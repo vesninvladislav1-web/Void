@@ -511,16 +511,18 @@
     setTimeout(()=>document.getElementById('sw1').focus(),400);
   }
 
-  function login() {
+  async function login() {
     const error = document.getElementById('login-error');
     const words = [];
     for (let i = 1; i <= 8; i++) {
-      const val = document.getElementById('sw'+i).value.trim();
+      const val = document.getElementById('sw'+i).value.trim().toLowerCase();
       words.push(val);
     }
     if (words.some(w => !w)) { error.style.display='block'; return; }
     error.style.display='none';
+    currentSeed = words;
     myName = 'User_' + words[0];
+    cryptoKey = await deriveKey(currentSeed);
     finishAuth();
   }
 
@@ -590,10 +592,11 @@
   }
 
   // Автовход при загрузке
-  window.addEventListener('DOMContentLoaded', () => {
+  window.addEventListener('DOMContentLoaded', async () => {
     if (loadState()) {
       clearInterval(neonInterval);
       requestNotifications();
+      if (currentSeed.length) cryptoKey = await deriveKey(currentSeed);
       document.getElementById('profile-nick').textContent = '@' + myName;
       const el = document.getElementById('profile-avatar-el');
       if (myAvatar) { el.innerHTML = '<img src="' + myAvatar + '" alt="avatar">'; }
@@ -639,11 +642,45 @@
     document.body.removeChild(ta);
   }
 
+  // ===== ШИФРОВАНИЕ =====
+  let cryptoKey = null;
+
+  async function deriveKey(seedWords) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      'raw', enc.encode(seedWords.join(' ')), 'PBKDF2', false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+      { name:'PBKDF2', salt:enc.encode('VOID_v1'), iterations:100000, hash:'SHA-256' },
+      keyMaterial, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
+    );
+  }
+
+  async function encryptText(text) {
+    if (!cryptoKey) return { plain: text };
+    const enc = new TextEncoder();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, cryptoKey, enc.encode(text));
+    return { iv: Array.from(iv), ct: Array.from(new Uint8Array(ct)) };
+  }
+
+  async function decryptText(data) {
+    if (!data) return '';
+    if (data.plain !== undefined) return data.plain;
+    if (!cryptoKey || !data.ct) return '[зашифровано]';
+    try {
+      const plain = await crypto.subtle.decrypt(
+        { name:'AES-GCM', iv: new Uint8Array(data.iv) }, cryptoKey, new Uint8Array(data.ct)
+      );
+      return new TextDecoder().decode(plain);
+    } catch { return '[ошибка дешифровки]'; }
+  }
+
   // ===== РЕГИСТРАЦИЯ =====
   let myName = '', myAvatar = null;
   let isDark = true, chats = {}, currentChat = null;
 
-  function register() {
+  async function register() {
     const nick = document.getElementById('reg-nick').value.trim();
     const error = document.getElementById('reg-error');
     const input = document.getElementById('reg-nick');
@@ -651,6 +688,7 @@
     if (!/^[a-zA-Z0-9_]+$/.test(nick)) { input.style.borderColor='var(--accent2)'; error.style.display='block'; input.focus(); return; }
     error.style.display='none'; input.style.borderColor='';
     myName = nick;
+    cryptoKey = await deriveKey(currentSeed);
     finishAuth();
   }
 
@@ -810,7 +848,7 @@
         <div class="avatar" style="background:${chat.color}">${nick[0].toUpperCase()}</div>
         <div class="chat-info">
           <div class="chat-name">@${esc(nick)}</div>
-          <div class="chat-preview">${last?(last.own?'Вы: ':'')+esc(last.text):'Нет сообщений'}</div>
+          <div class="chat-preview">${last?(last.own?'Вы: ':'')+( last.enc && last.enc.ct ? '🔒 Сообщение' : esc(last.text||'') ):'Нет сообщений'}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
           <div class="chat-time">${last?relativeTime(last.timestamp):''}</div>
@@ -835,32 +873,34 @@
     setTimeout(() => document.getElementById('msg-input').focus(), 50);
   }
 
-  function renderMessages() {
+  async function renderMessages() {
     const container = document.getElementById('messages');
     const noMsg = document.getElementById('no-messages');
     Array.from(container.children).forEach(el => { if(el.id!=='no-messages') el.remove(); });
     const msgs = chats[currentChat].messages;
     if (msgs.length===0) { noMsg.style.display='block'; return; }
     noMsg.style.display='none';
+
+    const texts = await Promise.all(msgs.map(msg => decryptText(msg.enc || { plain: msg.text || '' })));
+
     const div = document.createElement('div');
     div.className='date-divider'; div.innerHTML='<span>СЕГОДНЯ</span>';
     container.appendChild(div);
     msgs.forEach((msg, idx) => {
+      const text = texts[idx];
       const wrap = document.createElement('div');
       wrap.className='msg-wrap'+(msg.own?' own':'');
       wrap.style.marginTop='8px';
       wrap.dataset.idx = idx;
       wrap.innerHTML = msg.own
-        ? `<div><div class="bubble">${esc(msg.text)}</div></div>`
-        : `<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble">${esc(msg.text)}</div></div>`;
+        ? `<div><div class="bubble">${esc(text)}</div></div>`
+        : `<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble">${esc(text)}</div></div>`;
 
-      // Долгий тап — меню
       let pressTimer;
-      wrap.addEventListener('touchstart', () => { pressTimer = setTimeout(() => showMsgMenu(idx, msg), 500); });
+      wrap.addEventListener('touchstart', () => { pressTimer = setTimeout(() => showMsgMenu(idx, {text, own:msg.own}), 500); });
       wrap.addEventListener('touchend', () => clearTimeout(pressTimer));
       wrap.addEventListener('touchmove', () => clearTimeout(pressTimer));
-      // Правая кнопка мыши на десктопе
-      wrap.addEventListener('contextmenu', e => { e.preventDefault(); showMsgMenu(idx, msg); });
+      wrap.addEventListener('contextmenu', e => { e.preventDefault(); showMsgMenu(idx, {text, own:msg.own}); });
 
       container.appendChild(wrap);
       const t2 = document.createElement('div');
@@ -869,7 +909,6 @@
       container.appendChild(t2);
     });
 
-    // Анимация typing если есть
     if (chats[currentChat].typing) {
       const typing = document.createElement('div');
       typing.className='msg-wrap';
@@ -882,11 +921,12 @@
     container.scrollTop = container.scrollHeight;
   }
 
-  function sendMessage() {
+  async function sendMessage() {
     const input = document.getElementById('msg-input');
     const text = input.value.trim();
     if (!text||!currentChat) return;
-    chats[currentChat].messages.push({text, own:true, time:now(), timestamp:Date.now()});
+    const enc = await encryptText(text);
+    chats[currentChat].messages.push({enc, own:true, time:now(), timestamp:Date.now()});
     input.value='';
     playSound();
     renderMessages();
