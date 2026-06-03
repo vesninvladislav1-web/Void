@@ -1,0 +1,14 @@
+{
+  "name": "VOID Messenger",
+  "short_name": "VOID",
+  "description": "Анонимный мессенджер без регистрации",
+  "start_url": "/Void/",
+  "scope": "/Void/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0f",
+  "theme_color": "#7c6aff",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

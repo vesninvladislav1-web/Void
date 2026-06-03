@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#0a0a0f"/>
+  <rect width="512" height="512" rx="112" fill="url(#g)" opacity="0.15"/>
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c6aff"/>
+      <stop offset="100%" stop-color="#ff6ab0"/>
+    </linearGradient>
+  </defs>
+  <text x="256" y="300" text-anchor="middle" font-family="monospace" font-weight="700" font-size="148" letter-spacing="10"
+    fill="none" stroke="url(#g)" stroke-width="2">VOID</text>
+  <text x="256" y="300" text-anchor="middle" font-family="monospace" font-weight="700" font-size="148" letter-spacing="10"
+    fill="#7c6aff" opacity="0.9">VOID</text>
+</svg>
