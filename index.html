@@ -791,7 +791,7 @@
 
   // ===== РЕГИСТРАЦИЯ =====
   let myName = '', myAvatar = null;
-  let isDark = true, chats = {}, currentChat = null;
+  let isDark = false, chats = {}, currentChat = null;
   let authMode = 'anon', passwordHash = null;
 
   async function registerSimple() {
@@ -1366,6 +1366,9 @@
   // ===== УТИЛИТЫ =====
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (e.data?.type === 'RELOAD') window.location.reload();
+    });
   }
 
   // Автораспределение слов сид-фразы при вставке
