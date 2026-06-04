@@ -1371,18 +1371,20 @@
     });
   }
 
-  // Автораспределение слов сид-фразы при вставке
-  document.addEventListener('paste', e => {
-    const active = document.activeElement;
+  // Автораспределение слов сид-фразы при вставке (работает на мобильном)
+  document.addEventListener('input', e => {
+    const active = e.target;
     if (!active || !active.id || !active.id.startsWith('sw')) return;
-    const text = (e.clipboardData || window.clipboardData).getData('text');
+    const text = active.value;
+    if (!text.includes(' ') && !text.includes('·')) return;
     const words = text.trim().split(/[\s·\-,;]+/).filter(w => w.length > 0);
     if (words.length < 2) return;
-    e.preventDefault();
-    words.slice(0, 24).forEach((word, i) => {
-      const input = document.getElementById('sw' + (i + 1));
+    const startNum = parseInt(active.id.replace('sw', ''));
+    words.forEach((word, i) => {
+      const input = document.getElementById('sw' + (startNum + i));
       if (input) input.value = word.toLowerCase();
     });
+    active.value = words[0].toLowerCase();
   });
 
   function handleKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} }
