@@ -317,7 +317,7 @@
     <input type="password" class="reg-input" id="sreg-pass" placeholder="минимум 6 символов">
     <input type="password" class="reg-input" id="sreg-pass2" placeholder="повтори пароль">
     <div id="sreg-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Ошибка</div>
-    <div class="reg-hint">Пароль нельзя восстановить — запомни его.</div>
+    <div class="reg-hint">Минимум 10 символов: буквы, цифры и знаки (!@#$...). Пароль нельзя восстановить.</div>
     <div style="display:flex;gap:10px;width:100%;">
       <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="registerSimple()">СОЗДАТЬ</button>
@@ -786,7 +786,10 @@
     const pass2 = document.getElementById('sreg-pass2').value;
     const err = document.getElementById('sreg-error');
     if (!nick || !/^[a-zA-Z0-9_]+$/.test(nick)) { err.textContent='Только латиница, цифры и _'; err.style.display='block'; return; }
-    if (pass.length < 6) { err.textContent='Пароль минимум 6 символов'; err.style.display='block'; return; }
+    if (pass.length < 10) { err.textContent='Пароль минимум 10 символов'; err.style.display='block'; return; }
+    if (!/[a-zA-Z]/.test(pass)) { err.textContent='Нужна хотя бы одна буква'; err.style.display='block'; return; }
+    if (!/[0-9]/.test(pass)) { err.textContent='Нужна хотя бы одна цифра'; err.style.display='block'; return; }
+    if (!/[^a-zA-Z0-9]/.test(pass)) { err.textContent='Нужен хотя бы один знак препинания (!@#$...)'; err.style.display='block'; return; }
     if (pass !== pass2) { err.textContent='Пароли не совпадают'; err.style.display='block'; return; }
     err.style.display='none';
     myName = nick;
