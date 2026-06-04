@@ -261,6 +261,22 @@
   .seed-cell-input.ru { border-left:2px solid var(--accent); }
   .seed-cell-input.en { border-left:2px solid var(--accent2); }
 
+  /* ОНБОРДИНГ */
+  .ob-overlay { position:fixed; inset:0; background:var(--bg); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:60px 30px 40px; }
+  .ob-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; width:100%; max-width:340px; }
+  .ob-icon { font-size:64px; }
+  .ob-title { font-family:'Space Mono',monospace; font-size:18px; font-weight:700; text-align:center; letter-spacing:2px; color:var(--text); }
+  .ob-text { font-size:14px; color:var(--text2); text-align:center; line-height:1.8; }
+  .ob-seed-display { background:var(--bg3); border:1px solid var(--border); border-radius:14px; padding:16px; font-family:'Space Mono',monospace; font-size:11px; color:var(--accent); line-height:2; word-break:break-word; text-align:center; width:100%; }
+  .ob-warn { font-size:12px; color:var(--accent2); text-align:center; }
+  .ob-dots { display:flex; gap:8px; justify-content:center; margin:12px 0; }
+  .ob-dot { width:8px; height:8px; border-radius:50%; background:var(--text3); transition:all 0.3s; }
+  .ob-dot.active { background:var(--accent); width:24px; border-radius:4px; }
+  .ob-next-btn { width:100%; max-width:340px; padding:15px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; border-radius:14px; color:white; font-size:15px; font-family:'Space Mono',monospace; font-weight:700; letter-spacing:3px; cursor:pointer; transition:opacity 0.2s; }
+  .ob-next-btn:hover { opacity:0.85; }
+  .ob-copy-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; }
+  .ob-copy-btn:hover { border-color:var(--accent); color:var(--accent); }
+
   /* Мобайл */
   .burger-btn { display:none; }
   .sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:90; }
@@ -288,14 +304,30 @@
 
   <!-- Стартовый экран с кнопками -->
   <div id="start-screen" class="start-screen">
-    <button class="start-btn primary-btn" onclick="showRegForm()">Зарегистрироваться</button>
-    <button class="start-btn secondary-btn" onclick="showLoginForm()">Войти</button>
+    <button class="start-btn primary-btn" onclick="showSimpleRegForm()">Войти просто</button>
+    <button class="start-btn secondary-btn" onclick="showAnonRegForm()">Анонимный вход</button>
+    <button class="start-btn secondary-btn" onclick="showLoginSelect()">Уже есть аккаунт</button>
   </div>
 
-  <!-- Форма регистрации -->
+  <!-- Простая регистрация (ник + пароль) -->
+  <div class="reg-form" id="simple-reg-form" style="display:none;opacity:0;">
+    <div class="reg-label">Придумай ник</div>
+    <input type="text" class="reg-input" id="sreg-nick" placeholder="например: Storm19" maxlength="16" autocomplete="off">
+    <div class="reg-label" style="margin-top:4px;">Придумай пароль</div>
+    <input type="password" class="reg-input" id="sreg-pass" placeholder="минимум 6 символов">
+    <input type="password" class="reg-input" id="sreg-pass2" placeholder="повтори пароль">
+    <div id="sreg-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Ошибка</div>
+    <div class="reg-hint">Пароль нельзя восстановить — запомни его.</div>
+    <div style="display:flex;gap:10px;width:100%;">
+      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
+      <button class="reg-btn" style="flex:1;" onclick="registerSimple()">СОЗДАТЬ</button>
+    </div>
+  </div>
+
+  <!-- Анонимная регистрация (сид-фраза) -->
   <div class="reg-form" id="reg-form" style="display:none;opacity:0;">
     <div class="reg-label">Придумай ник</div>
-    <input type="text" class="reg-input" id="reg-nick" placeholder="например: Storm19" maxlength="16" autocomplete="off" onkeydown="if(event.key==='Enter') register()">
+    <input type="text" class="reg-input" id="reg-nick" placeholder="например: Storm19" maxlength="16" autocomplete="off" onkeydown="if(event.key==='Enter') registerAnon()">
     <div id="reg-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Только латинские буквы, цифры и _</div>
     <div class="reg-label" style="margin-top:4px;">Твоя сид-фраза</div>
     <div class="seed-box"><div class="seed-words" id="seed-words">—</div></div>
@@ -303,7 +335,28 @@
     <div class="reg-hint">Запиши фразу — нужна для восстановления аккаунта.</div>
     <div style="display:flex;gap:10px;width:100%;">
       <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
-      <button class="reg-btn" style="flex:1;" onclick="register()">СОЗДАТЬ</button>
+      <button class="reg-btn" style="flex:1;" onclick="registerAnon()">СОЗДАТЬ</button>
+    </div>
+  </div>
+
+  <!-- Выбор способа входа -->
+  <div class="reg-form" id="login-select" style="display:none;opacity:0;">
+    <div class="reg-label">Как входить?</div>
+    <button class="start-btn primary-btn" onclick="showSimpleLoginForm()">Обычный вход</button>
+    <button class="start-btn secondary-btn" onclick="showAnonLoginForm()">По сид-фразе</button>
+    <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);margin-top:4px;" onclick="showStartScreen()">← Назад</button>
+  </div>
+
+  <!-- Простой вход (ник + пароль) -->
+  <div class="reg-form" id="simple-login-form" style="display:none;opacity:0;">
+    <div class="reg-label">Ник</div>
+    <input type="text" class="reg-input" id="slogin-nick" placeholder="твой ник" maxlength="16" autocomplete="off">
+    <div class="reg-label" style="margin-top:4px;">Пароль</div>
+    <input type="password" class="reg-input" id="slogin-pass" placeholder="твой пароль">
+    <div id="slogin-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Неверный ник или пароль</div>
+    <div style="display:flex;gap:10px;width:100%;">
+      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
+      <button class="reg-btn" style="flex:1;" onclick="loginSimple()">ВОЙТИ</button>
     </div>
   </div>
 
@@ -345,6 +398,15 @@
   </div>
 </div>
 
+<!-- ОНБОРДИНГ -->
+<div id="onboarding" style="display:none;" class="ob-overlay">
+  <div class="ob-content" id="ob-content"></div>
+  <div>
+    <div class="ob-dots" id="ob-dots"></div>
+    <button class="ob-next-btn" id="ob-next-btn" onclick="nextObSlide()">Далее →</button>
+  </div>
+</div>
+
 <!-- ПРИЛОЖЕНИЕ -->
 <div class="app" id="app">
 
@@ -352,7 +414,6 @@
   <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="logo">VOID</div>
-      <button class="icon-btn" id="theme-btn" onclick="toggleTheme()" title="Тема">☀️</button>
     </div>
 
     <!-- Профиль -->
@@ -435,7 +496,6 @@
       <div class="chats-topbar">
         <button class="icon-btn burger-btn" onclick="toggleSidebar()">☰</button>
         <div class="chats-topbar-title">Сообщения</div>
-        <button class="icon-btn" id="theme-btn2" onclick="toggleTheme()" title="Тема">☀️</button>
       </div>
 
       <div class="chats-search-wrap">
@@ -510,33 +570,41 @@
   const EN_WORDS = ['stone','river','forest','flame','shadow','blade','storm','frost','crown','falcon','iron','wolf','ghost','raven','tower','shield','anchor','arrow','cloud','ember','valley','peak','hollow','bridge','lantern','crystal','cipher','signal','circuit','pulse','void','echo'];
   let currentSeed = [];
 
+  const ALL_FORMS = ['simple-reg-form','reg-form','login-select','simple-login-form','login-form'];
+
+  function hideAllForms() {
+    ALL_FORMS.forEach(id => { const el = document.getElementById(id); if(el) el.style.display='none'; });
+    document.getElementById('start-screen').style.display='none';
+  }
+
+  function showForm(id, focusId) {
+    hideAllForms();
+    const form = document.getElementById(id);
+    form.style.display='flex'; form.style.opacity='0';
+    setTimeout(()=>{ form.style.transition='opacity 0.4s'; form.style.opacity='1'; },10);
+    if (focusId) setTimeout(()=>document.getElementById(focusId)?.focus(),400);
+  }
+
   function showStartScreen() {
-    document.getElementById('reg-form').style.display='none';
-    document.getElementById('login-form').style.display='none';
+    hideAllForms();
     const ss = document.getElementById('start-screen');
-    ss.style.display='flex';
-    ss.style.animation='fadeInUp 0.4s ease forwards';
+    ss.style.display='flex'; ss.style.animation='fadeInUp 0.4s ease forwards';
   }
 
-  function showRegForm() {
-    document.getElementById('start-screen').style.display='none';
-    const form = document.getElementById('reg-form');
-    form.style.display='flex';
-    form.style.opacity='0';
-    setTimeout(()=>{ form.style.transition='opacity 0.4s'; form.style.opacity='1'; },10);
-    setTimeout(()=>document.getElementById('reg-nick').focus(),400);
+  function showSimpleRegForm() { showForm('simple-reg-form','sreg-nick'); }
+  function showAnonRegForm() { showForm('reg-form','reg-nick'); }
+  function showLoginSelect() { showForm('login-select'); }
+  function showSimpleLoginForm() { showForm('simple-login-form','slogin-nick'); }
+  function showAnonLoginForm() { showForm('login-form','sw1'); }
+
+  // Хеш пароля для проверки при входе
+  async function hashPassword(nick, pass) {
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(nick + ':' + pass + ':VOID_v1'));
+    return btoa(String.fromCharCode(...new Uint8Array(buf)));
   }
 
-  function showLoginForm() {
-    document.getElementById('start-screen').style.display='none';
-    const form = document.getElementById('login-form');
-    form.style.display='flex';
-    form.style.opacity='0';
-    setTimeout(()=>{ form.style.transition='opacity 0.4s'; form.style.opacity='1'; },10);
-    setTimeout(()=>document.getElementById('sw1').focus(),400);
-  }
-
-  async function login() {
+  async function loginAnon() {
     const error = document.getElementById('login-error');
     const words = [];
     for (let i = 1; i <= 24; i++) {
@@ -546,15 +614,18 @@
     if (words.some(w => !w)) { error.style.display='block'; return; }
     error.style.display='none';
     currentSeed = words;
+    authMode = 'anon';
     myName = 'User_' + words[0];
     cryptoKey = await deriveKey(currentSeed);
-    finishAuth();
+    finishAuth(false, 'anon');
   }
+
+  async function login() { return loginAnon(); }
 
   // ===== LOCALSTORAGE =====
   function saveState() {
     try {
-      localStorage.setItem('void_user', JSON.stringify({ name:myName, avatar:myAvatar, seed:currentSeed, isDark, currentAccent, lang }));
+      localStorage.setItem('void_user', JSON.stringify({ name:myName, avatar:myAvatar, seed:currentSeed, isDark, currentAccent, lang, authMode, passwordHash }));
       localStorage.setItem('void_chats', JSON.stringify(chats));
     } catch(e) {}
   }
@@ -569,11 +640,10 @@
       isDark = user.isDark !== false;
       lang = user.lang || 'ru';
       currentAccent = user.currentAccent || 0;
+      authMode = user.authMode || 'anon';
+      passwordHash = user.passwordHash || null;
       chats = JSON.parse(localStorage.getItem('void_chats')) || {};
       document.body.classList.toggle('light', !isDark);
-      const icon = isDark ? '☀️' : '🌙';
-      document.getElementById('theme-btn').textContent = icon;
-      document.getElementById('theme-btn2').textContent = icon;
       document.getElementById('theme-label').textContent = isDark ? 'Тёмная тема' : 'Светлая тема';
       document.getElementById('theme-sub').textContent = 'Сейчас: ' + (isDark ? 'тёмная' : 'светлая');
       if (currentAccent > 0) applyAccent(currentAccent);
@@ -596,7 +666,7 @@
     } catch(e) {}
   }
 
-  function finishAuth() {
+  function finishAuth(isNew = false, mode = 'anon') {
     document.getElementById('profile-nick').textContent = '@' + myName;
     const el = document.getElementById('profile-avatar-el');
     if (myAvatar) { el.innerHTML = '<img src="' + myAvatar + '" alt="avatar">'; }
@@ -608,11 +678,15 @@
     reg.classList.add('hide');
     setTimeout(() => {
       reg.style.display='none';
-      const app = document.getElementById('app');
-      app.style.display='flex';
-      app.classList.add('visible');
-      document.getElementById('fab').classList.add('visible');
-      renderChatList();
+      if (isNew) {
+        showOnboarding(mode);
+      } else {
+        const app = document.getElementById('app');
+        app.style.display='flex';
+        app.classList.add('visible');
+        document.getElementById('fab').classList.add('visible');
+        renderChatList();
+      }
     }, 500);
   }
 
@@ -704,8 +778,50 @@
   // ===== РЕГИСТРАЦИЯ =====
   let myName = '', myAvatar = null;
   let isDark = true, chats = {}, currentChat = null;
+  let authMode = 'anon', passwordHash = null;
 
-  async function register() {
+  async function registerSimple() {
+    const nick = document.getElementById('sreg-nick').value.trim();
+    const pass = document.getElementById('sreg-pass').value;
+    const pass2 = document.getElementById('sreg-pass2').value;
+    const err = document.getElementById('sreg-error');
+    if (!nick || !/^[a-zA-Z0-9_]+$/.test(nick)) { err.textContent='Только латиница, цифры и _'; err.style.display='block'; return; }
+    if (pass.length < 6) { err.textContent='Пароль минимум 6 символов'; err.style.display='block'; return; }
+    if (pass !== pass2) { err.textContent='Пароли не совпадают'; err.style.display='block'; return; }
+    err.style.display='none';
+    myName = nick;
+    authMode = 'simple';
+    passwordHash = await hashPassword(nick, pass);
+    cryptoKey = await deriveKey([nick, pass]);
+    currentSeed = [];
+    finishAuth(true, 'simple');
+  }
+
+  async function loginSimple() {
+    const nick = document.getElementById('slogin-nick').value.trim();
+    const pass = document.getElementById('slogin-pass').value;
+    const err = document.getElementById('slogin-error');
+    err.style.display='none';
+    if (!nick || !pass) { err.style.display='block'; return; }
+    const stored = JSON.parse(localStorage.getItem('void_user'));
+    if (!stored || stored.name !== nick || stored.authMode !== 'simple') { err.style.display='block'; return; }
+    const hash = await hashPassword(nick, pass);
+    if (hash !== stored.passwordHash) { err.style.display='block'; return; }
+    myName = nick;
+    authMode = 'simple';
+    passwordHash = stored.passwordHash;
+    cryptoKey = await deriveKey([nick, pass]);
+    chats = JSON.parse(localStorage.getItem('void_chats')) || {};
+    currentSeed = [];
+    isDark = stored.isDark !== false;
+    lang = stored.lang || 'ru';
+    currentAccent = stored.currentAccent || 0;
+    document.body.classList.toggle('light', !isDark);
+    if (currentAccent > 0) applyAccent(currentAccent);
+    finishAuth(false, 'simple');
+  }
+
+  async function registerAnon() {
     const nick = document.getElementById('reg-nick').value.trim();
     const error = document.getElementById('reg-error');
     const input = document.getElementById('reg-nick');
@@ -713,9 +829,12 @@
     if (!/^[a-zA-Z0-9_]+$/.test(nick)) { input.style.borderColor='var(--accent2)'; error.style.display='block'; input.focus(); return; }
     error.style.display='none'; input.style.borderColor='';
     myName = nick;
+    authMode = 'anon';
     cryptoKey = await deriveKey(currentSeed);
-    finishAuth();
+    finishAuth(true, 'anon');
   }
+
+  async function register() { return registerAnon(); }
 
   // ===== АВАТАР =====
   function pickAvatar() { document.getElementById('avatar-input').click(); }
@@ -735,9 +854,6 @@
   function toggleTheme() {
     isDark = !isDark;
     document.body.classList.toggle('light', !isDark);
-    const icon = isDark ? '☀️' : '🌙';
-    document.getElementById('theme-btn').textContent = icon;
-    document.getElementById('theme-btn2').textContent = icon;
     document.getElementById('theme-label').textContent = isDark ? 'Тёмная тема' : 'Светлая тема';
     document.getElementById('theme-sub').textContent = 'Сейчас: ' + (isDark ? 'тёмная' : 'светлая');
     saveState();
@@ -1116,11 +1232,64 @@
     reg.style.transform='none';
     reg.style.pointerEvents='all';
     // Сбрасываем на стартовый экран
-    document.getElementById('reg-form').style.display='none';
-    document.getElementById('login-form').style.display='none';
+    ALL_FORMS.forEach(id => { const el = document.getElementById(id); if(el) el.style.display='none'; });
     document.getElementById('start-screen').style.cssText='display:flex;opacity:0;animation:fadeInUp 0.4s ease 0.3s forwards;';
     document.getElementById('reg-nick').value='';
+    authMode = 'anon'; passwordHash = null;
     generateSeed();
+  }
+
+  // ===== ОНБОРДИНГ =====
+  const OB_SLIDES = {
+    simple: [
+      { icon:'🎉', title:'ДОБРО ПОЖАЛОВАТЬ', text:'VOID — мессенджер без телефона,\nпочты и слежки.' },
+      { icon:'💬', title:'КАК ПИСАТЬ', text:'Нажми ✏️ внизу → введи ник собеседника → начни переписку.' },
+      { icon:'🔒', title:'БЕЗОПАСНОСТЬ', text:'Не забудь пароль.\nВосстановить аккаунт без него невозможно.' }
+    ],
+    anon: [
+      { icon:'🎉', title:'ДОБРО ПОЖАЛОВАТЬ', text:'VOID — анонимный мессенджер.\nНикакой почты, телефона или имени.' },
+      { icon:'🔑', title:'ЧТО ТАКОЕ СИД-ФРАЗА', text:'24 слова = твой ключ к аккаунту.\nБез них войти снова невозможно.' },
+      { icon:'📝', title:'ЗАПИШИ ФРАЗУ СЕЙЧАС', seed: true }
+    ]
+  };
+  let obIdx = 0, obList = [];
+
+  function showOnboarding(mode) {
+    obIdx = 0;
+    obList = OB_SLIDES[mode] || OB_SLIDES.anon;
+    document.getElementById('onboarding').style.display = 'flex';
+    renderObSlide();
+  }
+
+  function renderObSlide() {
+    const s = obList[obIdx];
+    const content = document.getElementById('ob-content');
+    let html = `<div class="ob-icon">${s.icon}</div><div class="ob-title">${s.title}</div>`;
+    if (s.seed) {
+      html += `<div class="ob-seed-display">${currentSeed.join(' · ')}</div>`;
+      html += `<button class="ob-copy-btn" onclick="copySeed()">📋 Скопировать фразу</button>`;
+      html += `<div class="ob-warn">Запиши или скопируй фразу прежде чем продолжить</div>`;
+    } else {
+      html += `<div class="ob-text">${s.text.replace(/\n/g,'<br>')}</div>`;
+    }
+    content.innerHTML = html;
+    const dots = document.getElementById('ob-dots');
+    dots.innerHTML = obList.map((_,i) => `<div class="ob-dot${i===obIdx?' active':''}"></div>`).join('');
+    document.getElementById('ob-next-btn').textContent = obIdx === obList.length-1 ? 'НАЧАТЬ →' : 'Далее →';
+  }
+
+  function nextObSlide() {
+    if (obIdx < obList.length - 1) {
+      obIdx++;
+      renderObSlide();
+    } else {
+      document.getElementById('onboarding').style.display = 'none';
+      const app = document.getElementById('app');
+      app.style.display = 'flex';
+      app.classList.add('visible');
+      document.getElementById('fab').classList.add('visible');
+      renderChatList();
+    }
   }
 
   // ===== УТИЛИТЫ =====
