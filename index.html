@@ -1364,6 +1364,20 @@
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
 
+  // Автораспределение слов сид-фразы при вставке
+  document.addEventListener('paste', e => {
+    const active = document.activeElement;
+    if (!active || !active.id || !active.id.startsWith('sw')) return;
+    const text = (e.clipboardData || window.clipboardData).getData('text');
+    const words = text.trim().split(/[\s·\-,;]+/).filter(w => w.length > 0);
+    if (words.length < 2) return;
+    e.preventDefault();
+    words.slice(0, 24).forEach((word, i) => {
+      const input = document.getElementById('sw' + (i + 1));
+      if (input) input.value = word.toLowerCase();
+    });
+  });
+
   function handleKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} }
   function now() { const d=new Date(); return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'); }
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
