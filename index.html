@@ -616,12 +616,16 @@
 
   async function loginAnon() {
     const error = document.getElementById('login-error');
-    const words = [];
+    const all = [];
     for (let i = 1; i <= 24; i++) {
       const val = document.getElementById('sw'+i).value.trim().toLowerCase();
-      words.push(val);
+      all.push(val);
     }
-    if (words.some(w => !w)) { error.style.display='block'; return; }
+    const words = all.filter(w => w.length > 0);
+    if (words.length !== 8 && words.length !== 24) {
+      error.textContent = 'Нужно 8 или 24 слова';
+      error.style.display='block'; return;
+    }
     error.style.display='none';
     currentSeed = words;
     authMode = 'anon';
