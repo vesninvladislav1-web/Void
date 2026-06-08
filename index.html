@@ -271,6 +271,17 @@
   .install-banner-btn { padding:8px 14px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; border-radius:10px; color:white; font-size:12px; font-family:'Space Mono',monospace; font-weight:700; cursor:pointer; flex-shrink:0; }
   .install-banner-close { width:28px; height:28px; border-radius:8px; background:transparent; border:none; color:var(--text3); font-size:18px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
 
+  /* Защита от скриншота */
+  .secure-overlay { position:fixed; inset:0; background:var(--bg); z-index:9999; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; }
+  .secure-overlay-icon { font-size:56px; }
+  .secure-overlay-text { font-family:'Space Mono',monospace; font-size:13px; color:var(--text2); letter-spacing:3px; }
+  #secure-btn.active { background:var(--accent) !important; color:white !important; border-color:var(--accent) !important; }
+
+  /* Капсула времени */
+  #capsule-btn.armed { background:var(--accent) !important; color:white !important; border-color:var(--accent) !important; }
+  .capsule-bubble { text-align:center; min-width:130px; }
+  .capsule-countdown { font-size:11px; color:var(--accent2); font-family:'Space Mono',monospace; margin-top:3px; }
+
   /* ОНБОРДИНГ */
   .ob-overlay { position:fixed; inset:0; background:var(--bg); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:60px 30px 40px; }
   .ob-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; width:100%; max-width:340px; }
@@ -531,6 +542,7 @@
           <div class="chat-topbar-sub">прототип</div>
         </div>
         <div class="chat-topbar-actions">
+          <button class="icon-btn" id="secure-btn" onclick="toggleSecure()" title="Защита от скриншота">🛡️</button>
           <button class="icon-btn" onclick="deleteCurrentChat()">🗑️</button>
         </div>
       </div>
@@ -544,6 +556,7 @@
         <div class="input-wrap">
           <input type="text" class="msg-input" id="msg-input" placeholder="Написать сообщение..." onkeydown="handleKey(event)">
         </div>
+        <button class="icon-btn" id="capsule-btn" onclick="showCapsuleModal()" title="Капсула времени" style="flex-shrink:0;">🕰️</button>
         <button class="send-btn" onclick="sendMessage()">➤</button>
       </div>
     </div>
@@ -888,6 +901,7 @@
 
   // ===== НАВИГАЦИЯ =====
   function backToChats() {
+    if (secureMode) toggleSecure();
     document.getElementById('chat-view').classList.remove('active');
     document.getElementById('chats-screen').classList.remove('hidden');
     document.getElementById('fab').classList.add('visible');
@@ -1050,9 +1064,14 @@
       wrap.className='msg-wrap'+(msg.own?' own':'');
       wrap.style.marginTop='8px';
       wrap.dataset.idx = idx;
+      const isLocked = msg.unlockAt && msg.unlockAt > Date.now();
+      const unlockDate = msg.unlockAt ? new Date(msg.unlockAt).toLocaleString('ru',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}) : '';
+      const bubbleContent = isLocked
+        ? `<div class="capsule-bubble">🔒<br><span style="font-size:11px;color:var(--text2);font-family:'Space Mono',monospace;">Откроется ${unlockDate}</span><br><span class="capsule-countdown" data-unlock="${msg.unlockAt}">${formatCountdown(msg.unlockAt)}</span></div>`
+        : (msg.unlockAt ? `🎉 ${esc(text)}` : esc(text));
       wrap.innerHTML = msg.own
-        ? `<div><div class="bubble">${esc(text)}</div></div>`
-        : `<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble">${esc(text)}</div></div>`;
+        ? `<div><div class="bubble">${bubbleContent}</div></div>`
+        : `<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble">${bubbleContent}</div></div>`;
 
       let pressTimer;
       wrap.addEventListener('touchstart', () => { pressTimer = setTimeout(() => showMsgMenu(idx, {text, own:msg.own}), 500); });
@@ -1084,7 +1103,9 @@
     const text = input.value.trim();
     if (!text||!currentChat) return;
     const enc = await encryptText(text);
-    chats[currentChat].messages.push({enc, own:true, time:now(), timestamp:Date.now()});
+    const msg = {enc, own:true, time:now(), timestamp:Date.now()};
+    if (pendingCapsuleTime) { msg.unlockAt = pendingCapsuleTime; cancelCapsule(); }
+    chats[currentChat].messages.push(msg);
     input.value='';
     playSound();
     renderMessages();
@@ -1254,6 +1275,106 @@
     document.getElementById('reg-nick').value='';
     authMode = 'anon'; passwordHash = null;
     generateSeed();
+  }
+
+  // ===== КАПСУЛА ВРЕМЕНИ =====
+  let pendingCapsuleTime = null;
+
+  function showCapsuleModal() {
+    const existing = document.querySelector('.modal-overlay');
+    if (existing) existing.remove();
+    const min = new Date(Date.now() + 60000).toISOString().slice(0,16);
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">🕰️ КАПСУЛА ВРЕМЕНИ</div>
+        <div style="font-size:13px;color:var(--text2);text-align:center;">Сообщение откроется в указанное время</div>
+        <input type="datetime-local" class="modal-input" id="capsule-dt" min="${min}" style="font-family:monospace;font-size:14px;">
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+          <button class="btn-primary" onclick="applyCapsule()">Готово</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if(e.target===overlay) overlay.remove(); });
+  }
+
+  function applyCapsule() {
+    const val = document.getElementById('capsule-dt').value;
+    if (!val) return;
+    pendingCapsuleTime = new Date(val).getTime();
+    document.querySelector('.modal-overlay').remove();
+    document.getElementById('capsule-btn').classList.add('armed');
+    document.getElementById('capsule-btn').title = '🕰️ ' + new Date(pendingCapsuleTime).toLocaleString('ru');
+  }
+
+  function cancelCapsule() {
+    pendingCapsuleTime = null;
+    const btn = document.getElementById('capsule-btn');
+    if (btn) { btn.classList.remove('armed'); btn.title = 'Капсула времени'; }
+  }
+
+  function formatCountdown(ts) {
+    const diff = ts - Date.now();
+    if (diff <= 0) return null;
+    const d = Math.floor(diff / 86400000);
+    const h = Math.floor((diff % 86400000) / 3600000);
+    const m = Math.floor((diff % 3600000) / 60000);
+    const s = Math.floor((diff % 60000) / 1000);
+    if (d > 0) return `${d}д ${h}ч ${m}м`;
+    if (h > 0) return `${h}ч ${m}м ${s}с`;
+    return `${m}м ${s}с`;
+  }
+
+  // Обновляем обратные отсчёты каждую секунду
+  setInterval(() => {
+    const countdowns = document.querySelectorAll('[data-unlock]');
+    let needRerender = false;
+    countdowns.forEach(el => {
+      const ts = parseInt(el.dataset.unlock);
+      const cd = formatCountdown(ts);
+      if (cd) { el.textContent = cd; }
+      else { needRerender = true; }
+    });
+    if (needRerender && currentChat) renderMessages();
+  }, 1000);
+
+  // ===== ЗАЩИТА ОТ СКРИНШОТА =====
+  let secureMode = false;
+  let secureOverlay = null;
+
+  function toggleSecure() {
+    secureMode = !secureMode;
+    const btn = document.getElementById('secure-btn');
+    if (secureMode) {
+      btn.classList.add('active');
+      btn.title = 'Защита включена';
+      window.addEventListener('blur', showSecureOverlay);
+      document.addEventListener('visibilitychange', handleVisibility);
+    } else {
+      btn.classList.remove('active');
+      btn.title = 'Защита выключена';
+      window.removeEventListener('blur', showSecureOverlay);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      hideSecureOverlay();
+    }
+  }
+
+  function handleVisibility() {
+    if (document.hidden) showSecureOverlay(); else hideSecureOverlay();
+  }
+
+  function showSecureOverlay() {
+    if (secureOverlay || !secureMode) return;
+    secureOverlay = document.createElement('div');
+    secureOverlay.className = 'secure-overlay';
+    secureOverlay.innerHTML = `<div class="secure-overlay-icon">🛡️</div><div class="secure-overlay-text">СОДЕРЖИМОЕ ЗАЩИЩЕНО</div>`;
+    document.body.appendChild(secureOverlay);
+  }
+
+  function hideSecureOverlay() {
+    if (secureOverlay) { secureOverlay.remove(); secureOverlay = null; }
   }
 
   // ===== ОНБОРДИНГ =====
