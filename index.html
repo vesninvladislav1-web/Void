@@ -271,6 +271,18 @@
   .install-banner-btn { padding:8px 14px; background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; border-radius:10px; color:white; font-size:12px; font-family:'Space Mono',monospace; font-weight:700; cursor:pointer; flex-shrink:0; }
   .install-banner-close { width:28px; height:28px; border-radius:8px; background:transparent; border:none; color:var(--text3); font-size:18px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; }
 
+  /* Стикеры */
+  .sticker-panel { background:var(--bg2); border-top:1px solid var(--border); flex-shrink:0; }
+  .sticker-panel-inner { padding:12px 16px; display:flex; flex-direction:column; gap:10px; max-height:200px; overflow-y:auto; }
+  .sticker-grid { display:flex; flex-wrap:wrap; gap:8px; }
+  .sticker-item { width:56px; height:56px; border-radius:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:36px; background:var(--bg3); border:1px solid var(--border); transition:transform 0.15s; flex-shrink:0; overflow:hidden; }
+  .sticker-item:hover { transform:scale(1.12); }
+  .sticker-item img { width:100%; height:100%; object-fit:cover; border-radius:11px; }
+  .sticker-upload-btn { display:inline-block; padding:8px 14px; background:var(--bg3); border:1px dashed var(--border); border-radius:10px; color:var(--text2); font-size:13px; cursor:pointer; transition:all 0.2s; }
+  .sticker-upload-btn:hover { border-color:var(--accent); color:var(--accent); }
+  .msg-sticker { width:96px; height:96px; border-radius:16px; object-fit:cover; }
+  .msg-sticker-emoji { font-size:72px; line-height:1; }
+
   /* Защита от скриншота */
   .secure-overlay { position:fixed; inset:0; background:var(--bg); z-index:9999; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; }
   .secure-overlay-icon { font-size:56px; }
@@ -551,12 +563,21 @@
         <div class="no-messages" id="no-messages">Напиши первое сообщение 👋</div>
       </div>
 
+      <div class="sticker-panel" id="sticker-panel" style="display:none;">
+        <div class="sticker-panel-inner">
+          <div class="sticker-grid" id="sticker-grid"></div>
+          <label class="sticker-upload-btn" for="sticker-input">＋ Свой стикер</label>
+          <input type="file" id="sticker-input" accept="image/*" style="display:none;" onchange="uploadSticker(event)">
+        </div>
+      </div>
+
       <div class="input-area">
         <button class="back-btn" onclick="backToChats()" title="Назад">←</button>
         <div class="input-wrap">
           <input type="text" class="msg-input" id="msg-input" placeholder="Написать сообщение..." onkeydown="handleKey(event)">
         </div>
         <button class="icon-btn" id="capsule-btn" onclick="showCapsuleModal()" title="Капсула времени" style="flex-shrink:0;">🕰️</button>
+        <button class="icon-btn" onclick="toggleStickerPanel()" title="Стикеры" style="flex-shrink:0;">😊</button>
         <button class="send-btn" onclick="sendMessage()">➤</button>
       </div>
     </div>
@@ -1066,12 +1087,27 @@
       wrap.dataset.idx = idx;
       const isLocked = msg.unlockAt && msg.unlockAt > Date.now();
       const unlockDate = msg.unlockAt ? new Date(msg.unlockAt).toLocaleString('ru',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}) : '';
-      const bubbleContent = isLocked
-        ? `<div class="capsule-bubble">🔒<br><span style="font-size:11px;color:var(--text2);font-family:'Space Mono',monospace;">Откроется ${unlockDate}</span><br><span class="capsule-countdown" data-unlock="${msg.unlockAt}">${formatCountdown(msg.unlockAt)}</span></div>`
-        : (msg.unlockAt ? `🎉 ${esc(text)}` : esc(text));
+
+      let bubbleContent, isSticker = false;
+      if (text.startsWith('__STICKER__')) {
+        isSticker = true;
+        const rest = text.slice(11);
+        const colonIdx = rest.indexOf(':');
+        const stype = rest.slice(0, colonIdx);
+        const sval = rest.slice(colonIdx + 1);
+        bubbleContent = stype === 'emoji'
+          ? `<div class="msg-sticker-emoji">${sval}</div>`
+          : `<img class="msg-sticker" src="${sval}">`;
+      } else if (isLocked) {
+        bubbleContent = `<div class="capsule-bubble">🔒<br><span style="font-size:11px;color:var(--text2);font-family:'Space Mono',monospace;">Откроется ${unlockDate}</span><br><span class="capsule-countdown" data-unlock="${msg.unlockAt}">${formatCountdown(msg.unlockAt)}</span></div>`;
+      } else {
+        bubbleContent = msg.unlockAt ? `🎉 ${esc(text)}` : esc(text);
+      }
+
+      const bubbleStyle = isSticker ? 'style="background:transparent;border:none;padding:4px;"' : '';
       wrap.innerHTML = msg.own
-        ? `<div><div class="bubble">${bubbleContent}</div></div>`
-        : `<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble">${bubbleContent}</div></div>`;
+        ? `<div><div class="bubble" ${bubbleStyle}>${bubbleContent}</div></div>`
+        : `<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble" ${bubbleStyle}>${bubbleContent}</div></div>`;
 
       let pressTimer;
       wrap.addEventListener('touchstart', () => { pressTimer = setTimeout(() => showMsgMenu(idx, {text, own:msg.own}), 500); });
@@ -1276,6 +1312,63 @@
     authMode = 'anon'; passwordHash = null;
     generateSeed();
   }
+
+  // ===== СТИКЕРЫ =====
+  const DEFAULT_STICKERS = ['😂','❤️','🔥','👍','😭','🙏','💀','🤣','😍','🥺','✨','💯','😎','🤝','👻','🫡'];
+  let customStickers = [];
+
+  function loadStickers() {
+    try { customStickers = JSON.parse(localStorage.getItem('void_stickers')) || []; } catch(e) { customStickers = []; }
+  }
+
+  function saveStickers() {
+    try { localStorage.setItem('void_stickers', JSON.stringify(customStickers)); } catch(e) {}
+  }
+
+  function toggleStickerPanel() {
+    const panel = document.getElementById('sticker-panel');
+    const isVisible = panel.style.display !== 'none';
+    panel.style.display = isVisible ? 'none' : 'block';
+    if (!isVisible) renderStickerGrid();
+  }
+
+  function renderStickerGrid() {
+    const grid = document.getElementById('sticker-grid');
+    const emojis = DEFAULT_STICKERS.map(e =>
+      `<div class="sticker-item" onclick="sendSticker('${e}','emoji')">${e}</div>`
+    ).join('');
+    const customs = customStickers.map((src, i) =>
+      `<div class="sticker-item" onclick="sendSticker('${i}','custom')"><img src="${src}"></div>`
+    ).join('');
+    grid.innerHTML = emojis + customs;
+  }
+
+  function uploadSticker(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      customStickers.push(ev.target.result);
+      saveStickers();
+      renderStickerGrid();
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  }
+
+  async function sendSticker(val, type) {
+    if (!currentChat) return;
+    document.getElementById('sticker-panel').style.display = 'none';
+    let stickerData = type === 'emoji' ? val : customStickers[parseInt(val)];
+    const enc = await encryptText('__STICKER__' + type + ':' + stickerData);
+    chats[currentChat].messages.push({enc, own:true, time:now(), timestamp:Date.now(), isSticker:true});
+    playSound();
+    renderMessages();
+    renderChatList();
+    saveState();
+  }
+
+  loadStickers();
 
   // ===== КАПСУЛА ВРЕМЕНИ =====
   let pendingCapsuleTime = null;
