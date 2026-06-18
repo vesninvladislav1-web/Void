@@ -1285,6 +1285,83 @@
     overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
   }
 
+  // ===== ОТВЕТЫ =====
+  function setReply(idx) {
+    const msgs = chats[currentChat].messages;
+    const msg = msgs[idx];
+    if (!msg) return;
+    const wrap = document.querySelectorAll('.msg-wrap')[idx];
+    const bubble = wrap ? wrap.querySelector('.bubble') : null;
+    const rawText = bubble ? (bubble.innerText || bubble.textContent || '') : '';
+    replyTo = { text: rawText.slice(0,80), own: msg.own };
+    const bar = document.getElementById('reply-bar');
+    bar.style.display = 'flex';
+    document.getElementById('reply-bar-quote').textContent = '↩ ' + replyTo.text.slice(0,60);
+    document.getElementById('msg-input').focus();
+  }
+
+  function clearReply() {
+    replyTo = null;
+    const bar = document.getElementById('reply-bar');
+    if (bar) bar.style.display = 'none';
+  }
+
+  // ===== ФОН ЧАТА =====
+  const BG_PRESETS = [
+    { label:'Нет', value:'' },
+    { label:'Ночной', value:'linear-gradient(160deg,#0a0a1a 0%,#0d1117 100%)' },
+    { label:'Сумерки', value:'linear-gradient(160deg,#1a0a2e 0%,#0d0d1f 100%)' },
+    { label:'Полночь', value:'linear-gradient(160deg,#0a1628 0%,#0a0a0f 100%)' },
+    { label:'Лесная тень', value:'linear-gradient(160deg,#0a1a10 0%,#0a0f0a 100%)' },
+    { label:'Глубина', value:'linear-gradient(160deg,#071a2e 0%,#0a0a15 100%)' },
+  ];
+
+  function showBgModal() {
+    if (!currentChat) return;
+    const currentBg = chats[currentChat].bg || '';
+    const swatches = BG_PRESETS.map((p, i) => {
+      const isActive = currentBg === p.value;
+      const style = p.value ? `background:${p.value}` : 'background:var(--bg3);border:1px dashed var(--border);';
+      return `<div class="bg-swatch${isActive?' active':''}" style="${style}" onclick="applyBg('${p.value.replace(/'/g,"\\'")}',true)" title="${p.label}"></div>`;
+    }).join('');
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">ФОН ЧАТА</div>
+        <div class="bg-picker-grid" id="bg-swatches">${swatches}</div>
+        <label style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;cursor:pointer;font-size:13px;color:var(--text2);">
+          🖼️ Своя картинка
+          <input type="file" accept="image/*" style="display:none;" onchange="loadBgImage(event,this.closest('.modal-overlay'))">
+        </label>
+        <div class="modal-btns"><button class="btn-primary" onclick="this.closest('.modal-overlay').remove()">Готово</button></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if(e.target===overlay) overlay.remove(); });
+  }
+
+  function applyBg(value, save) {
+    const messages = document.getElementById('messages');
+    if (messages) messages.style.background = value || '';
+    if (save && currentChat) {
+      chats[currentChat].bg = value;
+      saveState();
+    }
+  }
+
+  function loadBgImage(e, overlayEl) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const dataUrl = ev.target.result;
+      const value = `url('${dataUrl}') center/cover no-repeat`;
+      applyBg(value, true);
+      if (overlayEl) overlayEl.remove();
+    };
+    reader.readAsDataURL(file);
+  }
+
   function showLangModal() {
     const overlay=document.createElement('div');
     overlay.className='modal-overlay';
