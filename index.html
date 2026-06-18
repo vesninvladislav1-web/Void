@@ -1443,12 +1443,10 @@
     if (secureMode) {
       btn.classList.add('active');
       btn.title = 'Защита включена';
-      window.addEventListener('blur', showSecureOverlay);
       document.addEventListener('visibilitychange', handleVisibility);
     } else {
       btn.classList.remove('active');
       btn.title = 'Защита выключена';
-      window.removeEventListener('blur', showSecureOverlay);
       document.removeEventListener('visibilitychange', handleVisibility);
       hideSecureOverlay();
     }
@@ -1462,7 +1460,12 @@
     if (secureOverlay || !secureMode) return;
     secureOverlay = document.createElement('div');
     secureOverlay.className = 'secure-overlay';
-    secureOverlay.innerHTML = `<div class="secure-overlay-icon">🛡️</div><div class="secure-overlay-text">СОДЕРЖИМОЕ ЗАЩИЩЕНО</div>`;
+    secureOverlay.innerHTML = `
+      <div class="secure-overlay-icon">🛡️</div>
+      <div class="secure-overlay-text">СОДЕРЖИМОЕ ЗАЩИЩЕНО</div>
+      <button onclick="hideSecureOverlay()" style="margin-top:24px;padding:12px 28px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:14px;color:var(--text2);font-size:14px;font-family:'Space Mono',monospace;cursor:pointer;letter-spacing:2px;">ВЕРНУТЬСЯ</button>
+      <button onclick="toggleSecure()" style="margin-top:8px;padding:10px 24px;background:transparent;border:none;color:var(--text3);font-size:12px;font-family:'Inter',sans-serif;cursor:pointer;">Выключить защиту</button>
+    `;
     document.body.appendChild(secureOverlay);
   }
 
