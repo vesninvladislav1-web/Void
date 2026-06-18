@@ -301,7 +301,15 @@
 
   /* ОНБОРДИНГ */
   .ob-overlay { position:fixed; inset:0; background:var(--bg); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:60px 30px 40px; }
-  .ob-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; width:100%; max-width:340px; }
+  .ob-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; width:100%; max-width:340px; overflow:hidden; }
+  @keyframes obSlideIn { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:none; } }
+  @keyframes obSlideOut { from { opacity:1; transform:none; } to { opacity:0; transform:translateX(-40px); } }
+  .ob-animate { animation: obSlideIn 0.35s cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
+
+  /* Финальная заставка */
+  .welcome-splash { position:fixed; inset:0; background:var(--bg); z-index:500; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:20px; transition:opacity 0.5s; }
+  .welcome-into-text { font-family:'Space Mono',monospace; font-size:13px; letter-spacing:4px; color:var(--text2); animation:fadeInUp 0.5s ease forwards; }
+  .welcome-void-logo { display:flex; gap:2px; letter-spacing:18px; font-family:'Space Mono',monospace; font-size:72px; font-weight:700; padding-left:18px; animation:fadeInUp 0.5s ease 0.2s both; }
   .ob-icon { font-size:64px; }
   .ob-title { font-family:'Space Mono',monospace; font-size:18px; font-weight:700; text-align:center; letter-spacing:2px; color:var(--text); }
   .ob-text { font-size:14px; color:var(--text2); text-align:center; line-height:1.8; }
@@ -1500,7 +1508,7 @@
     renderObSlide();
   }
 
-  function renderObSlide() {
+  function renderObSlide(animate = false) {
     const s = obList[obIdx];
     const content = document.getElementById('ob-content');
     let html = `<div class="ob-icon">${s.icon}</div><div class="ob-title">${s.title}</div>`;
@@ -1511,7 +1519,10 @@
     } else {
       html += `<div class="ob-text">${s.text.replace(/\n/g,'<br>')}</div>`;
     }
+    content.classList.remove('ob-animate');
+    void content.offsetWidth;
     content.innerHTML = html;
+    if (animate) content.classList.add('ob-animate');
     const dots = document.getElementById('ob-dots');
     dots.innerHTML = obList.map((_,i) => `<div class="ob-dot${i===obIdx?' active':''}"></div>`).join('');
     document.getElementById('ob-next-btn').textContent = obIdx === obList.length-1 ? 'НАЧАТЬ →' : 'Далее →';
@@ -1520,15 +1531,39 @@
   function nextObSlide() {
     if (obIdx < obList.length - 1) {
       obIdx++;
-      renderObSlide();
+      renderObSlide(true);
     } else {
       document.getElementById('onboarding').style.display = 'none';
-      const app = document.getElementById('app');
-      app.style.display = 'flex';
-      app.classList.add('visible');
-      document.getElementById('fab').classList.add('visible');
-      renderChatList();
+      showWelcomeSplash(() => {
+        const app = document.getElementById('app');
+        app.style.display = 'flex';
+        app.classList.add('visible');
+        document.getElementById('fab').classList.add('visible');
+        renderChatList();
+      });
     }
+  }
+
+  function showWelcomeSplash(callback) {
+    const splash = document.createElement('div');
+    splash.className = 'welcome-splash';
+    splash.innerHTML = `
+      <div class="welcome-into-text">ДОБРО ПОЖАЛОВАТЬ В</div>
+      <div class="welcome-void-logo">
+        <span class="neon-letter">V</span><span class="neon-letter">O</span><span class="neon-letter">I</span><span class="neon-letter">D</span>
+      </div>
+    `;
+    document.body.appendChild(splash);
+    const letters = splash.querySelectorAll('.neon-letter');
+    const flicker = setInterval(() => {
+      letters.forEach(l => Math.random() < 0.3 ? l.classList.add('dim') : l.classList.remove('dim'));
+    }, 120);
+    setTimeout(() => {
+      clearInterval(flicker);
+      letters.forEach(l => l.classList.remove('dim'));
+      splash.style.opacity = '0';
+      setTimeout(() => { splash.remove(); callback(); }, 500);
+    }, 1500);
   }
 
   // ===== БАННЕР УСТАНОВКИ =====
