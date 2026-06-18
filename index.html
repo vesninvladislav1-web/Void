@@ -506,7 +506,7 @@
       <div class="settings-item" onclick="showAccentModal()">
         <div class="settings-item-icon">🎨</div>
         <div class="settings-item-info">
-          <div class="settings-item-name">Цвет акцента</div>
+          <div class="settings-item-name">Тема оформления</div>
           <div class="settings-item-sub">Выбрать градиент</div>
         </div>
         <div class="settings-item-arrow">›</div>
@@ -585,6 +585,7 @@
           <div class="chat-topbar-sub">прототип</div>
         </div>
         <div class="chat-topbar-actions">
+          <button class="icon-btn" onclick="showBgModal()" title="Фон чата">🖼️</button>
           <button class="icon-btn" id="secure-btn" onclick="toggleSecure()" title="Защита от скриншота">🛡️</button>
           <button class="icon-btn delete-chat-btn" onclick="deleteCurrentChat()" title="Удалить чат">🗑️</button>
         </div>
@@ -602,6 +603,10 @@
         </div>
       </div>
 
+      <div class="reply-bar" id="reply-bar" style="display:none;">
+        <div class="reply-bar-quote" id="reply-bar-quote"></div>
+        <button class="reply-bar-cancel" onclick="clearReply()">✕</button>
+      </div>
       <div class="input-area">
         <button class="back-btn" onclick="backToChats()" title="Назад">←</button>
         <div class="input-wrap">
@@ -704,7 +709,7 @@
   // ===== LOCALSTORAGE =====
   function saveState() {
     try {
-      localStorage.setItem('void_user', JSON.stringify({ name:myName, avatar:myAvatar, seed:currentSeed, isDark, currentAccent, lang, authMode, passwordHash }));
+      localStorage.setItem('void_user', JSON.stringify({ name:myName, avatar:myAvatar, seed:currentSeed, isDark, currentAccent, lang, authMode, passwordHash, myStatus }));
       localStorage.setItem('void_chats', JSON.stringify(chats));
     } catch(e) {}
   }
@@ -721,6 +726,7 @@
       currentAccent = user.currentAccent || 0;
       authMode = user.authMode || 'anon';
       passwordHash = user.passwordHash || null;
+      myStatus = user.myStatus || '';
       chats = JSON.parse(localStorage.getItem('void_chats')) || {};
       document.body.classList.toggle('light', !isDark);
       document.getElementById('theme-label').textContent = isDark ? 'Тёмная тема' : 'Светлая тема';
@@ -747,6 +753,8 @@
 
   function finishAuth(isNew = false, mode = 'anon') {
     document.getElementById('profile-nick').textContent = '@' + myName;
+    const statusEl = document.getElementById('profile-status-el');
+    if (statusEl) statusEl.textContent = myStatus ? myStatus : '● В сети';
     const el = document.getElementById('profile-avatar-el');
     if (myAvatar) { el.innerHTML = '<img src="' + myAvatar + '" alt="avatar">'; }
     else { el.textContent = myName[0].toUpperCase(); }
@@ -767,6 +775,30 @@
         renderChatList();
       }
     }, 500);
+  }
+
+  function editStatus() {
+    const el = document.getElementById('profile-status-el');
+    if (document.getElementById('status-edit-input')) return;
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.id = 'status-edit-input';
+    inp.className = 'profile-status-edit';
+    inp.maxLength = 40;
+    inp.value = myStatus;
+    inp.placeholder = 'Установить статус';
+    el.style.display = 'none';
+    el.parentNode.insertBefore(inp, el.nextSibling);
+    inp.focus();
+    const save = () => {
+      myStatus = inp.value.trim().slice(0, 40);
+      inp.remove();
+      el.style.display = '';
+      el.textContent = myStatus ? myStatus : '● В сети';
+      saveState();
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', e => { if(e.key==='Enter') { e.preventDefault(); inp.blur(); } });
   }
 
   // Автовход при загрузке
@@ -858,6 +890,8 @@
   let myName = '', myAvatar = null;
   let isDark = false, chats = {}, currentChat = null;
   let authMode = 'anon', passwordHash = null;
+  let myStatus = '';
+  let replyTo = null;
 
   async function registerSimple() {
     const nick = document.getElementById('sreg-nick').value.trim();
@@ -1092,6 +1126,7 @@
     av.textContent = nick[0].toUpperCase();
     av.style.background = chats[nick].color;
     document.getElementById('cv-name').textContent = '@' + nick;
+    applyBg(chats[nick].bg || '');
     renderMessages();
     renderChatList();
     setTimeout(() => document.getElementById('msg-input').focus(), 50);
@@ -1136,9 +1171,11 @@
       }
 
       const bubbleStyle = isSticker ? 'style="background:transparent;border:none;padding:4px;"' : '';
+      const replyQuote = msg.reply ? `<div class="reply-quote">↩ ${esc(msg.reply.text.slice(0,60))}</div>` : '';
+      const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">↩</button>`;
       wrap.innerHTML = msg.own
-        ? `<div><div class="bubble" ${bubbleStyle}>${bubbleContent}</div></div>`
-        : `<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble" ${bubbleStyle}>${bubbleContent}</div></div>`;
+        ? `${replyBtn}<div><div class="bubble" ${bubbleStyle}>${replyQuote}${bubbleContent}</div></div>`
+        : `<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble" ${bubbleStyle}>${replyQuote}${bubbleContent}</div></div>${replyBtn}`;
 
       let pressTimer;
       wrap.addEventListener('touchstart', () => { pressTimer = setTimeout(() => showMsgMenu(idx, {text, own:msg.own}), 500); });
@@ -1172,6 +1209,7 @@
     const enc = await encryptText(text);
     const msg = {enc, own:true, time:now(), timestamp:Date.now()};
     if (pendingCapsuleTime) { msg.unlockAt = pendingCapsuleTime; cancelCapsule(); }
+    if (replyTo) { msg.reply = { text: replyTo.text, own: replyTo.own }; clearReply(); }
     chats[currentChat].messages.push(msg);
     input.value='';
     playSound();
@@ -1216,6 +1254,11 @@
     {name:'Оранж→Фиолет',a:'#f97316',b:'#a855f7'},
     {name:'Жёлтый→Розовый',a:'#eab308',b:'#ec4899'},
     {name:'Синий→Зелёный',a:'#3b82f6',b:'#10b981'},
+    {name:'Закат',a:'#ff6b6b',b:'#ffd93d'},
+    {name:'Лес',a:'#2ecc71',b:'#1abc9c'},
+    {name:'Океан',a:'#3b82f6',b:'#06b6d4'},
+    {name:'Сумерки',a:'#a855f7',b:'#ec4899'},
+    {name:'Монохром',a:'#6b7280',b:'#9ca3af'},
   ];
   let currentAccent = 0;
 
@@ -1237,7 +1280,7 @@
   function showAccentModal() {
     const overlay=document.createElement('div');
     overlay.className='modal-overlay';
-    overlay.innerHTML=`<div class="modal"><div class="modal-title">ЦВЕТ АКЦЕНТА</div><div class="color-palette" id="dots-wrap">${renderDots()}</div><div class="modal-btns"><button class="btn-primary" onclick="this.closest('.modal-overlay').remove()">Готово</button></div></div>`;
+    overlay.innerHTML=`<div class="modal"><div class="modal-title">ТЕМА ОФОРМЛЕНИЯ</div><div class="color-palette" id="dots-wrap">${renderDots()}</div><div class="modal-btns"><button class="btn-primary" onclick="this.closest('.modal-overlay').remove()">Готово</button></div></div>`;
     document.body.appendChild(overlay);
     overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
   }
