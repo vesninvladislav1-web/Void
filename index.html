@@ -324,6 +324,23 @@
   .ob-copy-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; }
   .ob-copy-btn:hover { border-color:var(--accent); color:var(--accent); }
 
+  /* LAN ЧАТ */
+  .lan-overlay { position:fixed; inset:0; background:var(--bg); z-index:600; display:flex; flex-direction:column; align-items:center; padding:20px 24px 40px; gap:14px; overflow-y:auto; }
+  .lan-back { align-self:flex-start; background:none; border:none; color:var(--text2); font-size:22px; cursor:pointer; padding:4px 8px; }
+  .lan-icon { font-size:56px; margin-top:20px; }
+  .lan-title { font-family:'Space Mono',monospace; font-size:16px; font-weight:700; letter-spacing:3px; color:var(--text); text-align:center; }
+  .lan-sub { font-size:13px; color:var(--text2); text-align:center; line-height:1.7; max-width:300px; }
+  .lan-btn { width:100%; max-width:320px; padding:14px; border-radius:14px; font-size:14px; font-family:'Space Mono',monospace; font-weight:700; letter-spacing:2px; cursor:pointer; transition:opacity 0.2s; }
+  .lan-btn:hover { opacity:0.85; }
+  .lan-btn-primary { background:linear-gradient(135deg,var(--accent),var(--accent2)); border:none; color:white; }
+  .lan-btn-secondary { background:var(--bg3); border:1px solid var(--border); color:var(--text2); }
+  .lan-qr-wrap { background:white; padding:14px; border-radius:18px; display:inline-block; }
+  .lan-scan-wrap { width:100%; max-width:320px; position:relative; border-radius:18px; overflow:hidden; }
+  .lan-scan-video { width:100%; aspect-ratio:1; object-fit:cover; display:block; }
+  .lan-scan-frame { position:absolute; inset:16px; border:2px solid var(--accent); border-radius:10px; box-shadow:0 0 0 9999px rgba(0,0,0,0.45); pointer-events:none; }
+  .lan-status { font-size:13px; color:var(--accent); font-family:'Space Mono',monospace; letter-spacing:1px; text-align:center; }
+  .lan-divider { width:100%; max-width:320px; height:1px; background:var(--border); margin:4px 0; }
+
   /* Мобайл */
   .burger-btn { display:none; }
   .sidebar-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:90; }
@@ -560,6 +577,7 @@
       <div class="chats-topbar">
         <button class="icon-btn burger-btn" onclick="toggleSidebar()">☰</button>
         <div class="chats-topbar-title">Сообщения</div>
+        <button class="icon-btn" onclick="showLanModal()" title="LAN чат">📡</button>
       </div>
 
       <div class="chats-search-wrap">
@@ -1205,6 +1223,15 @@
     const input = document.getElementById('msg-input');
     const text = input.value.trim();
     if (!text||!currentChat) return;
+    if (currentChat === '__lan__') {
+      if (lanDc && lanDc.readyState === 'open') {
+        lanDc.send(JSON.stringify({ text, time:now() }));
+        chats['__lan__'].messages.push({ enc:{ plain:text }, own:true, time:now(), timestamp:Date.now() });
+        input.value = '';
+        renderMessages();
+      }
+      return;
+    }
     const enc = await encryptText(text);
     const msg = {enc, own:true, time:now(), timestamp:Date.now()};
     if (pendingCapsuleTime) { msg.unlockAt = pendingCapsuleTime; cancelCapsule(); }
@@ -1521,6 +1548,200 @@
   }
 
   loadStickers();
+
+  // ===== LAN ЧАТ (WebRTC + QR) =====
+  let lanPc = null, lanDc = null, lanScanTimer = null, lanStream = null;
+
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      if (document.querySelector(`script[src="${src}"]`)) { res(); return; }
+      const s = document.createElement('script');
+      s.src = src; s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+  }
+
+  async function loadLanLibs() {
+    await Promise.all([
+      loadScript('https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js'),
+      loadScript('https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js'),
+      loadScript('https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js'),
+    ]);
+  }
+
+  function lanEl() { return document.getElementById('lan-overlay'); }
+
+  function lanHtml(content) {
+    const el = lanEl();
+    if (el) el.innerHTML = `<button class="lan-back" onclick="closeLanModal()">←</button>${content}`;
+  }
+
+  async function showLanModal() {
+    closeSidebar();
+    const overlay = document.createElement('div');
+    overlay.id = 'lan-overlay';
+    overlay.className = 'lan-overlay';
+    overlay.innerHTML = `<button class="lan-back" onclick="closeLanModal()">←</button><div class="lan-icon">📡</div><div class="lan-title">LAN ЧАТ</div><div class="lan-sub">Переписка с тем кто подключён к тому же WiFi. Без интернета.</div><div class="lan-divider"></div><button class="lan-btn lan-btn-primary" onclick="lanCreate()">Создать чат</button><button class="lan-btn lan-btn-secondary" onclick="lanJoin()">Подключиться</button>`;
+    document.body.appendChild(overlay);
+  }
+
+  function closeLanModal() {
+    stopLanScan();
+    if (lanPc) { try { lanPc.close(); } catch(e){} lanPc = null; }
+    lanDc = null;
+    const el = lanEl();
+    if (el) el.remove();
+  }
+
+  // --- Сжатие SDP для QR ---
+  function sdpToQr(sdp) {
+    const bytes = pako.deflate(sdp, { level:9 });
+    return btoa(String.fromCharCode.apply(null, bytes));
+  }
+  function qrToSdp(b64) {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    return pako.inflate(bytes, { to:'string' });
+  }
+
+  function waitIce(pc) {
+    return new Promise(resolve => {
+      if (pc.iceGatheringState === 'complete') { resolve(); return; }
+      const h = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', h); resolve(); } };
+      pc.addEventListener('icegatheringstatechange', h);
+      setTimeout(resolve, 7000);
+    });
+  }
+
+  // --- СОЗДАТЕЛЬ (A) ---
+  async function lanCreate() {
+    lanHtml(`<div class="lan-icon">⏳</div><div class="lan-title">ГЕНЕРИРУЮ QR</div><div class="lan-status">Подождите...</div>`);
+    try {
+      await loadLanLibs();
+      lanPc = new RTCPeerConnection({ iceServers:[] });
+      lanDc = lanPc.createDataChannel('void-lan');
+      setupLanDc(lanDc);
+      const offer = await lanPc.createOffer();
+      await lanPc.setLocalDescription(offer);
+      await waitIce(lanPc);
+      const data = sdpToQr(lanPc.localDescription.sdp);
+      lanHtml(`
+        <div class="lan-title">ШАГ 1 / 2</div>
+        <div class="lan-sub">Пусть собеседник откроет LAN чат → «Подключиться» и отсканирует этот QR</div>
+        <div class="lan-qr-wrap" id="lan-qr"></div>
+        <div class="lan-divider"></div>
+        <button class="lan-btn lan-btn-primary" onclick="lanCreatorScan()">Отсканировать ответ →</button>
+      `);
+      new QRCode(document.getElementById('lan-qr'), { text:data, width:220, height:220, correctLevel:QRCode.CorrectLevel.L });
+    } catch(e) { lanHtml(`<div class="lan-status">❌ Ошибка: ${e.message}</div>`); }
+  }
+
+  async function lanCreatorScan() {
+    lanHtml(`
+      <div class="lan-title">ШАГ 2 / 2</div>
+      <div class="lan-sub">Отсканируй QR собеседника</div>
+      <div class="lan-scan-wrap"><video id="lan-video" autoplay playsinline muted class="lan-scan-video"></video><div class="lan-scan-frame"></div></div>
+      <div class="lan-status" id="lan-status">📷 Наведи камеру на QR...</div>
+    `);
+    await startLanScan(async data => {
+      try {
+        const sdp = qrToSdp(data);
+        await lanPc.setRemoteDescription({ type:'answer', sdp });
+        lanHtml(`<div class="lan-icon">🔗</div><div class="lan-title">ПОДКЛЮЧАЮСЬ...</div><div class="lan-status">Устанавливаю соединение</div>`);
+      } catch(e) { document.getElementById('lan-status').textContent = '❌ Неверный QR'; }
+    });
+  }
+
+  // --- ПОДКЛЮЧАЮЩИЙСЯ (B) ---
+  async function lanJoin() {
+    try {
+      await loadLanLibs();
+    } catch(e) { return; }
+    lanPc = new RTCPeerConnection({ iceServers:[] });
+    lanPc.ondatachannel = e => { lanDc = e.channel; setupLanDc(lanDc); };
+    lanHtml(`
+      <div class="lan-title">ПОДКЛЮЧЕНИЕ</div>
+      <div class="lan-sub">Отсканируй QR создателя чата</div>
+      <div class="lan-scan-wrap"><video id="lan-video" autoplay playsinline muted class="lan-scan-video"></video><div class="lan-scan-frame"></div></div>
+      <div class="lan-status" id="lan-status">📷 Наведи камеру на QR...</div>
+    `);
+    await startLanScan(async data => {
+      try {
+        document.getElementById('lan-status').textContent = '⏳ Генерирую ответ...';
+        const offerSdp = qrToSdp(data);
+        await lanPc.setRemoteDescription({ type:'offer', sdp:offerSdp });
+        const answer = await lanPc.createAnswer();
+        await lanPc.setLocalDescription(answer);
+        await waitIce(lanPc);
+        const answerData = sdpToQr(lanPc.localDescription.sdp);
+        lanHtml(`
+          <div class="lan-title">ПОКАЖИ ЭТОТ QR</div>
+          <div class="lan-sub">Пусть создатель чата отсканирует этот QR</div>
+          <div class="lan-qr-wrap" id="lan-qr"></div>
+          <div class="lan-status">⏳ Ожидаю соединения...</div>
+        `);
+        new QRCode(document.getElementById('lan-qr'), { text:answerData, width:220, height:220, correctLevel:QRCode.CorrectLevel.L });
+      } catch(e) { if(document.getElementById('lan-status')) document.getElementById('lan-status').textContent = '❌ Неверный QR'; }
+    });
+  }
+
+  // --- DATA CHANNEL ---
+  function setupLanDc(dc) {
+    dc.onopen = () => {
+      closeLanModal();
+      openLanChat();
+    };
+    dc.onmessage = e => {
+      const data = JSON.parse(e.data);
+      if (!chats['__lan__']) chats['__lan__'] = { name:'📡 LAN', messages:[] };
+      chats['__lan__'].messages.push({ enc:{ plain:data.text }, own:false, time:data.time, timestamp:Date.now() });
+      if (currentChat === '__lan__') renderMessages();
+    };
+    dc.onerror = () => {};
+  }
+
+  // --- КАМЕРА / QR СКАНЕР ---
+  async function startLanScan(callback) {
+    try {
+      lanStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+      const video = document.getElementById('lan-video');
+      video.srcObject = lanStream;
+      await video.play();
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      let done = false;
+      lanScanTimer = setInterval(() => {
+        if (!video.videoWidth || done) return;
+        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0);
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(img.data, img.width, img.height);
+        if (code) { done = true; stopLanScan(); callback(code.data); }
+      }, 250);
+    } catch(e) {
+      const st = document.getElementById('lan-status');
+      if (st) st.textContent = '❌ Нет доступа к камере';
+    }
+  }
+
+  function stopLanScan() {
+    if (lanScanTimer) { clearInterval(lanScanTimer); lanScanTimer = null; }
+    if (lanStream) { lanStream.getTracks().forEach(t => t.stop()); lanStream = null; }
+  }
+
+  // --- LAN ЧАТ ---
+  function openLanChat() {
+    if (!chats['__lan__']) chats['__lan__'] = { name:'📡 LAN', messages:[] };
+    document.getElementById('chats-screen').classList.add('hidden');
+    document.getElementById('fab').classList.remove('visible');
+    const chatView = document.getElementById('chat-view');
+    chatView.classList.add('active');
+    document.getElementById('cv-name').textContent = '📡 LAN';
+    document.getElementById('cv-avatar').textContent = '📡';
+    document.getElementById('cv-avatar').style.fontSize = '22px';
+    currentChat = '__lan__';
+    applyBg(chats['__lan__'].bg || '');
+    renderMessages();
+  }
 
   // ===== КАПСУЛА ВРЕМЕНИ =====
   let pendingCapsuleTime = null;
