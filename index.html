@@ -406,6 +406,10 @@
   .bg-swatch { width:100%; aspect-ratio:1; border-radius:10px; cursor:pointer; border:2px solid transparent; transition:transform 0.15s,border 0.2s; }
   .bg-swatch:hover { transform:scale(1.08); }
   .bg-swatch.active { border-color:white; }
+  .lan-input { width:100%; max-width:320px; padding:13px 16px; border-radius:14px; background:var(--bg3); border:1px solid var(--border); color:var(--text); font-size:15px; font-family:'Inter',sans-serif; outline:none; box-sizing:border-box; }
+  .lan-input:focus { border-color:var(--accent); }
+  .msg-sender { font-size:11px; color:var(--accent); font-family:'Space Mono',monospace; letter-spacing:0.5px; margin-bottom:3px; padding-left:2px; }
+  .msg-system { text-align:center; color:var(--text2); font-size:11px; font-family:'Space Mono',monospace; padding:6px 12px; opacity:0.55; letter-spacing:0.5px; }
   .void-toast { position:fixed; bottom:90px; left:50%; transform:translateX(-50%) translateY(12px); background:rgba(30,30,44,0.92); backdrop-filter:blur(12px); color:#fff; padding:10px 18px; border-radius:20px; font-size:13px; font-family:'Inter',sans-serif; pointer-events:none; opacity:0; transition:opacity 0.2s,transform 0.2s; z-index:9999; white-space:nowrap; }
   .void-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 </style>
@@ -646,7 +650,8 @@
             <div class="chat-menu" id="chat-menu">
               <button class="chat-menu-item" onclick="showBgModal();closeChatMenu()">🖼️ Фон чата</button>
               <button class="chat-menu-item" id="secure-btn" onclick="toggleSecure();closeChatMenu()">🛡️ Защита</button>
-              <button class="chat-menu-item danger" onclick="deleteCurrentChat();closeChatMenu()">🗑️ Удалить чат</button>
+              <button class="chat-menu-item" id="lan-invite-item" onclick="lanInvite();closeChatMenu()" style="display:none">👤 Добавить участника</button>
+              <button class="chat-menu-item danger" id="delete-chat-item" onclick="deleteCurrentChat();closeChatMenu()">🗑️ Удалить чат</button>
             </div>
           </div>
         </div>
@@ -788,6 +793,7 @@
       passwordHash = user.passwordHash || null;
       myStatus = user.myStatus || '';
       chats = JSON.parse(localStorage.getItem('void_chats')) || {};
+      delete chats['__lan__']; // очистка старого формата
       document.body.classList.toggle('light', !isDark);
       document.getElementById('theme-label').textContent = isDark ? 'Тёмная тема' : 'Светлая тема';
       document.getElementById('theme-sub').textContent = 'Сейчас: ' + (isDark ? 'тёмная' : 'светлая');
@@ -1075,7 +1081,7 @@
 
   // ===== МИ НИ-ПРОФИЛЬ =====
   function showAvatarProfile() {
-    if (!currentChat || currentChat === '__lan__') return;
+    if (!currentChat || currentChat.startsWith('__lan__:')) return;
     const chat = chats[currentChat];
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -1125,6 +1131,10 @@
   function toggleChatMenu() {
     const menu = document.getElementById('chat-menu');
     menu.classList.toggle('open');
+    const isLan = currentChat?.startsWith('__lan__:');
+    document.getElementById('lan-invite-item').style.display = (isLan && lanRoom?.isHost) ? 'flex' : 'none';
+    document.getElementById('delete-chat-item').style.display = isLan ? 'none' : 'flex';
+    document.getElementById('secure-btn').style.display = isLan ? 'none' : 'flex';
     if (menu.classList.contains('open')) {
       setTimeout(() => document.addEventListener('click', closeChatMenuOutside, { once:true }), 0);
     }
@@ -1247,18 +1257,27 @@
     if (keys.length===0) { empty.style.display='flex'; return; }
     empty.style.display='none';
     keys.forEach(nick => {
+      if (nick === '__lan__') return; // старый формат, пропускаем
       const chat = chats[nick];
       const last = chat.messages[chat.messages.length-1] || null;
       const unread = chat.unread || 0;
+      const isLan = nick.startsWith('__lan__:');
+      const displayName = isLan ? esc(chat.name || 'LAN') : '@' + esc(nick);
+      const avatarContent = isLan ? '📡' : nick[0].toUpperCase();
+      const lastText = last
+        ? (last.system
+            ? `<i>${esc(last.text)}</i>`
+            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.enc?.ct ? '🔒 Сообщение' : esc(last.enc?.plain || last.text || '')))
+        : 'Нет сообщений';
       const item = document.createElement('div');
       item.className = 'chat-item' + (currentChat===nick?' active':'');
       item.dataset.nick = nick;
       item.onclick = () => openChat(nick);
       item.innerHTML = `
-        <div class="avatar" style="background:${chat.color}">${nick[0].toUpperCase()}</div>
+        <div class="avatar" style="background:${chat.color};font-size:${isLan?'22px':'inherit'}">${avatarContent}</div>
         <div class="chat-info">
-          <div class="chat-name">@${esc(nick)}</div>
-          <div class="chat-preview">${last?(last.own?'Вы: ':'')+( last.enc && last.enc.ct ? '🔒 Сообщение' : esc(last.text||'') ):'Нет сообщений'}</div>
+          <div class="chat-name">${displayName}</div>
+          <div class="chat-preview">${lastText}</div>
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
           <div class="chat-time">${last?relativeTime(last.timestamp):''}</div>
@@ -1269,6 +1288,20 @@
   }
 
   function openChat(nick) {
+    if (nick.startsWith('__lan__:')) {
+      currentChat = nick;
+      closeSidebar();
+      document.getElementById('chats-screen').classList.add('hidden');
+      document.getElementById('chat-view').classList.add('active');
+      document.getElementById('fab').classList.remove('visible');
+      const av = document.getElementById('cv-avatar');
+      av.textContent = '📡'; av.style.fontSize = '22px'; av.style.background = '#7c6aff';
+      document.getElementById('cv-name').textContent = chats[nick]?.name || '📡 LAN';
+      applyBg(chats[nick]?.bg || '');
+      renderMessages();
+      renderChatList();
+      return;
+    }
     currentChat = nick;
     closeSidebar();
     document.getElementById('chats-screen').classList.add('hidden');
@@ -1277,6 +1310,7 @@
     const av = document.getElementById('cv-avatar');
     av.textContent = nick[0].toUpperCase();
     av.style.background = chats[nick].color;
+    av.style.fontSize = '';
     document.getElementById('cv-name').textContent = '@' + nick;
     applyBg(chats[nick].bg || '');
     renderMessages();
@@ -1297,7 +1331,15 @@
     const div = document.createElement('div');
     div.className='date-divider'; div.innerHTML='<span>СЕГОДНЯ</span>';
     container.appendChild(div);
+    const isLanRoom = currentChat.startsWith('__lan__:');
     msgs.forEach((msg, idx) => {
+      if (msg.system) {
+        const sys = document.createElement('div');
+        sys.className = 'msg-system';
+        sys.textContent = msg.text;
+        container.appendChild(sys);
+        return;
+      }
       const text = texts[idx];
       const wrap = document.createElement('div');
       wrap.className='msg-wrap'+(msg.own?' own':'');
@@ -1330,9 +1372,11 @@
         ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
       const bubbleInner = isSticker ? bubbleContent : `${replyQuote}${bubbleContent}${timeHtml}`;
+      const avatarLetter = isLanRoom ? (msg.sender?.[0] || '?').toUpperCase() : currentChat[0].toUpperCase();
+      const senderDiv = (isLanRoom && !msg.own && msg.sender) ? `<div class="msg-sender">${esc(msg.sender)}</div>` : '';
       wrap.innerHTML = msg.own
         ? `${replyBtn}<div><div class="bubble" ${bubbleStyle}>${bubbleInner}</div>${reactionsHtml}</div>`
-        : `<div class="msg-avatar-sm" onclick="showAvatarProfile()" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble" ${bubbleStyle}>${bubbleInner}</div>${reactionsHtml}</div>${replyBtn}`;
+        : `<div class="msg-avatar-sm" onclick="showAvatarProfile()" style="background:${chats[currentChat].color}">${avatarLetter}</div><div>${senderDiv}<div class="bubble" ${bubbleStyle}>${bubbleInner}</div>${reactionsHtml}</div>${replyBtn}`;
 
       // Долгое нажатие → реакции
       let pressTimer, pressX, pressY;
@@ -1380,15 +1424,18 @@
     const input = document.getElementById('msg-input');
     const text = input.value.trim();
     if (!text||!currentChat) return;
-    if (currentChat === '__lan__') {
-      if (lanDc && lanDc.readyState === 'open') {
-        lanDc.send(JSON.stringify({ text, time:now() }));
-        chats['__lan__'].messages.push({ enc:{ plain:text }, own:true, time:now(), timestamp:Date.now() });
-        input.value = '';
-        renderMessages();
-      } else {
-        showToast('Соединение потеряно');
-      }
+    if (currentChat.startsWith('__lan__:')) {
+      if (!lanRoom) { showToast('Нет соединения'); return; }
+      const t = now();
+      const payload = JSON.stringify({ type:'msg', text, time:t, sender:lanRoom.myLabel });
+      let sent = false;
+      lanRoom.peers.forEach(({dc, active}) => {
+        if (active && dc?.readyState === 'open') { dc.send(payload); sent = true; }
+      });
+      if (!sent) { showToast('Нет активных участников'); return; }
+      chats[currentChat].messages.push({ enc:{ plain:text }, own:true, time:t, timestamp:Date.now(), sender:lanRoom.myLabel });
+      input.value = '';
+      renderMessages();
       return;
     }
     const enc = await encryptText(text);
@@ -1708,8 +1755,10 @@
 
   loadStickers();
 
-  // ===== LAN ЧАТ (WebRTC + QR) =====
-  let lanPc = null, lanDc = null, lanScanTimer = null, lanStream = null;
+  // ===== LAN ЧАТ (WebRTC + QR, групповой — топология звезда) =====
+  let lanRoom = null;
+  // { id, name, isHost, myLabel, peers:[{pc,dc,label,active}] }
+  let lanScanTimer = null, lanStream = null;
 
   function loadScript(src) {
     return new Promise((res, rej) => {
@@ -1735,33 +1784,29 @@
     if (el) el.innerHTML = `<button class="lan-back" onclick="closeLanModal()">←</button>${content}`;
   }
 
-  async function showLanModal() {
-    closeSidebar();
-    const overlay = document.createElement('div');
-    overlay.id = 'lan-overlay';
-    overlay.className = 'lan-overlay';
-    overlay.innerHTML = `<button class="lan-back" onclick="closeLanModal()">←</button><div class="lan-icon">📡</div><div class="lan-title">LAN ЧАТ</div><div class="lan-sub">Переписка с тем кто подключён к тому же WiFi. Без интернета.</div><div class="lan-divider"></div><button class="lan-btn lan-btn-primary" onclick="lanCreate()">Создать чат</button><button class="lan-btn lan-btn-secondary" onclick="lanJoin()">Подключиться</button>`;
-    document.body.appendChild(overlay);
-  }
-
   function closeLanModal() {
     stopLanScan();
-    if (!lanDc || lanDc.readyState !== 'open') {
-      if (lanPc) { try { lanPc.close(); } catch(e){} lanPc = null; }
-      lanDc = null;
+    const hasActive = lanRoom && lanRoom.peers.some(p => p.active);
+    if (!hasActive) {
+      if (lanRoom) lanRoom.peers.forEach(({pc}) => { try { pc.close(); } catch(e){} });
+      lanRoom = null;
     }
-    const el = lanEl();
-    if (el) el.remove();
+    const el = lanEl(); if (el) el.remove();
   }
 
-  // --- Сжатие SDP для QR ---
-  function sdpToQr(sdp) {
-    const bytes = pako.deflate(sdp, { level:9 });
+  // --- Сжатие данных для QR ---
+  function roomDataToQr(roomId, roomName, sdp) {
+    const json = JSON.stringify({ r:roomId, n:roomName, s:sdp });
+    const bytes = pako.deflate(json, { level:9 });
     return btoa(String.fromCharCode.apply(null, bytes));
   }
-  function qrToSdp(b64) {
+  function qrToRoomData(b64) {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-    return pako.inflate(bytes, { to:'string' });
+    const json = pako.inflate(bytes, { to:'string' });
+    return JSON.parse(json);
+  }
+  function generateRoomId() {
+    return Math.random().toString(36).slice(2,8).toUpperCase();
   }
 
   function waitIce(pc) {
@@ -1773,92 +1818,202 @@
     });
   }
 
-  // --- СОЗДАТЕЛЬ (A) ---
-  async function lanCreate() {
+  // --- ГЛАВНОЕ МЕНЮ LAN ---
+  async function showLanModal() {
+    closeSidebar();
+    if (lanEl()) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'lan-overlay';
+    overlay.className = 'lan-overlay';
+    overlay.innerHTML = `<button class="lan-back" onclick="closeLanModal()">←</button><div class="lan-icon">📡</div><div class="lan-title">LAN ЧАТ</div><div class="lan-sub">Групповой чат с теми кто подключён к тому же WiFi. Без интернета.</div><div class="lan-divider"></div><button class="lan-btn lan-btn-primary" onclick="lanCreateStep1()">Создать комнату</button><button class="lan-btn lan-btn-secondary" onclick="lanJoin()">Войти в комнату</button>`;
+    document.body.appendChild(overlay);
+  }
+
+  // --- СОЗДАТЕЛЬ: ШАГ 1 (ввод названия) ---
+  function lanCreateStep1() {
+    lanHtml(`
+      <div class="lan-title">НОВАЯ КОМНАТА</div>
+      <div class="lan-sub">Как назвать комнату?</div>
+      <input class="lan-input" id="lan-room-name" placeholder="Например: Офис" maxlength="24">
+      <button class="lan-btn lan-btn-primary" onclick="lanCreateStep2()">Создать →</button>
+    `);
+    setTimeout(() => {
+      const inp = document.getElementById('lan-room-name');
+      if (inp) { inp.focus(); inp.addEventListener('keydown', e => { if(e.key==='Enter') lanCreateStep2(); }); }
+    }, 100);
+  }
+
+  // --- СОЗДАТЕЛЬ: ШАГ 2 (генерация QR для первого участника) ---
+  async function lanCreateStep2() {
+    const nameEl = document.getElementById('lan-room-name');
+    const roomName = (nameEl?.value || '').trim() || 'LAN';
     lanHtml(`<div class="lan-icon">⏳</div><div class="lan-title">ГЕНЕРИРУЮ QR</div><div class="lan-status">Подождите...</div>`);
     try {
       await loadLanLibs();
-      lanPc = new RTCPeerConnection({ iceServers:[] });
-      lanDc = lanPc.createDataChannel('void-lan');
-      setupLanDc(lanDc);
-      const offer = await lanPc.createOffer();
-      await lanPc.setLocalDescription(offer);
-      await waitIce(lanPc);
-      const data = sdpToQr(lanPc.localDescription.sdp);
-      lanHtml(`
-        <div class="lan-title">ШАГ 1 / 2</div>
-        <div class="lan-sub">Пусть собеседник откроет LAN чат → «Подключиться» и отсканирует этот QR</div>
-        <div class="lan-qr-wrap" id="lan-qr"></div>
-        <div class="lan-divider"></div>
-        <button class="lan-btn lan-btn-primary" onclick="lanCreatorScan()">Отсканировать ответ →</button>
-      `);
-      new QRCode(document.getElementById('lan-qr'), { text:data, width:220, height:220, correctLevel:QRCode.CorrectLevel.L });
-    } catch(e) { lanHtml(`<div class="lan-status">❌ Ошибка: ${e.message}</div>`); }
+      lanRoom = { id:generateRoomId(), name:roomName, isHost:true, myLabel:'Хост', peers:[] };
+      await lanAddPeerOffer(0);
+    } catch(e) { lanHtml(`<div class="lan-status">❌ Ошибка: ${esc(e.message)}</div>`); }
   }
 
-  async function lanCreatorScan() {
+  // --- ХОСТ: создать оффер для нового участника ---
+  async function lanAddPeerOffer(peerIdx) {
+    const peerLabel = `Участник ${peerIdx + 1}`;
+    const pc = new RTCPeerConnection({ iceServers:[] });
+    const dc = pc.createDataChannel('void-lan');
+    if (peerIdx < lanRoom.peers.length) {
+      lanRoom.peers[peerIdx] = { pc, dc, label:peerLabel, active:false };
+    } else {
+      lanRoom.peers.push({ pc, dc, label:peerLabel, active:false });
+    }
+    setupLanHostDc(dc, peerIdx);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    await waitIce(pc);
+    const qrData = roomDataToQr(lanRoom.id, lanRoom.name, pc.localDescription.sdp);
+    lanHtml(`
+      <div class="lan-title">ШАГ 1 / 2</div>
+      <div class="lan-sub">Пусть ${peerLabel} откроет LAN чат → «Войти в комнату» и отсканирует этот QR</div>
+      <div class="lan-qr-wrap" id="lan-qr"></div>
+      <div class="lan-divider"></div>
+      <button class="lan-btn lan-btn-primary" onclick="lanHostScanAnswer(${peerIdx})">Отсканировать ответ →</button>
+    `);
+    new QRCode(document.getElementById('lan-qr'), { text:qrData, width:220, height:220, correctLevel:QRCode.CorrectLevel.L });
+  }
+
+  // --- ХОСТ: сканирует ответный QR участника ---
+  async function lanHostScanAnswer(peerIdx) {
     lanHtml(`
       <div class="lan-title">ШАГ 2 / 2</div>
-      <div class="lan-sub">Отсканируй QR собеседника</div>
+      <div class="lan-sub">Отсканируй QR участника</div>
       <div class="lan-scan-wrap"><video id="lan-video" autoplay playsinline muted class="lan-scan-video"></video><div class="lan-scan-frame"></div></div>
       <div class="lan-status" id="lan-status">📷 Наведи камеру на QR...</div>
     `);
-    await startLanScan(async data => {
+    await startLanScan(async raw => {
       try {
-        const sdp = qrToSdp(data);
-        await lanPc.setRemoteDescription({ type:'answer', sdp });
+        let answerSdp;
+        try { answerSdp = qrToRoomData(raw).s; } catch(e) { answerSdp = null; }
+        if (!answerSdp) throw new Error('Неверный QR');
+        const { pc } = lanRoom.peers[peerIdx];
+        await pc.setRemoteDescription({ type:'answer', sdp:answerSdp });
         lanHtml(`<div class="lan-icon">🔗</div><div class="lan-title">ПОДКЛЮЧАЮСЬ...</div><div class="lan-status">Устанавливаю соединение</div>`);
-      } catch(e) { document.getElementById('lan-status').textContent = '❌ Неверный QR'; }
+      } catch(e) {
+        const st = document.getElementById('lan-status');
+        if (st) st.textContent = '❌ ' + (e.message || 'Ошибка');
+      }
     });
   }
 
-  // --- ПОДКЛЮЧАЮЩИЙСЯ (B) ---
+  // --- ГОСТЬ: вход в комнату по QR ---
   async function lanJoin() {
-    try {
-      await loadLanLibs();
-    } catch(e) { return; }
-    lanPc = new RTCPeerConnection({ iceServers:[] });
-    lanPc.ondatachannel = e => { lanDc = e.channel; setupLanDc(lanDc); };
+    try { await loadLanLibs(); } catch(e) { return; }
+    const pc = new RTCPeerConnection({ iceServers:[] });
     lanHtml(`
-      <div class="lan-title">ПОДКЛЮЧЕНИЕ</div>
-      <div class="lan-sub">Отсканируй QR создателя чата</div>
+      <div class="lan-title">ВОЙТИ В КОМНАТУ</div>
+      <div class="lan-sub">Отсканируй QR создателя комнаты</div>
       <div class="lan-scan-wrap"><video id="lan-video" autoplay playsinline muted class="lan-scan-video"></video><div class="lan-scan-frame"></div></div>
       <div class="lan-status" id="lan-status">📷 Наведи камеру на QR...</div>
     `);
-    await startLanScan(async data => {
+    await startLanScan(async raw => {
       try {
         document.getElementById('lan-status').textContent = '⏳ Генерирую ответ...';
-        const offerSdp = qrToSdp(data);
-        await lanPc.setRemoteDescription({ type:'offer', sdp:offerSdp });
-        const answer = await lanPc.createAnswer();
-        await lanPc.setLocalDescription(answer);
-        await waitIce(lanPc);
-        const answerData = sdpToQr(lanPc.localDescription.sdp);
+        const { r:roomId, n:roomName, s:offerSdp } = qrToRoomData(raw);
+        await pc.setRemoteDescription({ type:'offer', sdp:offerSdp });
+        lanRoom = { id:roomId, name:roomName, isHost:false, myLabel:'Участник', peers:[{ pc, dc:null, label:'Хост', active:false }] };
+        pc.ondatachannel = e => {
+          lanRoom.peers[0].dc = e.channel;
+          setupLanGuestDc(e.channel);
+        };
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await waitIce(pc);
+        const answerData = roomDataToQr(roomId, roomName, pc.localDescription.sdp);
         lanHtml(`
           <div class="lan-title">ПОКАЖИ ЭТОТ QR</div>
-          <div class="lan-sub">Пусть создатель чата отсканирует этот QR</div>
+          <div class="lan-sub">Пусть создатель отсканирует этот QR</div>
           <div class="lan-qr-wrap" id="lan-qr"></div>
           <div class="lan-status">⏳ Ожидаю соединения...</div>
         `);
         new QRCode(document.getElementById('lan-qr'), { text:answerData, width:220, height:220, correctLevel:QRCode.CorrectLevel.L });
-      } catch(e) { if(document.getElementById('lan-status')) document.getElementById('lan-status').textContent = '❌ Неверный QR'; }
+      } catch(e) {
+        const st = document.getElementById('lan-status');
+        if (st) st.textContent = '❌ Неверный QR';
+      }
     });
   }
 
-  // --- DATA CHANNEL ---
-  function setupLanDc(dc) {
+  // --- DATA CHANNELS ---
+  function setupLanHostDc(dc, peerIdx) {
     dc.onopen = () => {
+      lanRoom.peers[peerIdx].active = true;
+      const chatKey = `__lan__:${lanRoom.id}`;
+      const peerLabel = lanRoom.peers[peerIdx].label;
+      dc.send(JSON.stringify({ type:'welcome', yourLabel:peerLabel }));
+      lanRoom.peers.forEach((p, i) => {
+        if (i !== peerIdx && p.active && p.dc?.readyState === 'open')
+          p.dc.send(JSON.stringify({ type:'join', label:peerLabel }));
+      });
+      lanStoreSys(chatKey, `${peerLabel} присоединился`);
       closeLanModal();
-      lanDc = dc;
-      openLanChat();
+      openLanRoom();
     };
     dc.onmessage = e => {
+      if (!lanRoom) return;
       const data = JSON.parse(e.data);
-      if (!chats['__lan__']) chats['__lan__'] = { name:'📡 LAN', color:'#7c6aff', messages:[] };
-      chats['__lan__'].messages.push({ enc:{ plain:data.text }, own:false, time:data.time, timestamp:Date.now() });
-      if (currentChat === '__lan__') renderMessages();
+      if (data.type !== 'msg') return;
+      const chatKey = `__lan__:${lanRoom.id}`;
+      lanStoreMsg(chatKey, data.text, data.time, data.sender, false);
+      lanRoom.peers.forEach((p, i) => {
+        if (i !== peerIdx && p.active && p.dc?.readyState === 'open') p.dc.send(e.data);
+      });
+    };
+    dc.onclose = () => {
+      if (!lanRoom) return;
+      const peer = lanRoom.peers[peerIdx];
+      if (peer) peer.active = false;
+      const chatKey = `__lan__:${lanRoom.id}`;
+      lanStoreSys(chatKey, `${peer?.label || 'Участник'} отключился`);
+      if (currentChat === chatKey) renderMessages();
     };
     dc.onerror = () => {};
+  }
+
+  function setupLanGuestDc(dc) {
+    dc.onopen = () => {
+      const peer = lanRoom.peers.find(p => p.dc === dc);
+      if (peer) peer.active = true;
+      closeLanModal();
+      openLanRoom();
+    };
+    dc.onmessage = e => {
+      if (!lanRoom) return;
+      const data = JSON.parse(e.data);
+      const chatKey = `__lan__:${lanRoom.id}`;
+      if (data.type === 'msg') {
+        lanStoreMsg(chatKey, data.text, data.time, data.sender, false);
+      } else if (data.type === 'welcome') {
+        lanRoom.myLabel = data.yourLabel;
+      } else if (data.type === 'join') {
+        lanStoreSys(chatKey, `${data.label} присоединился`);
+        if (currentChat === chatKey) renderMessages();
+      }
+    };
+    dc.onclose = () => {
+      if (!lanRoom) return;
+      const chatKey = `__lan__:${lanRoom.id}`;
+      lanStoreSys(chatKey, 'Хост отключился');
+      if (currentChat === chatKey) renderMessages();
+    };
+    dc.onerror = () => {};
+  }
+
+  function lanStoreMsg(chatKey, text, time, sender, own) {
+    if (!chats[chatKey]) chats[chatKey] = { name:`📡 ${lanRoom?.name||'LAN'}`, color:'#7c6aff', messages:[], isLan:true };
+    chats[chatKey].messages.push({ enc:{ plain:text }, own, time, timestamp:Date.now(), sender });
+    if (currentChat === chatKey) renderMessages();
+  }
+  function lanStoreSys(chatKey, text) {
+    if (!chats[chatKey]) chats[chatKey] = { name:`📡 ${lanRoom?.name||'LAN'}`, color:'#7c6aff', messages:[], isLan:true };
+    chats[chatKey].messages.push({ system:true, text, time:now(), timestamp:Date.now() });
   }
 
   // --- КАМЕРА / QR СКАНЕР ---
@@ -1890,19 +2045,38 @@
     if (lanStream) { lanStream.getTracks().forEach(t => t.stop()); lanStream = null; }
   }
 
-  // --- LAN ЧАТ ---
-  function openLanChat() {
-    if (!chats['__lan__']) chats['__lan__'] = { name:'📡 LAN', color:'#7c6aff', messages:[] };
+  // --- ОТКРЫТЬ ЭКРАН КОМНАТЫ ---
+  function openLanRoom() {
+    if (!lanRoom) return;
+    const chatKey = `__lan__:${lanRoom.id}`;
+    if (!chats[chatKey]) chats[chatKey] = { name:`📡 ${lanRoom.name}`, color:'#7c6aff', messages:[], isLan:true };
     document.getElementById('chats-screen').classList.add('hidden');
     document.getElementById('fab').classList.remove('visible');
-    const chatView = document.getElementById('chat-view');
-    chatView.classList.add('active');
-    document.getElementById('cv-name').textContent = '📡 LAN';
-    document.getElementById('cv-avatar').textContent = '📡';
-    document.getElementById('cv-avatar').style.fontSize = '22px';
-    currentChat = '__lan__';
-    applyBg(chats['__lan__'].bg || '');
+    document.getElementById('chat-view').classList.add('active');
+    document.getElementById('cv-name').textContent = `📡 ${lanRoom.name}`;
+    const av = document.getElementById('cv-avatar');
+    av.textContent = '📡'; av.style.fontSize = '22px'; av.style.background = '#7c6aff';
+    currentChat = chatKey;
+    applyBg(chats[chatKey].bg || '');
     renderMessages();
+  }
+
+  // --- ДОБАВИТЬ УЧАСТНИКА (из меню чата, только хост) ---
+  async function lanInvite() {
+    if (!lanRoom?.isHost) return;
+    closeChatMenu();
+    let overlay = lanEl();
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'lan-overlay';
+      overlay.className = 'lan-overlay';
+      document.body.appendChild(overlay);
+    }
+    lanHtml(`<div class="lan-icon">⏳</div><div class="lan-title">ДОБАВИТЬ УЧАСТНИКА</div><div class="lan-status">Генерирую QR...</div>`);
+    try {
+      await loadLanLibs();
+      await lanAddPeerOffer(lanRoom.peers.length);
+    } catch(e) { lanHtml(`<div class="lan-status">❌ ${esc(e.message)}</div>`); }
   }
 
   // ===== КАПСУЛА ВРЕМЕНИ =====
