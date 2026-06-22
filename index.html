@@ -654,7 +654,7 @@
           <input type="text" class="msg-input" id="msg-input" placeholder="Написать сообщение..." onkeydown="handleKey(event)">
         </div>
         <button class="icon-btn" id="capsule-btn" onclick="showCapsuleModal()" title="Капсула времени" style="flex-shrink:0;">🕰️</button>
-        <button class="send-btn" onclick="sendMessage()">➤</button>
+        <button class="send-btn" id="send-btn" onmousedown="sendBtnDown()" onmouseup="sendBtnUp()" onmouseleave="sendBtnCancel()" ontouchstart="sendBtnDown(event)" ontouchend="sendBtnUp()" ontouchcancel="sendBtnCancel()">➤</button>
       </div>
     </div>
 
@@ -1025,6 +1025,38 @@
     document.getElementById('sidebar-overlay').classList.remove('active');
   }
 
+  // ===== ДОЛГОЕ НАЖАТИЕ КНОПКИ ОТПРАВКИ =====
+  let sendHoldTimer = null;
+  let sendWasHeld = false;
+
+  function sendBtnDown(e) {
+    if (e) e.preventDefault();
+    sendWasHeld = false;
+    sendHoldTimer = setTimeout(() => {
+      sendWasHeld = true;
+      const cb = document.getElementById('capsule-btn');
+      cb.classList.add('flash');
+    }, 400);
+  }
+
+  function sendBtnUp() {
+    clearTimeout(sendHoldTimer);
+    if (!sendWasHeld) sendMessage();
+  }
+
+  function sendBtnCancel() {
+    clearTimeout(sendHoldTimer);
+    sendWasHeld = false;
+  }
+
+  // Скрыть капсулу при клике вне
+  document.addEventListener('click', e => {
+    const cb = document.getElementById('capsule-btn');
+    if (cb && cb.classList.contains('flash') && !e.target.closest('#capsule-btn') && !e.target.closest('#send-btn')) {
+      cb.classList.remove('flash');
+    }
+  });
+
   // ===== МЕНЮ ЧАТА =====
   function toggleChatMenu() {
     const menu = document.getElementById('chat-menu');
@@ -1278,11 +1310,6 @@
     chats[currentChat].messages.push(msg);
     input.value='';
     playSound();
-    if (!pendingCapsuleTime) {
-      const cb = document.getElementById('capsule-btn');
-      cb.classList.add('flash');
-      setTimeout(() => cb.classList.remove('flash'), 1000);
-    }
     renderMessages();
     renderChatList();
     saveState();
