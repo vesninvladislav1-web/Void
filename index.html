@@ -190,7 +190,8 @@
 
   /* ЧАТ */
   .chat-view { display:none; flex-direction:column; height:100%; overflow:hidden; }
-  .chat-view.active { display:flex; }
+  .chat-view.active { display:flex; animation:chatSlideIn 0.28s cubic-bezier(0.25,0.46,0.45,0.94); }
+  @keyframes chatSlideIn { from{opacity:0;transform:translateX(32px)} to{opacity:1;transform:none} }
 
   .chat-topbar { padding:14px 20px; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; flex-shrink:0; }
   .back-btn { width:40px; height:40px; border-radius:50%; background:var(--accent); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; color:white; transition:all 0.2s; flex-shrink:0; box-shadow:0 2px 10px var(--shadow); }
@@ -220,11 +221,15 @@
   .date-divider { text-align:center; margin:14px 0; flex-shrink:0; }
   .date-divider span { font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; letter-spacing:2px; opacity:0.5; }
 
-  .msg-wrap { display:flex; align-items:flex-end; gap:8px; max-width:72%; animation:fadeUp 0.2s ease; }
-  @keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
-  .msg-wrap.own { margin-left:auto; flex-direction:row-reverse; }
-  .msg-avatar-sm { width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:white; flex-shrink:0; font-family:'Space Mono',monospace; }
-  .bubble { padding:10px 14px; border-radius:var(--radius-lg); font-size:14px; line-height:1.5; word-break:break-word; }
+  .msg-wrap { display:flex; align-items:flex-end; gap:8px; max-width:75%; transition:transform 0.15s ease; }
+  .msg-wrap.own { margin-left:auto; flex-direction:row-reverse; animation:msgFromRight 0.22s cubic-bezier(0.25,0.46,0.45,0.94); }
+  .msg-wrap:not(.own) { animation:msgFromLeft 0.22s cubic-bezier(0.25,0.46,0.45,0.94); }
+  @keyframes msgFromRight { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:none} }
+  @keyframes msgFromLeft  { from{opacity:0;transform:translateX(-20px)} to{opacity:1;transform:none} }
+  .msg-avatar-sm { width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:white; flex-shrink:0; font-family:'Space Mono',monospace; cursor:pointer; }
+  .bubble { padding:10px 14px 8px; border-radius:var(--radius-lg); font-size:14px; line-height:1.5; word-break:break-word; overflow:hidden; }
+  .bubble::after { content:''; display:table; clear:both; }
+  .msg-time-inline { float:right; margin-left:10px; margin-top:2px; font-size:10px; font-family:'Space Mono',monospace; white-space:nowrap; opacity:0.55; display:flex; align-items:center; gap:3px; position:relative; bottom:-2px; }
   .msg-wrap:not(.own) .bubble { background:var(--msg-other); border:1px solid var(--border); border-bottom-left-radius:4px; box-shadow:0 2px 12px rgba(0,0,0,0.15); }
   .msg-wrap.own .bubble { background:var(--msg-own); border:1px solid rgba(124,106,255,0.2); border-bottom-right-radius:4px; box-shadow:0 4px 20px rgba(124,106,255,0.2); }
   .msg-time { font-size:10px; color:var(--text3); font-family:'Space Mono',monospace; margin-top:3px; padding:0 4px; display:flex; align-items:center; gap:3px; }
@@ -385,6 +390,16 @@
   .reply-quote { font-size:11px; color:var(--text3); border-left:2px solid var(--accent); padding-left:6px; margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:220px; }
   .msg-reply-btn { background:none; border:none; color:var(--text3); font-size:13px; cursor:pointer; opacity:0; transition:opacity 0.15s; padding:2px 4px; flex-shrink:0; }
   .msg-wrap:hover .msg-reply-btn { opacity:1; }
+
+  /* Реакции */
+  .reaction-picker { position:fixed; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:40px; padding:6px 10px; display:flex; gap:4px; z-index:300; box-shadow:0 8px 32px rgba(0,0,0,0.3); transform-origin:bottom center; animation:popIn 0.2s cubic-bezier(0.34,1.56,0.64,1); }
+  @keyframes popIn { from{opacity:0;transform:scale(0.7)} to{opacity:1;transform:scale(1)} }
+  .reaction-emoji { font-size:26px; cursor:pointer; padding:4px; border-radius:50%; transition:transform 0.15s; line-height:1; border:none; background:none; }
+  .reaction-emoji:hover { transform:scale(1.3); }
+  .msg-reactions { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
+  .msg-reaction { background:var(--glass); border:1px solid var(--glass-border); border-radius:20px; padding:2px 8px; font-size:13px; cursor:pointer; transition:background 0.15s; display:flex; align-items:center; gap:3px; }
+  .msg-reaction.mine { border-color:var(--accent); background:rgba(124,106,255,0.15); }
+  .msg-reaction span { font-size:11px; color:var(--text2); }
 
   /* Фон чата */
   .bg-picker-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; }
@@ -1028,6 +1043,50 @@
     document.getElementById('sidebar-overlay').classList.remove('active');
   }
 
+  // ===== РЕАКЦИИ =====
+  const REACTION_EMOJIS = ['❤️','😂','🔥','👍','😮','😢','🤝','🫡'];
+
+  function showReactionPicker(idx, wrapEl) {
+    document.querySelectorAll('.reaction-picker').forEach(e=>e.remove());
+    const picker = document.createElement('div');
+    picker.className = 'reaction-picker';
+    picker.innerHTML = REACTION_EMOJIS.map(e =>
+      `<button class="reaction-emoji" onclick="toggleReaction(${idx},'${e}');this.closest('.reaction-picker').remove()">${e}</button>`
+    ).join('');
+    // Позиционируем над сообщением
+    const rect = wrapEl.getBoundingClientRect();
+    picker.style.left = Math.min(rect.left, window.innerWidth - 320) + 'px';
+    picker.style.top = (rect.top - 64) + 'px';
+    document.body.appendChild(picker);
+    setTimeout(() => document.addEventListener('click', () => picker.remove(), { once:true }), 100);
+  }
+
+  function toggleReaction(idx, emoji) {
+    const msg = chats[currentChat].messages[idx];
+    if (!msg.reactions) msg.reactions = [];
+    const i = msg.reactions.indexOf(emoji);
+    if (i >= 0) msg.reactions.splice(i, 1);
+    else msg.reactions.push(emoji);
+    saveState();
+    renderMessages();
+  }
+
+  // ===== МИ НИ-ПРОФИЛЬ =====
+  function showAvatarProfile() {
+    if (!currentChat || currentChat === '__lan__') return;
+    const chat = chats[currentChat];
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `<div class="modal" style="align-items:center;gap:12px;text-align:center;">
+      <div class="avatar" style="width:72px;height:72px;border-radius:22px;font-size:28px;background:${chat.color};display:flex;align-items:center;justify-content:center;font-weight:700;color:white;font-family:'Space Mono',monospace;">${currentChat[0].toUpperCase()}</div>
+      <div style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;">@${esc(currentChat)}</div>
+      <div style="font-size:12px;color:var(--text3);">${chat.messages.length} сообщений</div>
+      <button class="btn-primary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
+    </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if(e.target===overlay) overlay.remove(); });
+  }
+
   // ===== ДОЛГОЕ НАЖАТИЕ КНОПКИ ОТПРАВКИ =====
   let sendHoldTimer = null;
   let sendWasHeld = false;
@@ -1264,21 +1323,43 @@
       const bubbleStyle = isSticker ? 'style="background:transparent;border:none;padding:4px;"' : '';
       const replyQuote = msg.reply ? `<div class="reply-quote">↩ ${esc(msg.reply.text.slice(0,60))}</div>` : '';
       const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">↩</button>`;
-      wrap.innerHTML = msg.own
-        ? `${replyBtn}<div><div class="bubble" ${bubbleStyle}>${replyQuote}${bubbleContent}</div></div>`
-        : `<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble" ${bubbleStyle}>${replyQuote}${bubbleContent}</div></div>${replyBtn}`;
+      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${msg.time}${msg.own?' <span class="check">✓</span>':''}</span>`;
+      const reactionsHtml = (msg.reactions && msg.reactions.length)
+        ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
-      let pressTimer;
-      wrap.addEventListener('touchstart', () => { pressTimer = setTimeout(() => showMsgMenu(idx, {text, own:msg.own}), 500); });
+      const bubbleInner = isSticker ? bubbleContent : `${replyQuote}${bubbleContent}${timeHtml}`;
+      wrap.innerHTML = msg.own
+        ? `${replyBtn}<div><div class="bubble" ${bubbleStyle}>${bubbleInner}</div>${reactionsHtml}</div>`
+        : `<div class="msg-avatar-sm" onclick="showAvatarProfile()" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble" ${bubbleStyle}>${bubbleInner}</div>${reactionsHtml}</div>${replyBtn}`;
+
+      // Долгое нажатие → реакции
+      let pressTimer, pressX, pressY;
+      wrap.addEventListener('touchstart', e => {
+        pressX = e.touches[0].clientX; pressY = e.touches[0].clientY;
+        pressTimer = setTimeout(() => showReactionPicker(idx, wrap), 500);
+      }, { passive:true });
+      wrap.addEventListener('touchmove', e => {
+        const dx = Math.abs(e.touches[0].clientX - pressX);
+        const dy = Math.abs(e.touches[0].clientY - pressY);
+        if (dx > 8 || dy > 8) clearTimeout(pressTimer);
+      }, { passive:true });
       wrap.addEventListener('touchend', () => clearTimeout(pressTimer));
-      wrap.addEventListener('touchmove', () => clearTimeout(pressTimer));
-      wrap.addEventListener('contextmenu', e => { e.preventDefault(); showMsgMenu(idx, {text, own:msg.own}); });
+      wrap.addEventListener('contextmenu', e => { e.preventDefault(); showReactionPicker(idx, wrap); });
+
+      // Свайп вправо → ответить
+      let swipeStartX = 0;
+      wrap.addEventListener('touchstart', e => { swipeStartX = e.touches[0].clientX; }, { passive:true });
+      wrap.addEventListener('touchmove', e => {
+        const dx = e.touches[0].clientX - swipeStartX;
+        if (dx > 0 && dx < 80) wrap.style.transform = `translateX(${dx * 0.4}px)`;
+      }, { passive:true });
+      wrap.addEventListener('touchend', e => {
+        const dx = e.changedTouches[0].clientX - swipeStartX;
+        wrap.style.transform = '';
+        if (dx > 55) setReply(idx);
+      });
 
       container.appendChild(wrap);
-      const t2 = document.createElement('div');
-      t2.className='msg-time '+(msg.own?'own':'other');
-      t2.innerHTML = msg.own?`${msg.time} <span class="check">✓</span>`:msg.time;
-      container.appendChild(t2);
     });
 
     if (chats[currentChat].typing) {
