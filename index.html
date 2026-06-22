@@ -198,6 +198,12 @@
   .chat-topbar-sub { font-size:12px; color:var(--text2); margin-top:2px; }
   .chat-topbar-actions { display:flex; gap:6px; align-items:center; }
   .chat-topbar-actions::before { content:''; width:1px; height:20px; background:var(--border); margin-right:2px; }
+  .chat-menu-wrap { position:relative; }
+  .chat-menu { position:absolute; right:0; top:50px; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:var(--radius-lg); padding:6px; display:flex; flex-direction:column; gap:2px; min-width:170px; z-index:200; transform-origin:top right; transform:scale(0.85); opacity:0; pointer-events:none; transition:transform 0.18s cubic-bezier(0.34,1.56,0.64,1), opacity 0.15s; }
+  .chat-menu.open { transform:scale(1); opacity:1; pointer-events:all; }
+  .chat-menu-item { display:flex; align-items:center; gap:10px; padding:11px 14px; border-radius:var(--radius-md); background:none; border:none; color:var(--text); font-size:14px; cursor:pointer; width:100%; text-align:left; transition:background 0.15s; font-family:'Inter',sans-serif; }
+  .chat-menu-item:hover { background:var(--glass); }
+  .chat-menu-item.danger { color:#ef4444; }
 
   .icon-btn { width:40px; height:40px; border-radius:50%; background:var(--glass); border:1px solid var(--glass-border); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:15px; transition:all 0.2s; color:var(--text2); }
   .icon-btn:hover { background:var(--accent); color:white; }
@@ -208,9 +214,8 @@
   .messages::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
   .no-messages { margin:auto; color:var(--text3); font-size:13px; }
 
-  .date-divider { text-align:center; margin:14px 0; position:relative; flex-shrink:0; }
-  .date-divider::before { content:''; position:absolute; top:50%; left:0; right:0; height:1px; background:var(--border); }
-  .date-divider span { position:relative; background:var(--bg); padding:0 12px; font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; letter-spacing:1px; }
+  .date-divider { text-align:center; margin:14px 0; flex-shrink:0; }
+  .date-divider span { font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; letter-spacing:2px; opacity:0.5; }
 
   .msg-wrap { display:flex; align-items:flex-end; gap:8px; max-width:72%; animation:fadeUp 0.2s ease; }
   @keyframes fadeUp { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:none} }
@@ -304,9 +309,11 @@
   .secure-overlay { position:fixed; inset:0; background:var(--bg); z-index:9999; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; }
   .secure-overlay-icon { font-size:56px; }
   .secure-overlay-text { font-family:'Space Mono',monospace; font-size:13px; color:var(--text2); letter-spacing:3px; }
-  #secure-btn.active { background:var(--accent) !important; color:white !important; border-color:var(--accent) !important; }
+  #secure-btn.active { background:var(--accent) !important; color:white !important; }
 
   /* Капсула времени */
+  #capsule-btn { opacity:0; transform:scale(0.5); pointer-events:none; transition:opacity 0.2s, transform 0.2s; }
+  #capsule-btn.flash, #capsule-btn.armed { opacity:1; transform:scale(1); pointer-events:auto; }
   #capsule-btn.armed { background:var(--accent) !important; color:white !important; border-color:var(--accent) !important; }
   .capsule-bubble { text-align:center; min-width:130px; }
   .capsule-countdown { font-size:11px; color:var(--accent2); font-family:'Space Mono',monospace; margin-top:3px; }
@@ -614,9 +621,14 @@
           <div class="chat-topbar-sub">прототип</div>
         </div>
         <div class="chat-topbar-actions">
-          <button class="icon-btn" onclick="showBgModal()" title="Фон чата">🖼️</button>
-          <button class="icon-btn" id="secure-btn" onclick="toggleSecure()" title="Защита от скриншота">🛡️</button>
-          <button class="icon-btn delete-chat-btn" onclick="deleteCurrentChat()" title="Удалить чат">🗑️</button>
+          <div class="chat-menu-wrap">
+            <button class="icon-btn" onclick="toggleChatMenu()" id="chat-menu-btn">⋮</button>
+            <div class="chat-menu" id="chat-menu">
+              <button class="chat-menu-item" onclick="showBgModal();closeChatMenu()">🖼️ Фон чата</button>
+              <button class="chat-menu-item" id="secure-btn" onclick="toggleSecure();closeChatMenu()">🛡️ Защита</button>
+              <button class="chat-menu-item danger" onclick="deleteCurrentChat();closeChatMenu()">🗑️ Удалить чат</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -637,11 +649,11 @@
         <button class="reply-bar-cancel" onclick="clearReply()">✕</button>
       </div>
       <div class="input-area">
+        <button class="icon-btn" onclick="toggleStickerPanel()" title="Стикеры" style="flex-shrink:0;">😊</button>
         <div class="input-wrap">
           <input type="text" class="msg-input" id="msg-input" placeholder="Написать сообщение..." onkeydown="handleKey(event)">
         </div>
         <button class="icon-btn" id="capsule-btn" onclick="showCapsuleModal()" title="Капсула времени" style="flex-shrink:0;">🕰️</button>
-        <button class="icon-btn" onclick="toggleStickerPanel()" title="Стикеры" style="flex-shrink:0;">😊</button>
         <button class="send-btn" onclick="sendMessage()">➤</button>
       </div>
     </div>
@@ -1013,6 +1025,22 @@
     document.getElementById('sidebar-overlay').classList.remove('active');
   }
 
+  // ===== МЕНЮ ЧАТА =====
+  function toggleChatMenu() {
+    const menu = document.getElementById('chat-menu');
+    menu.classList.toggle('open');
+    if (menu.classList.contains('open')) {
+      setTimeout(() => document.addEventListener('click', closeChatMenuOutside, { once:true }), 0);
+    }
+  }
+  function closeChatMenu() {
+    const menu = document.getElementById('chat-menu');
+    if (menu) menu.classList.remove('open');
+  }
+  function closeChatMenuOutside(e) {
+    if (!e.target.closest('.chat-menu-wrap')) closeChatMenu();
+  }
+
   // ===== НАВИГАЦИЯ =====
   function backToChats() {
     if (secureMode) toggleSecure();
@@ -1250,6 +1278,11 @@
     chats[currentChat].messages.push(msg);
     input.value='';
     playSound();
+    if (!pendingCapsuleTime) {
+      const cb = document.getElementById('capsule-btn');
+      cb.classList.add('flash');
+      setTimeout(() => cb.classList.remove('flash'), 1000);
+    }
     renderMessages();
     renderChatList();
     saveState();
