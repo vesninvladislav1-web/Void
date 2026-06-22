@@ -1855,7 +1855,7 @@
     } catch(e) { lanHtml(`<div class="lan-status">❌ Ошибка: ${esc(e.message)}</div>`); }
   }
 
-  // --- ХОСТ: создать оффер для нового участника ---
+  // --- ХОСТ: показывает QR и одновременно сканирует ответ ---
   async function lanAddPeerOffer(peerIdx) {
     const peerLabel = `Участник ${peerIdx + 1}`;
     const pc = new RTCPeerConnection({ iceServers:[] });
@@ -1871,29 +1871,20 @@
     await waitIce(pc);
     const qrData = roomDataToQr(lanRoom.id, lanRoom.name, pc.localDescription.sdp);
     lanHtml(`
-      <div class="lan-title">ШАГ 1 / 2</div>
-      <div class="lan-sub">Пусть ${peerLabel} откроет LAN чат → «Войти в комнату» и отсканирует этот QR</div>
+      <div class="lan-title">ПРИГЛАСИТЬ ${peerLabel.toUpperCase()}</div>
+      <div class="lan-sub">Покажи этот QR участнику — он отсканирует и покажет ответный QR</div>
       <div class="lan-qr-wrap" id="lan-qr"></div>
       <div class="lan-divider"></div>
-      <button class="lan-btn lan-btn-primary" onclick="lanHostScanAnswer(${peerIdx})">Отсканировать ответ →</button>
+      <div class="lan-sub" style="font-size:11px;opacity:0.7">Направь камеру на QR участника — соединение установится автоматически</div>
+      <div class="lan-scan-wrap" style="max-width:200px"><video id="lan-video" autoplay playsinline muted class="lan-scan-video"></video><div class="lan-scan-frame"></div></div>
+      <div class="lan-status" id="lan-status">📷 Жду ответного QR...</div>
     `);
-    new QRCode(document.getElementById('lan-qr'), { text:qrData, width:220, height:220, correctLevel:QRCode.CorrectLevel.L });
-  }
-
-  // --- ХОСТ: сканирует ответный QR участника ---
-  async function lanHostScanAnswer(peerIdx) {
-    lanHtml(`
-      <div class="lan-title">ШАГ 2 / 2</div>
-      <div class="lan-sub">Отсканируй QR участника</div>
-      <div class="lan-scan-wrap"><video id="lan-video" autoplay playsinline muted class="lan-scan-video"></video><div class="lan-scan-frame"></div></div>
-      <div class="lan-status" id="lan-status">📷 Наведи камеру на QR...</div>
-    `);
-    await startLanScan(async raw => {
+    new QRCode(document.getElementById('lan-qr'), { text:qrData, width:180, height:180, correctLevel:QRCode.CorrectLevel.L });
+    startLanScan(async raw => {
       try {
         let answerSdp;
         try { answerSdp = qrToRoomData(raw).s; } catch(e) { answerSdp = null; }
         if (!answerSdp) throw new Error('Неверный QR');
-        const { pc } = lanRoom.peers[peerIdx];
         await pc.setRemoteDescription({ type:'answer', sdp:answerSdp });
         lanHtml(`<div class="lan-icon">🔗</div><div class="lan-title">ПОДКЛЮЧАЮСЬ...</div><div class="lan-status">Устанавливаю соединение</div>`);
       } catch(e) {
