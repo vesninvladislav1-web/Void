@@ -406,6 +406,8 @@
   .bg-swatch { width:100%; aspect-ratio:1; border-radius:10px; cursor:pointer; border:2px solid transparent; transition:transform 0.15s,border 0.2s; }
   .bg-swatch:hover { transform:scale(1.08); }
   .bg-swatch.active { border-color:white; }
+  .void-toast { position:fixed; bottom:90px; left:50%; transform:translateX(-50%) translateY(12px); background:rgba(30,30,44,0.92); backdrop-filter:blur(12px); color:#fff; padding:10px 18px; border-radius:20px; font-size:13px; font-family:'Inter',sans-serif; pointer-events:none; opacity:0; transition:opacity 0.2s,transform 0.2s; z-index:9999; white-space:nowrap; }
+  .void-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
@@ -1384,6 +1386,8 @@
         chats['__lan__'].messages.push({ enc:{ plain:text }, own:true, time:now(), timestamp:Date.now() });
         input.value = '';
         renderMessages();
+      } else {
+        showToast('Соединение потеряно');
       }
       return;
     }
@@ -1742,8 +1746,10 @@
 
   function closeLanModal() {
     stopLanScan();
-    if (lanPc) { try { lanPc.close(); } catch(e){} lanPc = null; }
-    lanDc = null;
+    if (!lanDc || lanDc.readyState !== 'open') {
+      if (lanPc) { try { lanPc.close(); } catch(e){} lanPc = null; }
+      lanDc = null;
+    }
     const el = lanEl();
     if (el) el.remove();
   }
@@ -1843,11 +1849,12 @@
   function setupLanDc(dc) {
     dc.onopen = () => {
       closeLanModal();
+      lanDc = dc;
       openLanChat();
     };
     dc.onmessage = e => {
       const data = JSON.parse(e.data);
-      if (!chats['__lan__']) chats['__lan__'] = { name:'📡 LAN', messages:[] };
+      if (!chats['__lan__']) chats['__lan__'] = { name:'📡 LAN', color:'#7c6aff', messages:[] };
       chats['__lan__'].messages.push({ enc:{ plain:data.text }, own:false, time:data.time, timestamp:Date.now() });
       if (currentChat === '__lan__') renderMessages();
     };
@@ -1885,7 +1892,7 @@
 
   // --- LAN ЧАТ ---
   function openLanChat() {
-    if (!chats['__lan__']) chats['__lan__'] = { name:'📡 LAN', messages:[] };
+    if (!chats['__lan__']) chats['__lan__'] = { name:'📡 LAN', color:'#7c6aff', messages:[] };
     document.getElementById('chats-screen').classList.add('hidden');
     document.getElementById('fab').classList.remove('visible');
     const chatView = document.getElementById('chat-view');
@@ -2177,6 +2184,14 @@
   function handleKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} }
   function now() { const d=new Date(); return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'); }
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function showToast(msg) {
+    const t = document.createElement('div');
+    t.className = 'void-toast';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    requestAnimationFrame(() => t.classList.add('show'));
+    setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 2500);
+  }
 </script>
 </body>
 </html>
