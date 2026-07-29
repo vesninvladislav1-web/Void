@@ -1874,12 +1874,14 @@
       <div class="lan-title">ПРИГЛАСИТЬ ${peerLabel.toUpperCase()}</div>
       <div class="lan-sub">Покажи этот QR участнику — он отсканирует и покажет ответный QR</div>
       <div class="lan-qr-wrap" id="lan-qr"></div>
+      <button class="lan-btn lan-btn-secondary" style="max-width:240px;padding:10px;" onclick="navigator.clipboard.writeText('${qrData}').then(()=>showToast('Код скопирован'))">📋 Скопировать код</button>
       <div class="lan-divider"></div>
       <div class="lan-sub" style="font-size:11px;opacity:0.7">Направь камеру на QR участника — соединение установится автоматически</div>
       <div class="lan-scan-wrap" style="max-width:200px"><video id="lan-video" autoplay playsinline muted class="lan-scan-video"></video><div class="lan-scan-frame"></div></div>
       <div class="lan-status" id="lan-status">📷 Жду ответного QR...</div>
+      <button class="lan-btn lan-btn-secondary" style="max-width:240px;padding:10px;font-size:11px;" onclick="lanPasteAnswer(${peerIdx})">⌨️ Вставить код ответа вручную</button>
     `);
-    new QRCode(document.getElementById('lan-qr'), { text:qrData, width:180, height:180, correctLevel:QRCode.CorrectLevel.L });
+    new QRCode(document.getElementById('lan-qr'), { text:qrData, width:240, height:240, correctLevel:QRCode.CorrectLevel.M });
     startLanScan(async raw => {
       try {
         let answerSdp;
@@ -1903,6 +1905,7 @@
       <div class="lan-sub">Отсканируй QR создателя комнаты</div>
       <div class="lan-scan-wrap"><video id="lan-video" autoplay playsinline muted class="lan-scan-video"></video><div class="lan-scan-frame"></div></div>
       <div class="lan-status" id="lan-status">📷 Наведи камеру на QR...</div>
+      <button class="lan-btn lan-btn-secondary" style="max-width:280px;padding:10px;font-size:11px;" onclick="lanPasteOffer()">⌨️ Вставить код вручную</button>
     `);
     await startLanScan(async raw => {
       try {
@@ -1922,9 +1925,10 @@
           <div class="lan-title">ПОКАЖИ ЭТОТ QR</div>
           <div class="lan-sub">Пусть создатель отсканирует этот QR</div>
           <div class="lan-qr-wrap" id="lan-qr"></div>
+          <button class="lan-btn lan-btn-secondary" style="max-width:240px;padding:10px;" onclick="navigator.clipboard.writeText('${answerData}').then(()=>showToast('Код скопирован'))">📋 Скопировать код</button>
           <div class="lan-status">⏳ Ожидаю соединения...</div>
         `);
-        new QRCode(document.getElementById('lan-qr'), { text:answerData, width:220, height:220, correctLevel:QRCode.CorrectLevel.L });
+        new QRCode(document.getElementById('lan-qr'), { text:answerData, width:240, height:240, correctLevel:QRCode.CorrectLevel.M });
       } catch(e) {
         const st = document.getElementById('lan-status');
         if (st) st.textContent = '❌ Неверный QR';
@@ -2010,21 +2014,37 @@
   // --- КАМЕРА / QR СКАНЕР ---
   async function startLanScan(callback) {
     try {
-      lanStream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'environment' } });
+      lanStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode:'environment', width:{ ideal:1920 }, height:{ ideal:1080 } }
+      });
       const video = document.getElementById('lan-video');
       video.srcObject = lanStream;
       await video.play();
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
       let done = false;
-      lanScanTimer = setInterval(() => {
-        if (!video.videoWidth || done) return;
-        canvas.width = video.videoWidth; canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0);
-        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(img.data, img.width, img.height);
-        if (code) { done = true; stopLanScan(); callback(code.data); }
-      }, 250);
+
+      if ('BarcodeDetector' in window) {
+        // Нативный сканер браузера — намного надёжнее jsQR
+        const detector = new BarcodeDetector({ formats:['qr_code'] });
+        lanScanTimer = setInterval(async () => {
+          if (done || !video.videoWidth) return;
+          try {
+            const codes = await detector.detect(video);
+            if (codes.length > 0) { done = true; stopLanScan(); callback(codes[0].rawValue); }
+          } catch(e) {}
+        }, 80);
+      } else {
+        // Запасной вариант — jsQR
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        lanScanTimer = setInterval(() => {
+          if (!video.videoWidth || done) return;
+          canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+          ctx.drawImage(video, 0, 0);
+          const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const code = jsQR(img.data, img.width, img.height, { inversionAttempts:'dontInvert' });
+          if (code) { done = true; stopLanScan(); callback(code.data); }
+        }, 100);
+      }
     } catch(e) {
       const st = document.getElementById('lan-status');
       if (st) st.textContent = '❌ Нет доступа к камере';
@@ -2034,6 +2054,68 @@
   function stopLanScan() {
     if (lanScanTimer) { clearInterval(lanScanTimer); lanScanTimer = null; }
     if (lanStream) { lanStream.getTracks().forEach(t => t.stop()); lanStream = null; }
+  }
+
+  // --- Ручной ввод кода (если камера не берёт QR) ---
+  function lanPasteOffer() {
+    stopLanScan();
+    lanHtml(`
+      <div class="lan-title">ВСТАВИТЬ КОД</div>
+      <div class="lan-sub">Попроси создателя скопировать код и пришли тебе — вставь его сюда</div>
+      <textarea class="lan-input" id="lan-code-input" placeholder="Вставь код создателя..." rows="4" style="resize:none;font-size:11px;font-family:monospace;"></textarea>
+      <button class="lan-btn lan-btn-primary" onclick="lanSubmitOfferCode()">Подключиться →</button>
+    `);
+    setTimeout(() => document.getElementById('lan-code-input')?.focus(), 100);
+  }
+
+  async function lanSubmitOfferCode() {
+    const raw = document.getElementById('lan-code-input')?.value.trim();
+    if (!raw) return;
+    lanHtml(`<div class="lan-icon">⏳</div><div class="lan-title">ПОДКЛЮЧАЮСЬ...</div><div class="lan-status">Обрабатываю код...</div>`);
+    try {
+      await loadLanLibs();
+      const pc = new RTCPeerConnection({ iceServers:[] });
+      const { r:roomId, n:roomName, s:offerSdp } = qrToRoomData(raw);
+      await pc.setRemoteDescription({ type:'offer', sdp:offerSdp });
+      lanRoom = { id:roomId, name:roomName, isHost:false, myLabel:'Участник', peers:[{ pc, dc:null, label:'Хост', active:false }] };
+      pc.ondatachannel = e => { lanRoom.peers[0].dc = e.channel; setupLanGuestDc(e.channel); };
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+      await waitIce(pc);
+      const answerData = roomDataToQr(roomId, roomName, pc.localDescription.sdp);
+      lanHtml(`
+        <div class="lan-title">ПОКАЖИ ЭТОТ QR</div>
+        <div class="lan-sub">Пусть создатель отсканирует, или скопируй код ему</div>
+        <div class="lan-qr-wrap" id="lan-qr"></div>
+        <button class="lan-btn lan-btn-secondary" style="max-width:240px;padding:10px;" onclick="navigator.clipboard.writeText('${answerData}').then(()=>showToast('Код скопирован'))">📋 Скопировать код ответа</button>
+        <div class="lan-status">⏳ Ожидаю соединения...</div>
+      `);
+      new QRCode(document.getElementById('lan-qr'), { text:answerData, width:240, height:240, correctLevel:QRCode.CorrectLevel.M });
+    } catch(e) { lanHtml(`<div class="lan-status">❌ Неверный код</div><button class="lan-btn lan-btn-secondary" onclick="lanPasteOffer()">← Попробовать снова</button>`); }
+  }
+
+  function lanPasteAnswer(peerIdx) {
+    stopLanScan();
+    lanHtml(`
+      <div class="lan-title">ВСТАВИТЬ ОТВЕТ</div>
+      <div class="lan-sub">Попроси участника скопировать код ответа и пришли тебе</div>
+      <textarea class="lan-input" id="lan-code-input" placeholder="Вставь код участника..." rows="4" style="resize:none;font-size:11px;font-family:monospace;"></textarea>
+      <button class="lan-btn lan-btn-primary" onclick="lanSubmitAnswerCode(${peerIdx})">Применить →</button>
+    `);
+    setTimeout(() => document.getElementById('lan-code-input')?.focus(), 100);
+  }
+
+  async function lanSubmitAnswerCode(peerIdx) {
+    const raw = document.getElementById('lan-code-input')?.value.trim();
+    if (!raw) return;
+    try {
+      let answerSdp;
+      try { answerSdp = qrToRoomData(raw).s; } catch(e) { answerSdp = null; }
+      if (!answerSdp) throw new Error('Неверный код');
+      const { pc } = lanRoom.peers[peerIdx];
+      await pc.setRemoteDescription({ type:'answer', sdp:answerSdp });
+      lanHtml(`<div class="lan-icon">🔗</div><div class="lan-title">ПОДКЛЮЧАЮСЬ...</div><div class="lan-status">Устанавливаю соединение</div>`);
+    } catch(e) { lanHtml(`<div class="lan-status">❌ Неверный код</div><button class="lan-btn lan-btn-secondary" onclick="lanPasteAnswer(${peerIdx})">← Попробовать снова</button>`); }
   }
 
   // --- ОТКРЫТЬ ЭКРАН КОМНАТЫ ---
