@@ -513,7 +513,7 @@
       <div class="seed-cell"><span class="seed-num">24</span><input class="seed-cell-input" id="sw24" placeholder="слово" autocomplete="off" autocorrect="off" spellcheck="false"></div>
     </div>
     <div id="login-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Заполни все 24 слова</div>
-    <div class="reg-hint">Введи слова сид-фразы в нужном порядке.</div>
+    <div class="reg-hint">Введи слова в нужном порядке.<br>💡 Можно вставить всю фразу сразу в первое поле.</div>
     <div style="display:flex;gap:10px;width:100%;">
       <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="login()">ВОЙТИ</button>
@@ -524,9 +524,10 @@
 <!-- ОНБОРДИНГ -->
 <div id="onboarding" style="display:none;" class="ob-overlay">
   <div class="ob-content" id="ob-content"></div>
-  <div>
+  <div style="display:flex;flex-direction:column;align-items:center;gap:8px;width:100%;max-width:340px;">
     <div class="ob-dots" id="ob-dots"></div>
     <button class="ob-next-btn" id="ob-next-btn" onclick="nextObSlide()">Далее →</button>
+    <button class="ob-copy-btn" id="ob-back-btn" onclick="prevObSlide()" style="display:none;">← Назад</button>
   </div>
 </div>
 
@@ -642,7 +643,7 @@
         <div class="avatar" id="cv-avatar" style="width:38px;height:38px;border-radius:12px;font-size:14px;">?</div>
         <div class="chat-topbar-info">
           <div class="chat-topbar-name" id="cv-name">—</div>
-          <div class="chat-topbar-sub">прототип</div>
+          <div class="chat-topbar-sub" id="cv-sub"></div>
         </div>
         <div class="chat-topbar-actions">
           <div class="chat-menu-wrap">
@@ -1243,7 +1244,8 @@
     if (diff < 60) return 'только что';
     if (diff < 3600) return Math.floor(diff/60) + ' мин';
     if (diff < 86400) return Math.floor(diff/3600) + ' ч';
-    return now();
+    const d = new Date(ts);
+    return d.getDate() + '.' + String(d.getMonth()+1).padStart(2,'0');
   }
 
   // Обновляем время каждую минуту
@@ -1256,6 +1258,11 @@
     const keys = Object.keys(chats);
     if (keys.length===0) { empty.style.display='flex'; return; }
     empty.style.display='none';
+    keys.sort((a, b) => {
+      const aLast = chats[a].messages[chats[a].messages.length-1]?.timestamp || 0;
+      const bLast = chats[b].messages[chats[b].messages.length-1]?.timestamp || 0;
+      return bLast - aLast;
+    });
     keys.forEach(nick => {
       if (nick === '__lan__') return; // старый формат, пропускаем
       const chat = chats[nick];
@@ -1312,6 +1319,7 @@
     av.style.background = chats[nick].color;
     av.style.fontSize = '';
     document.getElementById('cv-name').textContent = '@' + nick;
+    document.getElementById('cv-sub').textContent = '';
     applyBg(chats[nick].bg || '');
     renderMessages();
     renderChatList();
@@ -1435,7 +1443,9 @@
       if (!sent) { showToast('Нет активных участников'); return; }
       chats[currentChat].messages.push({ enc:{ plain:text }, own:true, time:t, timestamp:Date.now(), sender:lanRoom.myLabel });
       input.value = '';
+      saveState();
       renderMessages();
+      renderChatList();
       return;
     }
     const enc = await encryptText(text);
@@ -1448,18 +1458,6 @@
     renderMessages();
     renderChatList();
     saveState();
-
-    // Симуляция "печатает..." через 1 сек
-    setTimeout(() => {
-      if (!chats[currentChat]) return;
-      chats[currentChat].typing = true;
-      renderMessages();
-      setTimeout(() => {
-        if (!chats[currentChat]) return;
-        chats[currentChat].typing = false;
-        renderMessages();
-      }, 2000);
-    }, 1000);
   }
 
   function deleteCurrentChat() {
@@ -1812,9 +1810,15 @@
   function waitIce(pc) {
     return new Promise(resolve => {
       if (pc.iceGatheringState === 'complete') { resolve(); return; }
-      const h = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', h); resolve(); } };
+      let n = 0;
+      const dotsTimer = setInterval(() => {
+        const st = document.getElementById('lan-status');
+        if (st) st.textContent = 'Подготовка' + '.'.repeat((++n % 4));
+      }, 400);
+      const done = () => { clearInterval(dotsTimer); resolve(); };
+      const h = () => { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', h); done(); } };
       pc.addEventListener('icegatheringstatechange', h);
-      setTimeout(resolve, 7000);
+      setTimeout(done, 7000);
     });
   }
 
@@ -1937,6 +1941,15 @@
   }
 
   // --- DATA CHANNELS ---
+  function updateLanTopbar() {
+    if (!lanRoom) return;
+    const chatKey = `__lan__:${lanRoom.id}`;
+    if (currentChat !== chatKey) return;
+    const online = lanRoom.peers.filter(p => p.active).length + 1;
+    const sub = document.getElementById('cv-sub');
+    if (sub) sub.textContent = online + ' в сети';
+  }
+
   function setupLanHostDc(dc, peerIdx) {
     dc.onopen = () => {
       lanRoom.peers[peerIdx].active = true;
@@ -1967,7 +1980,7 @@
       if (peer) peer.active = false;
       const chatKey = `__lan__:${lanRoom.id}`;
       lanStoreSys(chatKey, `${peer?.label || 'Участник'} отключился`);
-      if (currentChat === chatKey) renderMessages();
+      if (currentChat === chatKey) { renderMessages(); updateLanTopbar(); }
     };
     dc.onerror = () => {};
   }
@@ -1978,6 +1991,7 @@
       if (peer) peer.active = true;
       closeLanModal();
       openLanRoom();
+      updateLanTopbar();
     };
     dc.onmessage = e => {
       if (!lanRoom) return;
@@ -1996,7 +2010,7 @@
       if (!lanRoom) return;
       const chatKey = `__lan__:${lanRoom.id}`;
       lanStoreSys(chatKey, 'Хост отключился');
-      if (currentChat === chatKey) renderMessages();
+      if (currentChat === chatKey) { renderMessages(); updateLanTopbar(); }
     };
     dc.onerror = () => {};
   }
@@ -2132,6 +2146,7 @@
     currentChat = chatKey;
     applyBg(chats[chatKey].bg || '');
     renderMessages();
+    updateLanTopbar();
   }
 
   // --- ДОБАВИТЬ УЧАСТНИКА (из меню чата, только хост) ---
@@ -2295,6 +2310,12 @@
     const dots = document.getElementById('ob-dots');
     dots.innerHTML = obList.map((_,i) => `<div class="ob-dot${i===obIdx?' active':''}"></div>`).join('');
     document.getElementById('ob-next-btn').textContent = obIdx === obList.length-1 ? 'НАЧАТЬ →' : 'Далее →';
+    const backBtn = document.getElementById('ob-back-btn');
+    if (backBtn) backBtn.style.display = obIdx > 0 ? 'block' : 'none';
+  }
+
+  function prevObSlide() {
+    if (obIdx > 0) { obIdx--; renderObSlide(false); }
   }
 
   function nextObSlide() {
