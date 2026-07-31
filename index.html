@@ -583,7 +583,7 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
-      <div class="settings-item" onclick="showSeedModal()">
+      <div class="settings-item" id="seed-menu-item" onclick="showSeedModal()">
         <div class="settings-item-icon">🔑</div>
         <div class="settings-item-info">
           <div class="settings-item-name">Сид-фраза</div>
@@ -818,7 +818,13 @@
     } catch(e) {}
   }
 
+  function updateSeedMenuVisibility() {
+    const item = document.getElementById('seed-menu-item');
+    if (item) item.style.display = authMode === 'simple' ? 'none' : '';
+  }
+
   function finishAuth(isNew = false, mode = 'anon') {
+    updateSeedMenuVisibility();
     document.getElementById('profile-nick').textContent = '@' + myName;
     const statusEl = document.getElementById('profile-status-el');
     if (statusEl) statusEl.textContent = myStatus ? myStatus : '● В сети';
@@ -879,6 +885,7 @@
       if (myAvatar) { el.innerHTML = '<img src="' + myAvatar + '" alt="avatar">'; }
       else { el.textContent = myName[0].toUpperCase(); }
       document.getElementById('register-screen').style.display = 'none';
+      updateSeedMenuVisibility();
       const app = document.getElementById('app');
       app.style.display = 'flex';
       app.classList.add('visible');
@@ -1310,6 +1317,7 @@
       return;
     }
     currentChat = nick;
+    if (chats[nick].unread) { chats[nick].unread = 0; saveState(); }
     closeSidebar();
     document.getElementById('chats-screen').classList.add('hidden');
     document.getElementById('chat-view').classList.add('active');
