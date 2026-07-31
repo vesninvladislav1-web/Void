@@ -626,7 +626,12 @@
       <div class="chats-topbar">
         <button class="icon-btn burger-btn" onclick="toggleSidebar()">☰</button>
         <div class="chats-topbar-title">Сообщения</div>
-        <button class="icon-btn" onclick="showLanModal()" title="LAN чат">📡</button>
+        <div class="chat-menu-wrap">
+          <button class="icon-btn" onclick="toggleChatsMenu()" id="chats-menu-btn">⋮</button>
+          <div class="chat-menu" id="chats-menu">
+            <button class="chat-menu-item" onclick="showLanModal();closeChatsMenu()">📡 LAN чат</button>
+          </div>
+        </div>
       </div>
 
       <div class="chats-search-wrap">
@@ -1142,6 +1147,20 @@
   });
 
   // ===== МЕНЮ ЧАТА =====
+  function toggleChatsMenu() {
+    const menu = document.getElementById('chats-menu');
+    menu.classList.toggle('open');
+    if (menu.classList.contains('open')) {
+      setTimeout(() => document.addEventListener('click', closeChatsMenuOutside, { once:true }), 0);
+    }
+  }
+  function closeChatsMenu() {
+    document.getElementById('chats-menu')?.classList.remove('open');
+  }
+  function closeChatsMenuOutside(e) {
+    if (!e.target.closest('#chats-menu-btn')) closeChatsMenu();
+  }
+
   function toggleChatMenu() {
     const menu = document.getElementById('chat-menu');
     menu.classList.toggle('open');
