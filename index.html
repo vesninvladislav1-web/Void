@@ -1699,8 +1699,24 @@
   }
 
   function applyBg(value, save) {
+    const view = document.getElementById('chat-view');
+    const topbar = view?.querySelector('.chat-topbar');
+    const inputArea = view?.querySelector('.input-area');
+    const replyBar = view?.querySelector('.reply-bar');
     const messages = document.getElementById('messages');
-    if (messages) messages.style.background = value || '';
+    if (value) {
+      if (view) view.style.background = value;
+      if (messages) messages.style.background = 'transparent';
+      if (topbar) { topbar.style.background = 'rgba(28,25,23,0.55)'; topbar.style.backdropFilter = 'blur(20px)'; topbar.style.webkitBackdropFilter = 'blur(20px)'; }
+      if (inputArea) { inputArea.style.background = 'rgba(28,25,23,0.55)'; inputArea.style.backdropFilter = 'blur(20px)'; inputArea.style.webkitBackdropFilter = 'blur(20px)'; }
+      if (replyBar) { replyBar.style.background = 'rgba(28,25,23,0.55)'; }
+    } else {
+      if (view) view.style.background = '';
+      if (messages) messages.style.background = '';
+      if (topbar) { topbar.style.background = ''; topbar.style.backdropFilter = ''; topbar.style.webkitBackdropFilter = ''; }
+      if (inputArea) { inputArea.style.background = ''; inputArea.style.backdropFilter = ''; inputArea.style.webkitBackdropFilter = ''; }
+      if (replyBar) { replyBar.style.background = ''; }
+    }
     if (save && currentChat) {
       chats[currentChat].bg = value;
       saveState();
