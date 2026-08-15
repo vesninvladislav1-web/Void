@@ -163,7 +163,7 @@
   .chats-screen { display:flex; flex-direction:column; height:100%; }
   .chats-screen.hidden { display:none; }
 
-  .chats-topbar { padding:16px 20px; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; flex-shrink:0; }
+  .chats-topbar { padding:16px 20px; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; flex-shrink:0; position:relative; z-index:10; }
   .chats-topbar-title { font-family:'Space Mono',monospace; font-size:16px; font-weight:700; letter-spacing:2px; flex:1; }
 
   .chats-search-wrap { padding:12px 16px; border-bottom:1px solid var(--border); position:relative; flex-shrink:0; }
@@ -205,7 +205,7 @@
   .chat-topbar-actions { display:flex; gap:6px; align-items:center; }
   .chat-topbar-actions::before { content:''; width:1px; height:20px; background:var(--border); margin-right:2px; }
   .chat-menu-wrap { position:relative; }
-  .chat-menu { position:absolute; right:0; top:50px; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:var(--radius-lg); padding:6px; display:flex; flex-direction:column; gap:2px; min-width:170px; z-index:200; transform-origin:top right; transform:scale(0.85); opacity:0; pointer-events:none; transition:transform 0.18s cubic-bezier(0.34,1.56,0.64,1), opacity 0.15s; }
+  .chat-menu { position:absolute; right:0; top:50px; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:var(--radius-lg); padding:6px; display:flex; flex-direction:column; gap:2px; min-width:170px; z-index:500; transform-origin:top right; transform:scale(0.85); opacity:0; pointer-events:none; transition:transform 0.18s cubic-bezier(0.34,1.56,0.64,1), opacity 0.15s; }
   .chat-menu.open { transform:scale(1); opacity:1; pointer-events:all; }
   .chat-menu-item { display:flex; align-items:center; gap:10px; padding:11px 14px; border-radius:var(--radius-md); background:none; border:none; color:var(--text); font-size:14px; cursor:pointer; width:100%; text-align:left; transition:background 0.15s; font-family:'Inter',sans-serif; }
   .chat-menu-item:hover { background:var(--glass); }
