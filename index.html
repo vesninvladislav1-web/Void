@@ -997,7 +997,7 @@
 
   function connectDmWs() {
     if (!myName || !myRawPass || authMode !== 'simple') return;
-    if (dmWs && dmWs.readyState <= 1) return; // уже подключён
+    if (dmWs && dmWs.readyState <= 1) return;
     dmWs = new WebSocket(WS_URL);
     dmWs.onopen = () => {
       dmWs.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
@@ -1005,6 +1005,17 @@
     dmWs.onmessage = e => {
       try {
         const msg = JSON.parse(e.data);
+        if (msg.type === 'auth-fail') {
+          // Аккаунт не найден на сервере — регистрируем автоматически
+          fetch(API + '/api/register', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nick: myName, password: myRawPass })
+          }).then(() => {
+            // Повторяем авторизацию
+            dmWs.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
+          }).catch(() => {});
+        }
         if (msg.type === 'dm') {
           const key = msg.from;
           if (!chats[key]) chats[key] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
@@ -1014,11 +1025,12 @@
           saveState();
           if (currentChat === key) renderMessages();
           renderChatList();
+          sendNotification(key, msg.text.startsWith('__STICKER__') ? '🎭 Стикер' : msg.text);
         }
       } catch(e) {}
     };
     dmWs.onclose = () => {
-      setTimeout(connectDmWs, 4000); // реконнект
+      setTimeout(connectDmWs, 4000);
     };
     dmWs.onerror = () => {};
   }
