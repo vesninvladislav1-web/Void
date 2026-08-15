@@ -848,6 +848,7 @@
     clearInterval(neonInterval);
     saveState();
     requestNotifications();
+    if (mode === 'simple') connectDmWs();
     const reg = document.getElementById('register-screen');
     reg.classList.add('hide');
     setTimeout(() => {
@@ -981,6 +982,40 @@
   let myStatus = '';
   let replyTo = null;
 
+  // ===== СЕРВЕР =====
+  const API = 'https://voidm.site';
+  const WS_URL = 'wss://voidm.site/signal';
+  let myRawPass = null; // пароль в памяти для auth WebSocket (не сохраняется)
+  let dmWs = null;      // WebSocket для личных сообщений
+
+  function connectDmWs() {
+    if (!myName || !myRawPass || authMode !== 'simple') return;
+    if (dmWs && dmWs.readyState <= 1) return; // уже подключён
+    dmWs = new WebSocket(WS_URL);
+    dmWs.onopen = () => {
+      dmWs.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
+    };
+    dmWs.onmessage = e => {
+      try {
+        const msg = JSON.parse(e.data);
+        if (msg.type === 'dm') {
+          const key = msg.from;
+          if (!chats[key]) chats[key] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
+          const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          chats[key].messages.push({ enc: { plain: msg.text }, own: false, time: timeStr, timestamp: msg.timestamp });
+          if (currentChat !== key) { chats[key].unread = (chats[key].unread || 0) + 1; }
+          saveState();
+          if (currentChat === key) renderMessages();
+          renderChatList();
+        }
+      } catch(e) {}
+    };
+    dmWs.onclose = () => {
+      setTimeout(connectDmWs, 4000); // реконнект
+    };
+    dmWs.onerror = () => {};
+  }
+
   async function registerSimple() {
     const nick = document.getElementById('sreg-nick').value.trim();
     const pass = document.getElementById('sreg-pass').value;
@@ -993,8 +1028,23 @@
     if (!/[^a-zA-Z0-9]/.test(pass)) { err.textContent='Нужен хотя бы один знак препинания (!@#$...)'; err.style.display='block'; return; }
     if (pass !== pass2) { err.textContent='Пароли не совпадают'; err.style.display='block'; return; }
     err.style.display='none';
+    // Регистрация на сервере
+    try {
+      const btn = document.querySelector('#simple-reg-form .reg-btn:last-child');
+      if (btn) btn.textContent = '...';
+      const r = await fetch(API + '/api/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick, password: pass })
+      });
+      const data = await r.json();
+      if (!r.ok) { err.textContent = data.error || 'Ошибка сервера'; err.style.display='block'; if(btn) btn.textContent='СОЗДАТЬ'; return; }
+    } catch(e) {
+      err.textContent = 'Нет связи с сервером'; err.style.display='block'; return;
+    }
     myName = nick;
     authMode = 'simple';
+    myRawPass = pass;
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
     currentSeed = [];
@@ -1007,13 +1057,26 @@
     const err = document.getElementById('slogin-error');
     err.style.display='none';
     if (!nick || !pass) { err.style.display='block'; return; }
-    const stored = JSON.parse(localStorage.getItem('void_user'));
-    if (!stored || stored.name !== nick || stored.authMode !== 'simple') { err.style.display='block'; return; }
-    const hash = await hashPassword(nick, pass);
-    if (hash !== stored.passwordHash) { err.style.display='block'; return; }
+    // Проверка на сервере
+    try {
+      const r = await fetch(API + '/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick, password: pass })
+      });
+      if (!r.ok) { err.textContent = 'Неверный ник или пароль'; err.style.display='block'; return; }
+    } catch(e) {
+      // Если нет связи — пробуем локальный вход
+      const stored = JSON.parse(localStorage.getItem('void_user'));
+      if (!stored || stored.name !== nick || stored.authMode !== 'simple') { err.textContent='Нет связи с сервером'; err.style.display='block'; return; }
+      const hash = await hashPassword(nick, pass);
+      if (hash !== stored.passwordHash) { err.style.display='block'; return; }
+    }
+    const stored = JSON.parse(localStorage.getItem('void_user')) || {};
     myName = nick;
     authMode = 'simple';
-    passwordHash = stored.passwordHash;
+    myRawPass = pass;
+    passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
     chats = JSON.parse(localStorage.getItem('void_chats')) || {};
     currentSeed = [];
@@ -1203,15 +1266,41 @@
     overlay.innerHTML = `
       <div class="modal">
         <div class="modal-title">${t('newChat')}</div>
-        <input class="modal-input" id="nick-input" placeholder="${t('newChatPh')}">
+        <div style="position:relative;width:100%;">
+          <input class="modal-input" id="nick-input" placeholder="${t('newChatPh')}" autocomplete="off" style="width:100%;">
+          <div id="nick-search-results" style="position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--bg3);border:1px solid var(--border);border-radius:12px;overflow:hidden;z-index:10;display:none;"></div>
+        </div>
         <div class="modal-btns">
           <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">${t('cancel')}</button>
           <button class="btn-primary" onclick="createChat()">${t('start')}</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
-    setTimeout(() => overlay.querySelector('#nick-input').focus(), 50);
-    overlay.querySelector('#nick-input').addEventListener('keydown', e => { if(e.key==='Enter') createChat(); if(e.key==='Escape') overlay.remove(); });
+    const inp = overlay.querySelector('#nick-input');
+    const results = overlay.querySelector('#nick-search-results');
+    setTimeout(() => inp.focus(), 50);
+    let searchTimer = null;
+    inp.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      const q = inp.value.trim();
+      if (q.length < 2) { results.style.display='none'; return; }
+      searchTimer = setTimeout(async () => {
+        try {
+          const r = await fetch(`${API}/api/search?q=${encodeURIComponent(q)}`);
+          const data = await r.json();
+          const users = (data.users || []).filter(u => u !== myName);
+          if (!users.length) { results.style.display='none'; return; }
+          results.innerHTML = users.map(u => `
+            <div onclick="document.getElementById('nick-input').value='${esc(u)}';document.getElementById('nick-search-results').style.display='none';"
+              style="padding:10px 14px;cursor:pointer;font-size:14px;color:var(--text);transition:background 0.15s;"
+              onmouseover="this.style.background='var(--bg2)'" onmouseout="this.style.background=''">
+              @${esc(u)}
+            </div>`).join('');
+          results.style.display='block';
+        } catch(e) { results.style.display='none'; }
+      }, 300);
+    });
+    inp.addEventListener('keydown', e => { if(e.key==='Enter') createChat(); if(e.key==='Escape') overlay.remove(); });
     overlay.addEventListener('click', e => { if(e.target===overlay) overlay.remove(); });
   }
 
@@ -1483,6 +1572,10 @@
       renderMessages();
       renderChatList();
       return;
+    }
+    // Отправка через сервер если авторизованы
+    if (authMode === 'simple' && dmWs?.readyState === 1) {
+      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text }));
     }
     const enc = await encryptText(text);
     const msg = {enc, own:true, time:now(), timestamp:Date.now()};
