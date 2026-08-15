@@ -557,6 +557,7 @@
       </label>
       <div class="profile-nick" id="profile-nick">—</div>
       <div class="profile-status" id="profile-status-el" onclick="editStatus()">● В сети</div>
+      <div id="dm-conn-el" style="display:none;font-size:11px;color:#888;margin-top:2px;"></div>
     </div>
 
     <!-- Меню -->
@@ -848,7 +849,8 @@
     clearInterval(neonInterval);
     saveState();
     requestNotifications();
-    if (mode === 'simple') connectDmWs();
+    if (mode === 'simple') { updateDmStatus('wait'); connectDmWs(); }
+    else { const dmEl = document.getElementById('dm-conn-el'); if(dmEl) dmEl.style.display='none'; }
     const reg = document.getElementById('register-screen');
     reg.classList.add('hide');
     setTimeout(() => {
@@ -992,30 +994,70 @@
   // ===== СЕРВЕР =====
   const API = 'https://voidm.site';
   const WS_URL = 'wss://voidm.site/signal';
-  let myRawPass = null; // пароль в памяти для auth WebSocket (не сохраняется)
-  let dmWs = null;      // WebSocket для личных сообщений
+  let myRawPass = null;    // пароль в памяти для auth WebSocket
+  let dmWs = null;         // WebSocket для личных сообщений
+  let dmWsAuthOk = false;  // успешно авторизован на сервере
+  let dmWsHeartbeat = null;// интервал keepalive ping
+
+  function updateDmStatus(status) {
+    const el = document.getElementById('dm-conn-el');
+    if (!el) return;
+    if (authMode !== 'simple') { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    if (status === 'ok')         { el.textContent = '🟢 Сервер подключён'; el.style.color = 'var(--online)'; }
+    else if (status === 'wait')  { el.textContent = '🟡 Подключение...';   el.style.color = '#F59E0B'; }
+    else                         { el.textContent = '🔴 Нет связи';        el.style.color = '#EF4444'; }
+  }
 
   function connectDmWs() {
     if (!myName || !myRawPass || authMode !== 'simple') return;
-    if (dmWs && dmWs.readyState <= 1) return;
+    if (dmWs && dmWs.readyState <= 1) return; // уже подключён или подключается
+    dmWsAuthOk = false;
+    updateDmStatus('wait');
+    console.log('[DM] Connecting...');
     dmWs = new WebSocket(WS_URL);
+
     dmWs.onopen = () => {
+      console.log('[DM] Connected, sending auth for', myName);
       dmWs.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
     };
+
     dmWs.onmessage = e => {
       try {
         const msg = JSON.parse(e.data);
+
+        if (msg.type === 'auth-ok') {
+          dmWsAuthOk = true;
+          updateDmStatus('ok');
+          console.log('[DM] Auth OK');
+          // Keepalive: ping каждые 25с чтобы nginx не закрыл соединение
+          clearInterval(dmWsHeartbeat);
+          dmWsHeartbeat = setInterval(() => {
+            if (dmWs?.readyState === 1) dmWs.send(JSON.stringify({ type: 'ping' }));
+          }, 25000);
+          return;
+        }
+
         if (msg.type === 'auth-fail') {
-          // Аккаунт не найден на сервере — регистрируем автоматически
+          dmWsAuthOk = false;
+          console.warn('[DM] Auth fail — trying auto-register');
+          // Аккаунт не найден — регистрируем автоматически
           fetch(API + '/api/register', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nick: myName, password: myRawPass })
-          }).then(() => {
-            // Повторяем авторизацию
-            dmWs.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
-          }).catch(() => {});
+          }).then(r => {
+            if (r.ok) {
+              console.log('[DM] Auto-registered, retrying auth');
+              dmWs.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
+            } else {
+              console.warn('[DM] Auto-register failed (nick taken with different password?)');
+              updateDmStatus('off');
+            }
+          }).catch(() => { console.warn('[DM] Auto-register network error'); updateDmStatus('off'); });
+          return;
         }
+
         if (msg.type === 'dm') {
           const key = msg.from;
           if (!chats[key]) chats[key] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
@@ -1027,12 +1069,19 @@
           renderChatList();
           sendNotification(key, msg.text.startsWith('__STICKER__') ? '🎭 Стикер' : msg.text);
         }
-      } catch(e) {}
+      } catch(ex) { console.error('[DM] Parse error', ex); }
     };
-    dmWs.onclose = () => {
+
+    dmWs.onclose = ev => {
+      console.log('[DM] Closed, code:', ev.code, '— reconnecting in 4s');
+      dmWsAuthOk = false;
+      clearInterval(dmWsHeartbeat);
+      dmWsHeartbeat = null;
+      updateDmStatus('off');
       setTimeout(connectDmWs, 4000);
     };
-    dmWs.onerror = () => {};
+
+    dmWs.onerror = ev => { console.error('[DM] WS error', ev); };
   }
 
   async function registerSimple() {
@@ -1592,8 +1641,11 @@
       return;
     }
     // Отправка через сервер если авторизованы
-    if (authMode === 'simple' && dmWs?.readyState === 1) {
+    if (authMode === 'simple' && dmWsAuthOk && dmWs?.readyState === 1) {
+      console.log('[DM] Sending dm to', currentChat);
       dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text }));
+    } else if (authMode === 'simple' && !dmWsAuthOk) {
+      console.warn('[DM] Not authed yet, message not relayed');
     }
     const enc = await encryptText(text);
     const msg = {enc, own:true, time:now(), timestamp:Date.now()};
@@ -1908,7 +1960,8 @@
     let stickerData = type === 'emoji' ? val : customStickers[parseInt(val)];
     const stickerText = '__STICKER__' + type + ':' + stickerData;
     // Отправить через сервер (только emoji — custom слишком большие)
-    if (authMode === 'simple' && type === 'emoji' && dmWs?.readyState === 1) {
+    if (authMode === 'simple' && type === 'emoji' && dmWsAuthOk && dmWs?.readyState === 1) {
+      console.log('[DM] Sending sticker dm to', currentChat);
       dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: stickerText }));
     }
     const enc = await encryptText(stickerText);

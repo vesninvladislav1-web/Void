@@ -87,6 +87,12 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // GET /api/status — проверка работы сервера
+  if (req.method === 'GET' && url.pathname === '/api/status') {
+    json(200, { ok: true, online: Object.keys(online), rooms: Object.keys(rooms) });
+    return;
+  }
+
   res.writeHead(404); res.end('{}');
 });
 
@@ -95,29 +101,56 @@ const wss = new WebSocketServer({ server });
 const rooms = {};    // LAN сигналинг: roomId -> { peerId: ws }
 const online = {};   // Личные чаты: nick -> ws
 
+// Heartbeat: пинг каждые 30с, убиваем клиентов без ответа
+const PING_INTERVAL = 30000;
+const heartbeat = setInterval(() => {
+  wss.clients.forEach(ws => {
+    if (ws.isAlive === false) {
+      ws.terminate();
+      return;
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}, PING_INTERVAL);
+
+wss.on('close', () => clearInterval(heartbeat));
+
 wss.on('connection', ws => {
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+
   let roomId = null, peerId = null, nick = null;
 
   ws.on('message', raw => {
     try {
       const msg = JSON.parse(raw);
 
+      // Клиентский keepalive ping — просто игнорируем
+      if (msg.type === 'ping') return;
+
       // --- Авторизация для личных чатов ---
       if (msg.type === 'auth') {
         const user = db.prepare('SELECT nick FROM users WHERE nick = ? AND password_hash = ?')
           .get(msg.nick, hashPw(msg.nick, msg.password));
-        if (!user) { ws.send(JSON.stringify({ type: 'auth-fail' })); return; }
+        if (!user) {
+          console.log('[auth] FAIL for', msg.nick);
+          ws.send(JSON.stringify({ type: 'auth-fail' }));
+          return;
+        }
         nick = user.nick;
         online[nick] = ws;
         ws.send(JSON.stringify({ type: 'auth-ok', nick }));
+        console.log('[auth] OK for', nick, '| online:', Object.keys(online));
         // Доставить накопленные сообщения
         const pending = db.prepare(
           'SELECT id, from_nick, text, timestamp FROM messages WHERE to_nick = ? AND delivered = 0 ORDER BY timestamp'
         ).all(nick);
-        pending.forEach(m => {
-          ws.send(JSON.stringify({ type: 'dm', from: m.from_nick, text: m.text, timestamp: m.timestamp }));
-        });
         if (pending.length) {
+          console.log('[auth] Delivering', pending.length, 'pending messages to', nick);
+          pending.forEach(m => {
+            ws.send(JSON.stringify({ type: 'dm', from: m.from_nick, text: m.text, timestamp: m.timestamp }));
+          });
           db.prepare('UPDATE messages SET delivered = 1 WHERE to_nick = ? AND delivered = 0').run(nick);
         }
         return;
@@ -129,13 +162,16 @@ wss.on('connection', ws => {
         if (!to || !text) return;
         const timestamp = Date.now();
         const payload = JSON.stringify({ type: 'dm', from: nick, text, timestamp });
-        if (online[to]?.readyState === 1) {
-          online[to].send(payload);
+        const recipientWs = online[to];
+        if (recipientWs && recipientWs.readyState === 1) {
+          recipientWs.send(payload);
           db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered) VALUES (?, ?, ?, ?, 1)')
             .run(nick, to, text, timestamp);
+          console.log('[dm] Delivered', nick, '->', to);
         } else {
           db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered) VALUES (?, ?, ?, ?, 0)')
             .run(nick, to, text, timestamp);
+          console.log('[dm] Stored (offline)', nick, '->', to);
         }
         return;
       }
@@ -153,7 +189,7 @@ wss.on('connection', ws => {
       if (msg.to && roomId && rooms[roomId]?.[msg.to]) {
         rooms[roomId][msg.to].send(JSON.stringify({ ...msg, from: peerId }));
       }
-    } catch(e) {}
+    } catch(e) { console.error('[ws] Error:', e.message); }
   });
 
   ws.on('close', () => {
@@ -162,7 +198,10 @@ wss.on('connection', ws => {
       broadcast(roomId, peerId, { type: 'peer-left', peer: peerId });
       if (!Object.keys(rooms[roomId]).length) delete rooms[roomId];
     }
-    if (nick && online[nick] === ws) delete online[nick];
+    if (nick && online[nick] === ws) {
+      delete online[nick];
+      console.log('[close]', nick, 'offline | online:', Object.keys(online));
+    }
   });
 });
 
