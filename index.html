@@ -894,7 +894,14 @@
     if (loadState()) {
       clearInterval(neonInterval);
       requestNotifications();
-      if (currentSeed.length) cryptoKey = await deriveKey(currentSeed);
+      if (authMode === 'simple') {
+        const savedPass = sessionStorage.getItem('void_sess_pass');
+        if (savedPass) {
+          myRawPass = savedPass;
+          cryptoKey = await deriveKey([myName, savedPass]);
+          connectDmWs();
+        }
+      } else if (currentSeed.length) cryptoKey = await deriveKey(currentSeed);
       document.getElementById('profile-nick').textContent = '@' + myName;
       const el = document.getElementById('profile-avatar-el');
       if (myAvatar) { el.innerHTML = '<img src="' + myAvatar + '" alt="avatar">'; }
@@ -1042,6 +1049,7 @@
     myName = nick;
     authMode = 'simple';
     myRawPass = pass;
+    sessionStorage.setItem('void_sess_pass', pass);
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
     currentSeed = [];
@@ -1073,6 +1081,7 @@
     myName = nick;
     authMode = 'simple';
     myRawPass = pass;
+    sessionStorage.setItem('void_sess_pass', pass);
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
     chats = JSON.parse(localStorage.getItem('void_chats')) || {};
@@ -1882,10 +1891,15 @@
   }
 
   async function sendSticker(val, type) {
-    if (!currentChat) return;
+    if (!currentChat || currentChat.startsWith('__lan__:')) return;
     document.getElementById('sticker-panel').style.display = 'none';
     let stickerData = type === 'emoji' ? val : customStickers[parseInt(val)];
-    const enc = await encryptText('__STICKER__' + type + ':' + stickerData);
+    const stickerText = '__STICKER__' + type + ':' + stickerData;
+    // Отправить через сервер (только emoji — custom слишком большие)
+    if (authMode === 'simple' && type === 'emoji' && dmWs?.readyState === 1) {
+      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: stickerText }));
+    }
+    const enc = await encryptText(stickerText);
     chats[currentChat].messages.push({enc, own:true, time:now(), timestamp:Date.now(), isSticker:true});
     playSound();
     renderMessages();
