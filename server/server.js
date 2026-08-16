@@ -12,6 +12,8 @@ const ADMIN_PASS    = process.env.VOID_ADMIN_PASSWORD || '';
 const MAX_BODY      = 16 * 1024;        // максимум тела HTTP-запроса
 const MAX_TEXT      = 4000;             // максимум длины сообщения
 const MAX_STICKER   = 128 * 1024;       // картинка-стикер приходит как data:URI
+const MAX_AVATAR    = 96 * 1024;        // аватар тоже data:URI
+const MAX_AVATAR_BODY = 128 * 1024;     // тело запроса с аватаром
 const MAX_PAYLOAD   = 256 * 1024;       // максимум размера WS-кадра
 const MAX_PEERS     = 16;               // максимум участников LAN-комнаты
 const MAX_ROOMS     = 500;              // максимум одновременных LAN-комнат
@@ -55,6 +57,8 @@ db.exec(`
   if (!cols.includes('ban_reason')) db.exec('ALTER TABLE users ADD COLUMN ban_reason TEXT');
   // Аккаунты по сид-фразе: ищем владельца по одной только фразе, без ника
   if (!cols.includes('seed_lookup')) db.exec('ALTER TABLE users ADD COLUMN seed_lookup TEXT');
+  // Аватар виден собеседникам, поэтому живёт на сервере, а не только локально
+  if (!cols.includes('avatar')) db.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_seed ON users(seed_lookup) WHERE seed_lookup IS NOT NULL');
 }
 
@@ -62,6 +66,8 @@ const qUserByNick  = db.prepare('SELECT nick, password_hash, banned, is_admin, b
 const qNickExists  = db.prepare('SELECT nick, banned FROM users WHERE nick = ? COLLATE NOCASE');
 const qInsertUser  = db.prepare('INSERT INTO users (nick, password_hash) VALUES (?, ?)');
 const qInsertSeed  = db.prepare('INSERT INTO users (nick, password_hash, seed_lookup) VALUES (?, ?, ?)');
+const qSetAvatar   = db.prepare('UPDATE users SET avatar = ? WHERE nick = ?');
+const qGetAvatar   = db.prepare('SELECT nick, avatar FROM users WHERE nick = ? COLLATE NOCASE');
 const qUserBySeed  = db.prepare('SELECT nick, password_hash, banned, is_admin, ban_reason FROM users WHERE seed_lookup = ?');
 const qUpdateHash  = db.prepare('UPDATE users SET password_hash = ? WHERE nick = ?');
 const qSearchUsers = db.prepare("SELECT nick FROM users WHERE nick LIKE ? ESCAPE '\\' ORDER BY nick LIMIT 10");
@@ -261,12 +267,13 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify(data));
   };
 
-  const readBody = (cb) => {
+  const readBody = (cb, maxBody) => {
+    const limit = maxBody || MAX_BODY;
     let body = '', aborted = false;
     req.on('data', c => {
       if (aborted) return;
       body += c;
-      if (body.length > MAX_BODY) {
+      if (body.length > limit) {
         aborted = true;
         json(413, { error: 'Слишком большой запрос' });
         req.destroy();
@@ -368,6 +375,49 @@ const server = http.createServer((req, res) => {
       }
       if (row.banned) return json(403, { error: 'Аккаунт заблокирован', reason: row.ban_reason || null });
       json(200, { ok: true, nick: row.nick });
+    });
+    return;
+  }
+
+  // ===== АВАТАРЫ =====
+  // Аватар публичный по смыслу: его должны видеть собеседники.
+  // Читать может кто угодно, менять — только владелец аккаунта.
+  if (req.method === 'POST' && url.pathname === '/api/avatar') {
+    if (!rateLimit('avatar:' + clientIp(req), 30, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+
+      const avatar = body.avatar;
+      if (avatar === null || avatar === '') {
+        qSetAvatar.run(null, u.nick);
+        return json(200, { ok: true, nick: u.nick, avatar: null });
+      }
+      if (typeof avatar !== 'string' || !/^data:image\/(png|jpeg|webp);base64,/.test(avatar)) {
+        return json(400, { error: 'Нужна картинка' });
+      }
+      if (avatar.length > MAX_AVATAR) return json(413, { error: 'Картинка слишком большая' });
+      qSetAvatar.run(avatar, u.nick);
+      console.log('[avatar] Обновлён у', u.nick, '(' + Math.round(avatar.length / 1024) + ' КБ)');
+      json(200, { ok: true, nick: u.nick });
+    }, MAX_AVATAR_BODY);
+    return;
+  }
+
+  // Пачкой: клиенту нужны аватары всех собеседников сразу
+  if (req.method === 'POST' && url.pathname === '/api/avatars') {
+    readBody((body) => {
+      const nicks = Array.isArray(body.nicks) ? body.nicks.slice(0, 50) : [];
+      const out = {};
+      for (const n of nicks) {
+        if (typeof n !== 'string' || !n.trim()) continue;
+        const row = qGetAvatar.get(n.trim());
+        if (row) out[row.nick] = row.avatar || null;
+      }
+      json(200, { ok: true, avatars: out });
     });
     return;
   }

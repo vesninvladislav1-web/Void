@@ -185,6 +185,7 @@
   .chat-item.active { background:var(--glass2); }
   .chat-item.active::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); border-radius:0 2px 2px 0; }
 
+  .avatar img { width:100%; height:100%; object-fit:cover; }
   .avatar { width:46px; height:46px; border-radius:15px; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:700; color:white; flex-shrink:0; font-family:'Space Mono',monospace; overflow:hidden; }
   .chat-info { flex:1; min-width:0; }
   .chat-name { font-size:14px; font-weight:500; color:var(--text); margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -229,7 +230,8 @@
   .msg-wrap:not(.own) { animation:msgFromLeft 0.22s cubic-bezier(0.25,0.46,0.45,0.94); }
   @keyframes msgFromRight { from{opacity:0;transform:translateX(20px)} to{opacity:1;transform:none} }
   @keyframes msgFromLeft  { from{opacity:0;transform:translateX(-20px)} to{opacity:1;transform:none} }
-  .msg-avatar-sm { width:28px; height:28px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:white; flex-shrink:0; font-family:'Space Mono',monospace; cursor:pointer; }
+  .msg-avatar-sm img { width:100%; height:100%; object-fit:cover; }
+  .msg-avatar-sm { width:28px; height:28px; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:white; flex-shrink:0; font-family:'Space Mono',monospace; cursor:pointer; }
   .bubble { padding:10px 14px 8px; border-radius:var(--radius-lg); font-size:14px; line-height:1.5; word-break:break-word; overflow:hidden; }
   .bubble::after { content:''; display:table; clear:both; }
   .msg-time-inline { float:right; margin-left:10px; margin-top:2px; font-size:10px; font-family:'Space Mono',monospace; white-space:nowrap; opacity:0.55; display:flex; align-items:center; gap:3px; position:relative; bottom:-2px; }
@@ -677,7 +679,7 @@
         <div class="settings-item-icon">ℹ️</div>
         <div class="settings-item-info">
           <div class="settings-item-name">О Void</div>
-          <div class="settings-item-sub">Версия 0.1 · прототип</div>
+          <div class="settings-item-sub">Версия 1.0</div>
         </div>
         <div class="settings-item-arrow">›</div>
       </div>
@@ -1045,6 +1047,7 @@
     // Переписка этого аккаунта, если он уже был на устройстве
     try { chats = JSON.parse(localStorage.getItem('void_chats:' + acctId(serverNick))) || {}; } catch(e) { chats = {}; }
     currentChat = null;
+    restoreProfileFields(serverNick);
     applyPrefs();
     finishAuth(false, 'anon');
   }
@@ -1081,6 +1084,15 @@
   }
 
   // Поднимает в память состояние конкретного аккаунта
+  // При входе профиль надо поднять из сохранённого аккаунта, иначе
+  // saveState() затрёт аватар и статус пустыми значениями
+  function restoreProfileFields(nick) {
+    let u = null;
+    try { u = JSON.parse(localStorage.getItem('void_acct:' + acctId(nick))); } catch(e) {}
+    myAvatar = (u && u.avatar) || avatarCache[nick] || null;
+    myStatus = (u && u.myStatus) || '';
+  }
+
   function loadAccountInto(id) {
     let user = null;
     try { user = JSON.parse(localStorage.getItem('void_acct:' + id)); } catch(e) {}
@@ -1146,6 +1158,7 @@
     // Оба типа аккаунтов живут на сервере, значит обоим нужен WebSocket
     if (myRawPass) { updateDmStatus('wait'); connectDmWs(); }
     else { const dmEl = document.getElementById('dm-conn-el'); if(dmEl) dmEl.style.display='none'; }
+    syncAvatars();
     const reg = document.getElementById('register-screen');
     reg.classList.add('hide');
     setTimeout(() => {
@@ -1215,6 +1228,7 @@
       if (myAvatar) { el.innerHTML = '<img src="' + myAvatar + '" alt="avatar">'; }
       else { el.textContent = myName[0].toUpperCase(); }
       document.getElementById('register-screen').style.display = 'none';
+      syncAvatars();
       updateAccountsMenu();
       updateSeedMenuVisibility();
       const app = document.getElementById('app');
@@ -1573,6 +1587,7 @@
     cryptoKey = await deriveKey([nick, pass]);
     currentSeed = [];
     chats = {}; currentChat = null;   // новый аккаунт — чужую переписку не наследуем
+    myAvatar = null; myStatus = '';
     finishAuth(true, 'simple');
   }
 
@@ -1613,6 +1628,7 @@
     try { chats = JSON.parse(localStorage.getItem('void_chats:' + acctId(nick))) || {}; } catch(e) { chats = {}; }
     currentSeed = [];
     currentChat = null;
+    restoreProfileFields(nick);
     applyPrefs();
     finishAuth(false, 'simple');
   }
@@ -1658,24 +1674,104 @@
     storeSessionPass(token, true);
     cryptoKey = await deriveKey(currentSeed);
     chats = {}; currentChat = null;   // новый аккаунт — чужую переписку не наследуем
+    myAvatar = null; myStatus = '';
     finishAuth(true, 'anon');
   }
 
   async function register() { return registerAnon(); }
 
   // ===== АВАТАР =====
-  function pickAvatar() { document.getElementById('avatar-input').click(); }
-  function loadAvatar(e) {
-    const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      myAvatar = ev.target.result;
+  const AVATAR_MAX = 90 * 1024;        // с запасом под лимит сервера (96 КБ)
+  let avatarCache = {};                // ник -> data:URI | null
+
+  function loadAvatarCache() {
+    try { avatarCache = JSON.parse(localStorage.getItem('void_avatars')) || {}; }
+    catch(e) { avatarCache = {}; }
+  }
+
+  function saveAvatarCache() {
+    try { localStorage.setItem('void_avatars', JSON.stringify(avatarCache)); } catch(e) {}
+  }
+
+  // Аватар собеседника: из кэша, иначе первая буква ника на цветном фоне
+  function avatarInner(nick, fallbackChar) {
+    const src = avatarCache[nick];
+    return src ? '<img src="' + src + '" alt="">'
+               : (fallbackChar !== undefined ? fallbackChar : (nick[0] || '?').toUpperCase());
+  }
+
+  // Подтягиваем аватары собеседников пачкой — по одному было бы много запросов
+  async function fetchAvatars(nicks) {
+    const list = [...new Set(nicks.filter(n => n && !n.startsWith('__lan__:')))].slice(0, 50);
+    if (!list.length) return;
+    try {
+      const r = await fetch(API + '/api/avatars', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nicks: list })
+      });
+      if (!r.ok) return;
+      const data = await r.json();
+      let changed = false;
+      for (const [nick, av] of Object.entries(data.avatars || {})) {
+        if (avatarCache[nick] !== av) { avatarCache[nick] = av; changed = true; }
+      }
+      if (changed) { saveAvatarCache(); renderChatList(); if (currentChat) renderMessages(); refreshChatHeaderAvatar(); }
+    } catch(e) { /* нет связи — покажем буквы */ }
+  }
+
+  function refreshChatHeaderAvatar() {
+    const av = document.getElementById('cv-avatar');
+    if (!av || !currentChat || currentChat.startsWith('__lan__:')) return;
+    av.innerHTML = avatarInner(currentChat);
+  }
+
+  // Аватар мог быть загружен с другого устройства — забираем его с сервера
+  async function syncAvatars() {
+    const nicks = Object.keys(chats).filter(n => !n.startsWith('__lan__:'));
+    if (myName) nicks.push(myName);
+    await fetchAvatars(nicks);
+    const mine = avatarCache[myName];
+    if (mine && mine !== myAvatar) {
+      myAvatar = mine;
       const el = document.getElementById('profile-avatar-el');
-      el.innerHTML = `<img src="${myAvatar}" alt="avatar">`;
+      if (el) el.innerHTML = '<img src="' + mine + '" alt="avatar">';
       saveState();
-    };
-    reader.readAsDataURL(file);
+    }
+  }
+
+  loadAvatarCache();
+
+  function pickAvatar() { document.getElementById('avatar-input').click(); }
+
+  async function loadAvatar(e) {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { showToast('Нужен файл-картинка'); return; }
+
+    let data;
+    // Фото с камеры весит мегабайты — без сжатия оно не уходит на сервер
+    try { data = await compressImage(file, 256, AVATAR_MAX); }
+    catch(err) { showToast(err.message || 'Не удалось обработать картинку'); return; }
+
+    myAvatar = data;
+    avatarCache[myName] = data;
+    saveAvatarCache();
+    document.getElementById('profile-avatar-el').innerHTML = '<img src="' + data + '" alt="avatar">';
+    saveState();
+    renderChatList();
+
+    // Публикуем: без этого аватар видел только сам владелец
+    if (!myRawPass) { showToast('Аватар сохранён только на устройстве'); return; }
+    try {
+      const r = await fetch(API + '/api/avatar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass, avatar: data })
+      });
+      const res = await r.json().catch(() => ({}));
+      if (r.ok) showToast('Аватар обновлён');
+      else showToast(res.error || 'Не удалось отправить аватар');
+    } catch(err) { showToast('Нет связи — аватар пока только на устройстве'); }
   }
 
   // ===== ТЕМА =====
@@ -1732,7 +1828,7 @@
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `<div class="modal" style="align-items:center;gap:12px;text-align:center;">
-      <div class="avatar" style="width:72px;height:72px;border-radius:22px;font-size:28px;background:${chat.color};display:flex;align-items:center;justify-content:center;font-weight:700;color:white;font-family:'Space Mono',monospace;">${currentChat[0].toUpperCase()}</div>
+      <div class="avatar" style="width:72px;height:72px;border-radius:22px;font-size:28px;background:${chat.color};display:flex;align-items:center;justify-content:center;font-weight:700;color:white;font-family:'Space Mono',monospace;overflow:hidden;">${avatarInner(currentChat)}</div>
       <div style="font-family:'Space Mono',monospace;font-size:16px;font-weight:700;">@${esc(currentChat)}</div>
       <div style="font-size:12px;color:var(--text3);">${chat.messages.length} сообщений</div>
       <button class="btn-primary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
@@ -1956,7 +2052,7 @@
       const unread = chat.unread || 0;
       const isLan = nick.startsWith('__lan__:');
       const displayName = isLan ? esc(chat.name || 'LAN') : '@' + esc(nick);
-      const avatarContent = isLan ? '📡' : nick[0].toUpperCase();
+      const avatarContent = isLan ? '📡' : avatarInner(nick);
       const lastText = last
         ? (last.system
             ? `<i>${esc(last.text)}</i>`
@@ -2003,7 +2099,7 @@
     document.getElementById('chat-view').classList.add('active');
     document.getElementById('fab').classList.remove('visible');
     const av = document.getElementById('cv-avatar');
-    av.textContent = nick[0].toUpperCase();
+    av.innerHTML = avatarInner(nick);
     av.style.background = chats[nick].color;
     av.style.fontSize = '';
     document.getElementById('cv-name').textContent = '@' + nick;
@@ -2068,7 +2164,7 @@
         ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
       const bubbleInner = isSticker ? bubbleContent : `${replyQuote}${bubbleContent}${timeHtml}`;
-      const avatarLetter = isLanRoom ? (msg.sender?.[0] || '?').toUpperCase() : currentChat[0].toUpperCase();
+      const avatarLetter = isLanRoom ? (msg.sender?.[0] || '?').toUpperCase() : avatarInner(currentChat);
       const senderDiv = (isLanRoom && !msg.own && msg.sender) ? `<div class="msg-sender">${esc(msg.sender)}</div>` : '';
       wrap.innerHTML = msg.own
         ? `${replyBtn}<div><div class="bubble" ${bubbleStyle}>${bubbleInner}</div>${reactionsHtml}</div>`
@@ -2109,7 +2205,7 @@
       typing.className='msg-wrap';
       typing.style.marginTop='8px';
       typing.id='typing-indicator';
-      typing.innerHTML=`<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${currentChat[0].toUpperCase()}</div><div><div class="bubble typing-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>`;
+      typing.innerHTML=`<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${avatarInner(currentChat)}</div><div><div class="bubble typing-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>`;
       container.appendChild(typing);
     }
 
@@ -2506,7 +2602,7 @@
     overlay.innerHTML=`
       <div class="modal">
         <div class="modal-title">О VOID</div>
-        <div style="font-size:13px;color:var(--text2);line-height:1.8;">Void — анонимный мессенджер без регистрации по email или телефону.<br><br>Идентификация только через сид-фразу. Потерял фразу — потерял аккаунт.<br><br><span style="color:var(--text3);font-size:11px;font-family:'Space Mono',monospace;">Версия 0.1 · прототип</span></div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.8;">Void — анонимный мессенджер без регистрации по email или телефону.<br><br>Идентификация только через сид-фразу. Потерял фразу — потерял аккаунт.<br><br><span style="color:var(--text3);font-size:11px;font-family:'Space Mono',monospace;">Версия 1.0</span></div>
         <div class="modal-btns"><button class="btn-primary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
       </div>`;
     document.body.appendChild(overlay);
@@ -2726,15 +2822,16 @@
 
   const STICKER_MAX = 120 * 1024;   // с запасом под лимит сервера (128 КБ)
 
-  // Фото с телефона весит мегабайты. Без сжатия стикер не влезал ни в
-  // localStorage, ни в сообщение — поэтому картинки и не отправлялись.
-  function compressSticker(file) {
+  // Фото с телефона весит мегабайты. Без сжатия картинка не влезала ни в
+  // localStorage, ни в сообщение — поэтому стикеры и не отправлялись.
+  function compressImage(file, maxPx, maxBytes) {
+    const MAXPX = maxPx || 256;
+    const LIMIT = maxBytes || STICKER_MAX;
     return new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
         URL.revokeObjectURL(url);
-        const MAXPX = 256;
         const scale = Math.min(1, MAXPX / Math.max(img.width, img.height));
         const w = Math.max(1, Math.round(img.width * scale));
         const h = Math.max(1, Math.round(img.height * scale));
@@ -2747,10 +2844,10 @@
           const d = c.toDataURL(mime, q);
           if (!d.startsWith('data:' + mime)) continue;   // формат не поддержан
           out = d;
-          if (d.length <= STICKER_MAX) break;
+          if (d.length <= LIMIT) break;
         }
         if (!out) out = c.toDataURL('image/png');
-        if (out.length > STICKER_MAX) return reject(new Error('Картинка слишком большая'));
+        if (out.length > LIMIT) return reject(new Error('Картинка слишком большая'));
         resolve(out);
       };
       img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Не удалось прочитать картинку')); };
@@ -2764,7 +2861,7 @@
     if (!file) return;
     if (!file.type.startsWith('image/')) { showToast('Нужен файл-картинка'); return; }
     if (customStickers.length >= 40) { showToast('Максимум 40 своих стикеров'); return; }
-    compressSticker(file).then(data => {
+    compressImage(file, 256, STICKER_MAX).then(data => {
       customStickers.push(data);
       if (!saveStickers()) {           // не влезло в localStorage — откатываем
         customStickers.pop();
