@@ -1180,12 +1180,19 @@
 
   // Аккаунт заблокирован или удалён администратором — дальше сидеть в
   // приложении смысла нет, чистим сессию и объясняем что произошло.
-  function showBannedScreen(reason) {
+  function showBannedScreen(reason, note) {
     const deleted = reason === 'deleted';
     if (document.getElementById('banned-overlay')) return;
     const ov = document.createElement('div');
     ov.id = 'banned-overlay';
     ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:32px;text-align:center;';
+    // Причину показываем самому пользователю — иначе непонятно, за что
+    const noteHtml = note
+      ? '<div style="max-width:320px;width:100%;padding:13px 16px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:12px;">' +
+          '<div style="font-size:10px;letter-spacing:1.5px;color:#ef4444;font-family:\'Space Mono\',monospace;margin-bottom:6px;">ПРИЧИНА</div>' +
+          '<div style="font-size:14px;color:var(--text);line-height:1.5;word-break:break-word;">' + esc(note) + '</div>' +
+        '</div>'
+      : '';
     ov.innerHTML =
       '<div style="font-size:52px;">' + (deleted ? '🗑️' : '🚫') + '</div>' +
       '<div style="font-size:19px;font-weight:700;color:var(--text);">' +
@@ -1193,6 +1200,7 @@
       '<div style="font-size:13px;color:var(--text2);line-height:1.6;max-width:300px;">' +
         (deleted ? 'Этот аккаунт был удалён администратором.' : 'Доступ к этому аккаунту закрыт администратором.') +
       '</div>' +
+      noteHtml +
       '<button class="reg-btn" style="max-width:240px;" onclick="doLogout();document.getElementById(\'banned-overlay\')?.remove();">ВЫЙТИ</button>';
     document.body.appendChild(ov);
     clearSessionPass();
@@ -1289,7 +1297,7 @@
           clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
           dropDmWs();
           updateDmStatus('off');
-          showBannedScreen();
+          showBannedScreen('banned', msg.note);
           return;
         }
 
@@ -1299,7 +1307,7 @@
           clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
           dropDmWs();
           updateDmStatus('off');
-          if (msg.reason === 'banned' || msg.reason === 'deleted') showBannedScreen(msg.reason);
+          if (msg.reason === 'banned' || msg.reason === 'deleted') showBannedScreen(msg.reason, msg.note);
           return;
         }
 
@@ -1396,7 +1404,11 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nick, password: pass })
       });
-      if (r.status === 403) { err.textContent = 'Аккаунт заблокирован'; err.style.display='block'; return; }
+      if (r.status === 403) {
+        const d = await r.json().catch(() => ({}));
+        err.textContent = d.reason ? 'Аккаунт заблокирован: ' + d.reason : 'Аккаунт заблокирован';
+        err.style.display='block'; return;
+      }
       if (!r.ok) { err.textContent = 'Неверный ник или пароль'; err.style.display='block'; return; }
     } catch(e) {
       // Если нет связи — пробуем локальный вход
@@ -2223,34 +2235,54 @@
     }).join('');
   }
 
+  // Сервер отдаёт обновлённый список прямо в ответе — второй запрос
+  // (и повторная проверка пароля на нём) не нужен, действие срабатывает вдвое быстрее.
+  function applyAdminResult(r) {
+    if (r && Array.isArray(r.users)) { adminUsers = r.users; renderAdminUsers(); }
+    else loadAdminUsers();
+  }
+
+  // Пока запрос идёт, блокируем кнопки строки, чтобы не было двойных нажатий
+  function setAdminRowBusy(nick, busy) {
+    document.querySelectorAll('.adm-row').forEach(row => {
+      if (row.querySelector('.adm-nick')?.textContent !== nick) return;
+      row.querySelectorAll('.adm-btn').forEach(b => { b.disabled = busy; });
+    });
+  }
+
   async function adminBan(nick) {
     const reason = prompt('Причина блокировки для ' + nick + ' (можно оставить пустым):');
     if (reason === null) return;   // нажали «Отмена»
+    setAdminRowBusy(nick, true);
     try {
-      await adminCall('ban', { nick, reason: reason.trim() || null });
+      applyAdminResult(await adminCall('ban', { nick, reason: reason.trim() || null }));
       showToast(nick + ' заблокирован');
-      loadAdminUsers();
-    } catch (e) { showToast(e.message); }
+    } catch (e) { setAdminRowBusy(nick, false); showToast(e.message); }
   }
 
   async function adminUnban(nick) {
+    setAdminRowBusy(nick, true);
     try {
-      await adminCall('unban', { nick });
+      applyAdminResult(await adminCall('unban', { nick }));
       showToast(nick + ' разблокирован');
-      loadAdminUsers();
-    } catch (e) { showToast(e.message); }
+    } catch (e) { setAdminRowBusy(nick, false); showToast(e.message); }
   }
 
   async function adminDelete(nick) {
+    // Аккаунта после удаления не останется, поэтому причина показывается
+    // пользователю сразу при отключении и пишется в лог сервера
+    const reason = prompt('Причина удаления для ' + nick + ' (можно оставить пустым):');
+    if (reason === null) return;
     // Необратимо, поэтому просим ввести ник целиком
     const typed = prompt('УДАЛИТЬ НАВСЕГДА вместе со всей перепиской.\nВведи ник "' + nick + '" для подтверждения:');
     if (typed === null) return;
     if (typed.trim() !== nick) { showToast('Ник не совпал — отменено'); return; }
+    setAdminRowBusy(nick, true);
     try {
-      const r = await adminCall('delete', { nick });
+      const r = await adminCall('delete', { nick, reason: reason.trim() || null });
+      applyAdminResult(r);
       showToast(nick + ' удалён (сообщений: ' + r.messagesDeleted + ')');
-      loadAdminUsers();
-    } catch (e) { showToast(e.message); }
+    } catch (e) { setAdminRowBusy(nick, false); showToast(e.message); }
   }
 
   function showAboutModal() {
@@ -2335,7 +2367,8 @@
   }
 
   function saveStickers() {
-    try { localStorage.setItem('void_stickers', JSON.stringify(customStickers)); } catch(e) {}
+    try { localStorage.setItem('void_stickers', JSON.stringify(customStickers)); return true; }
+    catch(e) { return false; }   // квота localStorage исчерпана
   }
 
   function toggleStickerPanel() {
@@ -2356,29 +2389,72 @@
     grid.innerHTML = emojis + customs;
   }
 
+  const STICKER_MAX = 120 * 1024;   // с запасом под лимит сервера (128 КБ)
+
+  // Фото с телефона весит мегабайты. Без сжатия стикер не влезал ни в
+  // localStorage, ни в сообщение — поэтому картинки и не отправлялись.
+  function compressSticker(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const MAXPX = 256;
+        const scale = Math.min(1, MAXPX / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        // webp держит прозрачность и жмёт лучше; jpeg — запасной вариант
+        let out = null;
+        for (const [mime, q] of [['image/webp',0.85],['image/webp',0.7],['image/webp',0.5],['image/jpeg',0.75],['image/jpeg',0.5]]) {
+          const d = c.toDataURL(mime, q);
+          if (!d.startsWith('data:' + mime)) continue;   // формат не поддержан
+          out = d;
+          if (d.length <= STICKER_MAX) break;
+        }
+        if (!out) out = c.toDataURL('image/png');
+        if (out.length > STICKER_MAX) return reject(new Error('Картинка слишком большая'));
+        resolve(out);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Не удалось прочитать картинку')); };
+      img.src = url;
+    });
+  }
+
   function uploadSticker(e) {
     const file = e.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => {
-      customStickers.push(ev.target.result);
-      saveStickers();
-      renderStickerGrid();
-    };
-    reader.readAsDataURL(file);
     e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { showToast('Нужен файл-картинка'); return; }
+    if (customStickers.length >= 40) { showToast('Максимум 40 своих стикеров'); return; }
+    compressSticker(file).then(data => {
+      customStickers.push(data);
+      if (!saveStickers()) {           // не влезло в localStorage — откатываем
+        customStickers.pop();
+        showToast('Не хватает места — удали часть стикеров');
+        return;
+      }
+      renderStickerGrid();
+    }).catch(err => showToast(err.message || 'Не удалось обработать картинку'));
   }
 
   async function sendSticker(val, type) {
     document.getElementById('sticker-panel').style.display = 'none';
     if (!currentChat || currentChat.startsWith('__lan__:')) return;
     if (!cryptoKey) { showToast('Нет ключа шифрования — перезайди в аккаунт'); return; }
-    let stickerData = type === 'emoji' ? val : customStickers[parseInt(val)];
+    const stickerData = type === 'emoji' ? val : customStickers[parseInt(val)];
+    if (!stickerData) { showToast('Стикер не найден'); return; }
     const stickerText = '__STICKER__' + type + ':' + stickerData;
-    // Отправить через сервер (только emoji — custom слишком большие)
-    if (authMode === 'simple' && type === 'emoji' && dmWsAuthOk && dmWs?.readyState === 1) {
-      console.log('[DM] Sending sticker dm to', currentChat);
+    // Картинки теперь тоже уходят на сервер — они сжимаются при загрузке
+    if (authMode === 'simple' && dmWsAuthOk && dmWs?.readyState === 1) {
+      console.log('[DM] Sending sticker dm to', currentChat, '(' + stickerText.length + ' байт)');
       dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: stickerText }));
+    } else if (authMode === 'simple') {
+      showToast('Нет связи с сервером — стикер не отправлен');
+      dmWakeCheck();
+      return;
     }
     const enc = await encryptText(stickerText);
     chats[currentChat].messages.push({enc, own:true, time:now(), timestamp:Date.now(), isSticker:true});

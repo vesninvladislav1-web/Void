@@ -4,7 +4,7 @@
 //   node admin.js list
 //   node admin.js ban <ник> [причина]
 //   node admin.js unban <ник>
-//   node admin.js delete <ник>
+//   node admin.js delete <ник> [причина]
 //
 // Пароль админа берётся из VOID_ADMIN_PASSWORD, иначе спрашивается в терминале.
 // Работает через API, поэтому забаненный сразу отключается от сервера.
@@ -62,7 +62,7 @@ function usage() {
     '  node admin.js list                     список всех аккаунтов',
     '  node admin.js ban <ник> [причина]      заблокировать (ник остаётся занят)',
     '  node admin.js unban <ник>              разблокировать',
-    '  node admin.js delete <ник>             удалить полностью вместе с перепиской'
+    '  node admin.js delete <ник> [причина]   удалить полностью вместе с перепиской'
   ].join('\n'));
 }
 
@@ -94,7 +94,7 @@ function usage() {
       rl.question('Удалить "' + target + '" НАВСЕГДА вместе с перепиской? Введи ник для подтверждения: ', a => { rl.close(); r(a); })
     );
     if (answer.trim() !== target) { console.log('Отменено.'); return; }
-    const r = await call('delete', { ...auth, nick: target });
+    const r = await call('delete', { ...auth, nick: target, reason: rest.join(' ') || null });
     console.log('Удалён: ' + r.nick + ' (сообщений удалено: ' + r.messagesDeleted + ')');
     return;
   }
