@@ -65,7 +65,7 @@
 
   .neon-logo { display:flex; gap:2px; letter-spacing:18px; font-family:'Space Mono',monospace; font-size:72px; font-weight:700; padding-left:18px; user-select:none; }
   .neon-letter { display:inline-block; color:#fff; text-shadow:0 0 7px #fff,0 0 18px #fff,0 0 35px var(--accent),0 0 70px var(--accent),0 0 100px var(--accent); transition:color 0.15s,text-shadow 0.15s; }
-  .neon-letter.dim { color:#2A1F1A; text-shadow:0 0 4px #2A1F1A,0 0 8px #1C1510; }
+  .neon-letter.dim { color:var(--bg2); text-shadow:none; }
 
   .reg-form { display:flex; flex-direction:column; align-items:center; gap:14px; width:300px; }
   .reg-label { font-size:11px; letter-spacing:3px; color:var(--text3); text-transform:uppercase; font-family:'Space Mono',monospace; align-self:flex-start; }
@@ -79,8 +79,7 @@
   .copy-seed-btn.copied { border-color:var(--online); color:var(--online); }
   .reg-hint { font-size:11px; color:var(--text3); text-align:center; line-height:1.6; }
   .reg-btn { width:100%; padding:14px; background:var(--accent); border:none; border-radius:14px; color:white; font-size:15px; font-family:'Space Mono',monospace; font-weight:700; letter-spacing:3px; cursor:pointer; transition:opacity 0.2s,transform 0.2s; margin-top:4px; }
-  .reg-btn:hover { background:#E55A3C; }
-  .reg-btn:hover { opacity:0.85; transform:scale(1.02); }
+  .reg-btn:hover { background:#E55A3C; opacity:0.85; transform:scale(1.02); }
 
   /* Стартовый экран */
   .start-screen { display:flex; flex-direction:column; gap:12px; width:300px; opacity:0; animation:fadeInUp 0.6s ease 1.2s forwards; }
@@ -151,7 +150,7 @@
 
   .settings-divider { height:1px; background:var(--border); margin:8px 0; }
 
-  .logout-item { display:flex; align-items:center; gap:12px; padding:12px 18px; cursor:pointer; transition:background 0.15s; }
+  .logout-item { display:flex; align-items:center; gap:12px; padding:12px 18px; cursor:pointer; transition:background 0.15s; border-radius:var(--radius-md); margin:2px 10px; }
   .logout-item:hover { background:rgba(239,68,68,0.1); }
   .logout-item-icon { width:34px; height:34px; border-radius:10px; background:rgba(239,68,68,0.15); display:flex; align-items:center; justify-content:center; font-size:16px; flex-shrink:0; }
   .logout-item span { font-size:14px; color:#ef4444; }
@@ -179,7 +178,7 @@
   .empty-chats .empty-icon { font-size:30px; opacity:0.4; }
   .empty-chats p { font-size:12px; line-height:1.6; }
 
-  .chat-item { display:flex; align-items:center; gap:12px; padding:12px 18px; cursor:pointer; transition:background 0.15s; position:relative; border-radius:var(--radius-lg); margin:4px 12px; background:var(--glass); border:1px solid var(--glass-border); border-bottom:none; }
+  .chat-item { display:flex; align-items:center; gap:12px; padding:12px 18px; cursor:pointer; transition:background 0.15s; position:relative; border-radius:var(--radius-lg); margin:4px 12px; background:var(--glass); border:1px solid var(--glass-border); overflow:hidden; }
   .chat-item:hover { background:var(--glass2); }
   .chat-item.active { background:var(--glass2); }
   .chat-item.active::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); border-radius:0 2px 2px 0; }
@@ -205,7 +204,7 @@
   .chat-topbar-actions { display:flex; gap:6px; align-items:center; }
   .chat-topbar-actions::before { content:''; width:1px; height:20px; background:var(--border); margin-right:2px; }
   .chat-menu-wrap { position:relative; }
-  .chat-menu { position:absolute; right:0; top:50px; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:var(--radius-lg); padding:6px; display:flex; flex-direction:column; gap:2px; min-width:170px; z-index:500; transform-origin:top right; transform:scale(0.85); opacity:0; pointer-events:none; transition:transform 0.18s cubic-bezier(0.34,1.56,0.64,1), opacity 0.15s; }
+  .chat-menu { position:absolute; right:0; top:calc(100% + 8px); background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:var(--radius-lg); padding:6px; display:flex; flex-direction:column; gap:2px; min-width:170px; z-index:500; transform-origin:top right; transform:scale(0.85); opacity:0; pointer-events:none; transition:transform 0.18s cubic-bezier(0.34,1.56,0.64,1), opacity 0.15s; }
   .chat-menu.open { transform:scale(1); opacity:1; pointer-events:all; }
   .chat-menu-item { display:flex; align-items:center; gap:10px; padding:11px 14px; border-radius:var(--radius-md); background:none; border:none; color:var(--text); font-size:14px; cursor:pointer; width:100%; text-align:left; transition:background 0.15s; font-family:'Inter',sans-serif; }
   .chat-menu-item:hover { background:var(--glass); }
@@ -255,15 +254,13 @@
   .msg-input { flex:1; background:transparent; border:none; outline:none; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; padding:12px 0; }
   .msg-input::placeholder { color:var(--text3); }
   .send-btn { width:40px; height:40px; border-radius:50%; background:var(--accent); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; color:white; font-size:16px; transition:all 0.2s; flex-shrink:0; }
-  .send-btn:hover { background:#E55A3C; }
-  .send-btn:hover { transform:scale(1.05); opacity:0.9; }
+  .send-btn:hover { background:#E55A3C; transform:scale(1.05); opacity:0.9; }
   .send-btn:active { transform:scale(0.95); }
 
   /* FAB */
   .fab { position:fixed; bottom:28px; right:28px; width:56px; height:56px; border-radius:18px; background:var(--accent); border:none; cursor:pointer; display:none; align-items:center; justify-content:center; font-size:24px; color:white; box-shadow:0 4px 24px var(--shadow); transition:transform 0.2s,opacity 0.2s; z-index:50; }
-  .fab:hover { background:#E55A3C; }
   .fab.visible { display:flex; }
-  .fab:hover { transform:scale(1.08); }
+  .fab:hover { background:#E55A3C; transform:scale(1.08); }
   .fab:active { transform:scale(0.95); }
 
   /* MODAL */
@@ -332,7 +329,7 @@
 
   /* ОНБОРДИНГ */
   .ob-overlay { position:fixed; inset:0; background:var(--bg); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:60px 30px 40px; }
-  .ob-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; width:100%; max-width:340px; overflow:hidden; }
+  .ob-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; width:100%; max-width:340px; overflow-y:auto; }
   @keyframes obSlideIn { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:none; } }
   @keyframes obSlideOut { from { opacity:1; transform:none; } to { opacity:0; transform:translateX(-40px); } }
   .ob-animate { animation: obSlideIn 0.35s cubic-bezier(0.25,0.46,0.45,0.94) forwards; }
@@ -350,8 +347,7 @@
   .ob-dot { width:8px; height:8px; border-radius:50%; background:var(--text3); transition:all 0.3s; }
   .ob-dot.active { background:var(--accent); width:24px; border-radius:4px; }
   .ob-next-btn { width:100%; max-width:340px; padding:15px; background:var(--accent); border:none; border-radius:14px; color:white; font-size:15px; font-family:'Space Mono',monospace; font-weight:700; letter-spacing:3px; cursor:pointer; transition:background 0.2s; }
-  .ob-next-btn:hover { background:#E55A3C; }
-  .ob-next-btn:hover { opacity:0.85; }
+  .ob-next-btn:hover { background:#E55A3C; opacity:0.85; }
   .ob-copy-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; }
   .ob-copy-btn:hover { border-color:var(--accent); color:var(--accent); }
 
@@ -524,7 +520,7 @@
     <div id="login-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Заполни все 24 слова</div>
     <div class="reg-hint">Введи слова в нужном порядке.<br>💡 Можно вставить всю фразу сразу в первое поле.</div>
     <div style="display:flex;gap:10px;width:100%;">
-      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
+      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="login()">ВОЙТИ</button>
     </div>
   </div>
@@ -778,8 +774,8 @@
       all.push(val);
     }
     const words = all.filter(w => w.length > 0);
-    if (words.length !== 8 && words.length !== 24) {
-      error.textContent = 'Нужно 8 или 24 слова';
+    if (words.length !== 24) {
+      error.textContent = 'Нужно ровно 24 слова';
       error.style.display='block'; return;
     }
     error.style.display='none';
@@ -991,7 +987,7 @@
 
   // ===== РЕГИСТРАЦИЯ =====
   let myName = '', myAvatar = null;
-  let isDark = false, chats = {}, currentChat = null;
+  let isDark = true, chats = {}, currentChat = null;
   let authMode = 'anon', passwordHash = null;
   let myStatus = '';
   let replyTo = null;
@@ -1185,6 +1181,7 @@
       myAvatar = ev.target.result;
       const el = document.getElementById('profile-avatar-el');
       el.innerHTML = `<img src="${myAvatar}" alt="avatar">`;
+      saveState();
     };
     reader.readAsDataURL(file);
   }
@@ -1220,8 +1217,8 @@
     ).join('');
     // Позиционируем над сообщением
     const rect = wrapEl.getBoundingClientRect();
-    picker.style.left = Math.min(rect.left, window.innerWidth - 320) + 'px';
-    picker.style.top = (rect.top - 64) + 'px';
+    picker.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 320)) + 'px';
+    picker.style.top = Math.max(8, rect.top - 64) + 'px';
     document.body.appendChild(picker);
     setTimeout(() => document.addEventListener('click', () => picker.remove(), { once:true }), 100);
   }
@@ -1379,7 +1376,7 @@
   function createChat() {
     const nick = document.getElementById('nick-input').value.trim();
     if (!nick) return;
-    document.querySelector('.modal-overlay').remove();
+    document.querySelector('.modal-overlay')?.remove();
     if (!chats[nick]) {
       chats[nick] = { messages:[], color:colors[colorIdx%colors.length], unread:0 };
       colorIdx++;
@@ -1493,6 +1490,7 @@
   function openChat(nick) {
     if (nick.startsWith('__lan__:')) {
       currentChat = nick;
+      if (chats[nick]?.unread) { chats[nick].unread = 0; saveState(); }
       closeSidebar();
       document.getElementById('chats-screen').classList.add('hidden');
       document.getElementById('chat-view').classList.add('active');
@@ -1631,14 +1629,14 @@
     if (!text||!currentChat) return;
     if (currentChat.startsWith('__lan__:')) {
       if (!lanRoom) { showToast('Нет соединения'); return; }
-      const t = now();
-      const payload = JSON.stringify({ type:'msg', text, time:t, sender:lanRoom.myLabel });
+      const timeStr = now();
+      const payload = JSON.stringify({ type:'msg', text, time:timeStr, sender:lanRoom.myLabel });
       let sent = false;
       lanRoom.peers.forEach(({dc, active}) => {
         if (active && dc?.readyState === 'open') { dc.send(payload); sent = true; }
       });
       if (!sent) { showToast('Нет активных участников'); return; }
-      chats[currentChat].messages.push({ enc:{ plain:text }, own:true, time:t, timestamp:Date.now(), sender:lanRoom.myLabel });
+      chats[currentChat].messages.push({ enc:{ plain:text }, own:true, time:timeStr, timestamp:Date.now(), sender:lanRoom.myLabel });
       input.value = '';
       saveState();
       renderMessages();
@@ -1724,7 +1722,7 @@
     const msgs = chats[currentChat].messages;
     const msg = msgs[idx];
     if (!msg) return;
-    const wrap = document.querySelectorAll('.msg-wrap')[idx];
+    const wrap = document.querySelectorAll('#messages .msg-wrap')[idx];
     const bubble = wrap ? wrap.querySelector('.bubble') : null;
     const rawText = bubble ? (bubble.innerText || bubble.textContent || '') : '';
     replyTo = { text: rawText.slice(0,80), own: msg.own };
@@ -1783,11 +1781,13 @@
     const replyBar = view?.querySelector('.reply-bar');
     const messages = document.getElementById('messages');
     if (value) {
+      const isLight = document.body.classList.contains('light');
+      const overlayBg = isLight ? 'rgba(250,250,250,0.75)' : 'rgba(28,25,23,0.55)';
       if (view) view.style.background = value;
       if (messages) messages.style.background = 'transparent';
-      if (topbar) { topbar.style.background = 'rgba(28,25,23,0.55)'; topbar.style.backdropFilter = 'blur(20px)'; topbar.style.webkitBackdropFilter = 'blur(20px)'; }
-      if (inputArea) { inputArea.style.background = 'rgba(28,25,23,0.55)'; inputArea.style.backdropFilter = 'blur(20px)'; inputArea.style.webkitBackdropFilter = 'blur(20px)'; }
-      if (replyBar) { replyBar.style.background = 'rgba(28,25,23,0.55)'; }
+      if (topbar) { topbar.style.background = overlayBg; topbar.style.backdropFilter = 'blur(20px)'; topbar.style.webkitBackdropFilter = 'blur(20px)'; }
+      if (inputArea) { inputArea.style.background = overlayBg; inputArea.style.backdropFilter = 'blur(20px)'; inputArea.style.webkitBackdropFilter = 'blur(20px)'; }
+      if (replyBar) { replyBar.style.background = overlayBg; }
     } else {
       if (view) view.style.background = '';
       if (messages) messages.style.background = '';
@@ -1832,6 +1832,7 @@
 
   function setLang(l, btn) {
     lang = l;
+    document.documentElement.lang = l;
     document.getElementById('lang-sub').textContent = t('langName');
     btn.parentElement.querySelectorAll('button').forEach(b => {
       b.style.opacity='0.5'; b.style.borderColor='var(--border)';
@@ -1972,8 +1973,8 @@
   }
 
   async function sendSticker(val, type) {
-    if (!currentChat || currentChat.startsWith('__lan__:')) return;
     document.getElementById('sticker-panel').style.display = 'none';
+    if (!currentChat || currentChat.startsWith('__lan__:')) return;
     let stickerData = type === 'emoji' ? val : customStickers[parseInt(val)];
     const stickerText = '__STICKER__' + type + ':' + stickerData;
     // Отправить через сервер (только emoji — custom слишком большие)
@@ -2308,6 +2309,7 @@
   // --- ОТКРЫТЬ ЭКРАН КОМНАТЫ ---
   function openLanRoom() {
     if (!lanRoom) return;
+    closeSidebar();
     const chatKey = `__lan__:${lanRoom.id}`;
     if (!chats[chatKey]) chats[chatKey] = { name:`📡 ${lanRoom.name}`, color:'#FF6B4A', messages:[], isLan:true };
     document.getElementById('chats-screen').classList.add('hidden');
