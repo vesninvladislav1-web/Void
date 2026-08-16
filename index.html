@@ -756,7 +756,12 @@
   function showAnonRegForm() { showForm('reg-form','reg-nick'); }
   function showLoginSelect() { showForm('login-select'); }
   function showSimpleLoginForm() { showForm('simple-login-form','slogin-nick'); }
-  function showAnonLoginForm() { showForm('login-form','sw1'); }
+  function showAnonLoginForm() {
+    // Сбрасываем поля перед показом формы
+    for (let i = 1; i <= 24; i++) { const el = document.getElementById('sw'+i); if(el) el.value=''; }
+    document.getElementById('login-error').style.display='none';
+    showForm('login-form','sw1');
+  }
 
   // Хеш пароля для проверки при входе
   async function hashPassword(nick, pass) {
@@ -1907,6 +1912,18 @@
     ALL_FORMS.forEach(id => { const el = document.getElementById(id); if(el) el.style.display='none'; });
     document.getElementById('start-screen').style.cssText='display:flex;opacity:0;animation:fadeInUp 0.4s ease 0.3s forwards;';
     document.getElementById('reg-nick').value='';
+    // Очищаем все поля сид-фразы и другие формы
+    for (let i = 1; i <= 24; i++) { const el = document.getElementById('sw'+i); if(el) el.value=''; }
+    const sn = document.getElementById('slogin-nick'); if(sn) sn.value='';
+    const sp = document.getElementById('slogin-pass'); if(sp) sp.value='';
+    const srn = document.getElementById('sreg-nick'); if(srn) srn.value='';
+    const srp = document.getElementById('sreg-pass'); if(srp) srp.value='';
+    const srp2 = document.getElementById('sreg-pass2'); if(srp2) srp2.value='';
+    sessionStorage.removeItem('void_sess_pass');
+    dmWsAuthOk = false;
+    if(dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
+    clearInterval(dmWsHeartbeat); dmWsHeartbeat = null;
+    const dmEl = document.getElementById('dm-conn-el'); if(dmEl) dmEl.style.display='none';
     authMode = 'anon'; passwordHash = null;
     generateSeed();
   }
