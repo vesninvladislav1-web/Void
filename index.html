@@ -1086,6 +1086,56 @@
   let dmWs = null;         // WebSocket для личных сообщений
   let dmWsAuthOk = false;  // успешно авторизован на сервере
   let dmWsHeartbeat = null;// интервал keepalive ping
+  let dmWsWatchdog = null; // таймер: auth-ok не пришёл вовремя
+  let dmWsRetryTimer = null;
+  let dmWsAttempt = 0;     // счётчик попыток для нарастающей паузы
+  let dmWsGen = 0;         // поколение сокета: обработчики старого не мешают новому
+
+  function dmClearTimers() {
+    clearInterval(dmWsHeartbeat); dmWsHeartbeat = null;
+    clearTimeout(dmWsWatchdog);   dmWsWatchdog = null;
+  }
+
+  // Полностью гасим текущий сокет: снимаем обработчики, иначе его onclose
+  // запустит переподключение уже поверх нового соединения.
+  function dropDmWs() {
+    dmClearTimers();
+    if (dmWs) {
+      try {
+        dmWs.onopen = dmWs.onmessage = dmWs.onclose = dmWs.onerror = null;
+        dmWs.close();
+      } catch(e) {}
+    }
+    dmWs = null;
+    dmWsAuthOk = false;
+  }
+
+  function scheduleDmReconnect() {
+    if (dmWsRetryTimer) return;   // уже запланировано — не плодим таймеры
+    dmWsAttempt = Math.min(dmWsAttempt + 1, 5);
+    const delay = Math.min(2000 * Math.pow(2, dmWsAttempt - 1), 15000);
+    console.log('[DM] Reconnect in', delay, 'ms');
+    dmWsRetryTimer = setTimeout(() => { dmWsRetryTimer = null; connectDmWs(); }, delay);
+  }
+
+  // Телефон вышел из сна / вкладка снова активна / вернулась сеть.
+  // Сокет к этому моменту часто уже мёртв, но onclose не приходит.
+  function dmWakeCheck() {
+    if (authMode !== 'simple' || !myRawPass) return;
+    if (dmWs && dmWs.readyState === 1 && dmWsAuthOk) {
+      try { dmWs.send(JSON.stringify({ type: 'ping' })); }
+      catch(e) { dropDmWs(); connectDmWs(); }
+      return;
+    }
+    dmWsAttempt = 0;
+    clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
+    dropDmWs();
+    connectDmWs();
+  }
+
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) dmWakeCheck(); });
+  window.addEventListener('online', dmWakeCheck);
+  window.addEventListener('focus', dmWakeCheck);
 
   function updateDmStatus(status) {
     const el = document.getElementById('dm-conn-el');
@@ -1099,30 +1149,72 @@
 
   function connectDmWs() {
     if (!myName || !myRawPass || authMode !== 'simple') return;
-    if (dmWs && dmWs.readyState <= 1) return; // уже подключён или подключается
-    dmWsAuthOk = false;
+    // Живым считаем ТОЛЬКО авторизованное соединение. Раньше проверка была
+    // readyState <= 1, и сокет, зависший в CONNECTING (обычное дело после сна
+    // телефона или обрыва мобильной сети), навсегда блокировал переподключение —
+    // выйти из этого состояния можно было только перезаходом в аккаунт.
+    if (dmWs && dmWs.readyState === 1 && dmWsAuthOk) return;
+    if (dmWs && dmWs.readyState === 0 && dmWsWatchdog) return; // подключается, ждём watchdog
+
+    dropDmWs();
+    clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
     updateDmStatus('wait');
     console.log('[DM] Connecting...');
-    dmWs = new WebSocket(WS_URL);
 
-    dmWs.onopen = () => {
+    const gen = ++dmWsGen;
+    const isCurrent = () => gen === dmWsGen;
+    let ws;
+    try { ws = new WebSocket(WS_URL); }
+    catch(e) { updateDmStatus('off'); scheduleDmReconnect(); return; }
+    dmWs = ws;
+
+    // Сокет может открыться, но auth-ok не прийти — тогда статус вечно висел
+    // на «🟡 Подключение...», а сообщения молча никуда не уходили.
+    dmWsWatchdog = setTimeout(() => {
+      if (!isCurrent() || dmWsAuthOk) return;
+      console.warn('[DM] Auth timeout — reconnecting');
+      updateDmStatus('off');
+      dropDmWs();
+      scheduleDmReconnect();
+    }, 12000);
+
+    ws.onopen = () => {
+      if (!isCurrent()) return;
       console.log('[DM] Connected, sending auth for', myName);
-      dmWs.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
+      ws.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
     };
 
-    dmWs.onmessage = e => {
+    ws.onmessage = e => {
+      if (!isCurrent()) return;
       try {
         const msg = JSON.parse(e.data);
 
         if (msg.type === 'auth-ok') {
           dmWsAuthOk = true;
+          dmWsAttempt = 0;
+          clearTimeout(dmWsWatchdog); dmWsWatchdog = null;
           updateDmStatus('ok');
           console.log('[DM] Auth OK');
           // Keepalive: ping каждые 25с чтобы nginx не закрыл соединение
           clearInterval(dmWsHeartbeat);
           dmWsHeartbeat = setInterval(() => {
-            if (dmWs?.readyState === 1) dmWs.send(JSON.stringify({ type: 'ping' }));
+            if (dmWs === ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'ping' }));
           }, 25000);
+          return;
+        }
+
+        // Сервер разорвал эту сессию: тот же ник вошёл с другого устройства
+        if (msg.type === 'session-replaced') {
+          console.warn('[DM] Session replaced from another device');
+          showToast('Вход с другого устройства');
+          return;
+        }
+
+        if (msg.type === 'dm-error') {
+          console.warn('[DM] Server rejected message:', msg.error);
+          if (msg.error === 'no-such-user') showToast('Пользователь ' + (msg.to || '') + ' не найден');
+          else if (msg.error === 'too-long') showToast('Сообщение слишком длинное');
+          else if (msg.error === 'rate-limit') showToast('Слишком часто — подожди немного');
           return;
         }
 
@@ -1135,9 +1227,10 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ nick: myName, password: myRawPass })
           }).then(r => {
+            if (!isCurrent() || ws.readyState !== 1) return;
             if (r.ok) {
               console.log('[DM] Auto-registered, retrying auth');
-              dmWs.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
+              ws.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
             } else {
               console.warn('[DM] Auto-register failed (nick taken with different password?)');
               updateDmStatus('off');
@@ -1160,16 +1253,16 @@
       } catch(ex) { console.error('[DM] Parse error', ex); }
     };
 
-    dmWs.onclose = ev => {
-      console.log('[DM] Closed, code:', ev.code, '— reconnecting in 4s');
+    ws.onclose = ev => {
+      if (!isCurrent()) return;   // закрылся старый сокет — новый уже работает
+      console.log('[DM] Closed, code:', ev.code);
+      dmClearTimers();
       dmWsAuthOk = false;
-      clearInterval(dmWsHeartbeat);
-      dmWsHeartbeat = null;
       updateDmStatus('off');
-      setTimeout(connectDmWs, 4000);
+      scheduleDmReconnect();
     };
 
-    dmWs.onerror = ev => { console.error('[DM] WS error', ev); };
+    ws.onerror = () => { /* за обрывом всегда следует onclose — там и переподключаемся */ };
   }
 
   async function registerSimple() {
@@ -1736,8 +1829,13 @@
     if (authMode === 'simple' && dmWsAuthOk && dmWs?.readyState === 1) {
       console.log('[DM] Sending dm to', currentChat);
       dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text }));
-    } else if (authMode === 'simple' && !dmWsAuthOk) {
-      console.warn('[DM] Not authed yet, message not relayed');
+    } else if (authMode === 'simple') {
+      // Раньше сообщение просто оседало локально, а собеседник его не получал
+      // и об этом никто не сообщал. Теперь честно говорим и жмём переподключение.
+      console.warn('[DM] Not connected, message not relayed');
+      showToast('Нет связи с сервером — сообщение не отправлено');
+      dmWakeCheck();
+      return;
     }
     const enc = await encryptText(text);
     const msg = {enc, own:true, time:now(), timestamp:Date.now()};
@@ -2011,9 +2109,10 @@
     const srp2 = document.getElementById('sreg-pass2'); if(srp2) srp2.value='';
     clearSessionPass();
     myRawPass = null; cryptoKey = null;
-    dmWsAuthOk = false;
-    if(dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
-    clearInterval(dmWsHeartbeat); dmWsHeartbeat = null;
+    dmWsGen++;                 // обработчики старого сокета больше не в счёт
+    clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
+    dmWsAttempt = 0;
+    dropDmWs();
     const dmEl = document.getElementById('dm-conn-el'); if(dmEl) dmEl.style.display='none';
     authMode = 'anon'; passwordHash = null;
     generateSeed();
