@@ -53,11 +53,16 @@ db.exec(`
   if (!cols.includes('is_admin'))   db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
   if (!cols.includes('banned_at'))  db.exec('ALTER TABLE users ADD COLUMN banned_at INTEGER');
   if (!cols.includes('ban_reason')) db.exec('ALTER TABLE users ADD COLUMN ban_reason TEXT');
+  // Аккаунты по сид-фразе: ищем владельца по одной только фразе, без ника
+  if (!cols.includes('seed_lookup')) db.exec('ALTER TABLE users ADD COLUMN seed_lookup TEXT');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_seed ON users(seed_lookup) WHERE seed_lookup IS NOT NULL');
 }
 
 const qUserByNick  = db.prepare('SELECT nick, password_hash, banned, is_admin, ban_reason FROM users WHERE nick = ? COLLATE NOCASE');
 const qNickExists  = db.prepare('SELECT nick, banned FROM users WHERE nick = ? COLLATE NOCASE');
 const qInsertUser  = db.prepare('INSERT INTO users (nick, password_hash) VALUES (?, ?)');
+const qInsertSeed  = db.prepare('INSERT INTO users (nick, password_hash, seed_lookup) VALUES (?, ?, ?)');
+const qUserBySeed  = db.prepare('SELECT nick, password_hash, banned, is_admin, ban_reason FROM users WHERE seed_lookup = ?');
 const qUpdateHash  = db.prepare('UPDATE users SET password_hash = ? WHERE nick = ?');
 const qSearchUsers = db.prepare("SELECT nick FROM users WHERE nick LIKE ? ESCAPE '\\' ORDER BY nick LIMIT 10");
 const qInsertMsg   = db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered) VALUES (?, ?, ?, ?, ?)');
@@ -314,6 +319,55 @@ const server = http.createServer((req, res) => {
       if (!u) return json(401, { error: 'Неверный ник или пароль' });
       if (u.banned) return json(403, { error: 'Аккаунт заблокирован', reason: u.ban_reason });
       json(200, { ok: true, nick: u.nick, admin: u.is_admin });
+    });
+    return;
+  }
+
+  // ===== ВХОД ПО СИД-ФРАЗЕ =====
+  // Клиент никогда не присылает саму фразу — только производный от неё токен.
+  // Ключ шифрования переписки выводится из фразы отдельной функцией, поэтому
+  // сервер не может его получить.
+  if (req.method === 'POST' && url.pathname === '/api/seed/register') {
+    if (!rateLimit('reg:' + clientIp(req), 10, 600000)) {
+      return json(429, { error: 'Слишком много попыток, подожди' });
+    }
+    readBody(async (body) => {
+      const nick  = typeof body.nick === 'string' ? body.nick.trim() : '';
+      const token = typeof body.token === 'string' ? body.token : '';
+      if (nick.length < 2 || nick.length > 16) return json(400, { error: 'Неверные данные' });
+      if (!/^[a-zA-Z0-9_]+$/.test(nick)) return json(400, { error: 'Ник: только латиница, цифры и _' });
+      if (token.length < 32 || token.length > 200) return json(400, { error: 'Неверная сид-фраза' });
+
+      const lookup = crypto.createHash('sha256').update(token).digest('hex');
+      if (qUserBySeed.get(lookup)) return json(409, { error: 'Эта сид-фраза уже используется' });
+      if (qNickExists.get(nick))   return json(409, { error: 'Ник уже занят' });
+      try {
+        qInsertSeed.run(nick, await scryptHash(token), lookup);
+        json(200, { ok: true, nick });
+      } catch (e) {
+        json(409, { error: 'Ник уже занят' });
+      }
+    });
+    return;
+  }
+
+  // Ник возвращает сервер: по фразе он определяется однозначно,
+  // запоминать его пользователю не нужно.
+  if (req.method === 'POST' && url.pathname === '/api/seed/login') {
+    if (!rateLimit('login:' + clientIp(req), 20, 600000)) {
+      return json(429, { error: 'Слишком много попыток, подожди' });
+    }
+    readBody(async (body) => {
+      const token = typeof body.token === 'string' ? body.token : '';
+      if (!token) return json(400, { error: 'Неверная сид-фраза' });
+      const lookup = crypto.createHash('sha256').update(token).digest('hex');
+      const row = qUserBySeed.get(lookup);
+      if (!row) return json(404, { error: 'Аккаунт с такой фразой не найден' });
+      if (!(await scryptVerify(token, row.password_hash))) {
+        return json(401, { error: 'Неверная сид-фраза' });
+      }
+      if (row.banned) return json(403, { error: 'Аккаунт заблокирован', reason: row.ban_reason || null });
+      json(200, { ok: true, nick: row.nick });
     });
     return;
   }

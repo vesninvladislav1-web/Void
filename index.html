@@ -876,6 +876,15 @@
     showForm('login-form','sw1');
   }
 
+  // Токен для авторизации по сид-фразе. Сама фраза на сервер не уходит:
+  // ключ шифрования выводится из неё другой функцией (deriveKey, соль VOID_v1),
+  // поэтому по токену его восстановить нельзя.
+  async function seedAuthToken(words) {
+    const enc = new TextEncoder();
+    const buf = await crypto.subtle.digest('SHA-256', enc.encode(words.join(' ') + ':VOID_SEED_AUTH_v1'));
+    return btoa(String.fromCharCode(...new Uint8Array(buf)));
+  }
+
   // Хеш пароля для проверки при входе
   async function hashPassword(nick, pass) {
     const enc = new TextEncoder();
@@ -896,9 +905,43 @@
       error.style.display='block'; return;
     }
     error.style.display='none';
+
+    // Ник спрашивает не пользователь, а сервер: по фразе он определяется
+    // однозначно. Раньше здесь подставлялось 'User_' + первое слово, из-за
+    // чего после входа по фразе ник не совпадал с тем, под которым регистрировались.
+    const token = await seedAuthToken(words);
+    let serverNick = null;
+    try {
+      const r = await fetch(API + '/api/seed/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (r.status === 403) {
+        error.textContent = data.reason ? 'Аккаунт заблокирован: ' + data.reason : 'Аккаунт заблокирован';
+        error.style.display='block'; return;
+      }
+      if (r.status === 404) {
+        error.textContent = 'Аккаунт с такой фразой не найден';
+        error.style.display='block'; return;
+      }
+      if (!r.ok) { error.textContent = data.error || 'Ошибка сервера'; error.style.display='block'; return; }
+      serverNick = data.nick;
+    } catch(e) {
+      // Нет связи — пускаем локально, если эта фраза уже использовалась здесь
+      const stored = JSON.parse(localStorage.getItem('void_user') || 'null');
+      if (!stored || stored.authMode !== 'anon' || (stored.seed || []).join(' ') !== words.join(' ')) {
+        error.textContent = 'Нет связи с сервером';
+        error.style.display='block'; return;
+      }
+      serverNick = stored.name;
+    }
+
     currentSeed = words;
     authMode = 'anon';
-    myName = 'User_' + words[0];
+    myName = serverNick;
+    myRawPass = token;
+    storeSessionPass(token, true);
     cryptoKey = await deriveKey(currentSeed);
     finishAuth(false, 'anon');
   }
@@ -971,7 +1014,8 @@
     clearInterval(neonInterval);
     saveState();
     requestNotifications();
-    if (mode === 'simple') { updateDmStatus('wait'); connectDmWs(); }
+    // Оба типа аккаунтов живут на сервере, значит обоим нужен WebSocket
+    if (myRawPass) { updateDmStatus('wait'); connectDmWs(); }
     else { const dmEl = document.getElementById('dm-conn-el'); if(dmEl) dmEl.style.display='none'; }
     const reg = document.getElementById('register-screen');
     reg.classList.add('hide');
@@ -1030,7 +1074,13 @@
           showUnlockScreen();
           return;
         }
-      } else if (currentSeed.length) cryptoKey = await deriveKey(currentSeed);
+      } else if (currentSeed.length) {
+        cryptoKey = await deriveKey(currentSeed);
+        // Сид-фраза лежит локально, поэтому токен пересчитываем сами —
+        // спрашивать пользователя нечего
+        myRawPass = await seedAuthToken(currentSeed);
+        connectDmWs();
+      }
       document.getElementById('profile-nick').textContent = '@' + myName;
       const el = document.getElementById('profile-avatar-el');
       if (myAvatar) { el.innerHTML = '<img src="' + myAvatar + '" alt="avatar">'; }
@@ -1162,7 +1212,7 @@
   // Телефон вышел из сна / вкладка снова активна / вернулась сеть.
   // Сокет к этому моменту часто уже мёртв, но onclose не приходит.
   function dmWakeCheck() {
-    if (authMode !== 'simple' || !myRawPass) return;
+    if (!myRawPass) return;
     if (dmWs && dmWs.readyState === 1 && dmWsAuthOk) {
       try { dmWs.send(JSON.stringify({ type: 'ping' })); }
       catch(e) { dropDmWs(); connectDmWs(); }
@@ -1209,7 +1259,7 @@
   function updateDmStatus(status) {
     const el = document.getElementById('dm-conn-el');
     if (!el) return;
-    if (authMode !== 'simple') { el.style.display = 'none'; return; }
+    if (!myRawPass) { el.style.display = 'none'; return; }
     el.style.display = 'block';
     if (status === 'ok')         { el.textContent = '🟢 Сервер подключён'; el.style.color = 'var(--online)'; }
     else if (status === 'wait')  { el.textContent = '🟡 Подключение...';   el.style.color = '#F59E0B'; }
@@ -1217,7 +1267,7 @@
   }
 
   function connectDmWs() {
-    if (!myName || !myRawPass || authMode !== 'simple') return;
+    if (!myName || !myRawPass) return;
     // Живым считаем ТОЛЬКО авторизованное соединение. Раньше проверка была
     // readyState <= 1, и сокет, зависший в CONNECTING (обычное дело после сна
     // телефона или обрыва мобильной сети), навсегда блокировал переподключение —
@@ -1314,11 +1364,15 @@
         if (msg.type === 'auth-fail') {
           dmWsAuthOk = false;
           console.warn('[DM] Auth fail — trying auto-register');
-          // Аккаунт не найден — регистрируем автоматически
-          fetch(API + '/api/register', {
+          // Аккаунт не найден — регистрируем автоматически. Сид-аккаунты идут
+          // своим путём, иначе они бы записались как обычные и вход по фразе
+          // перестал бы их находить.
+          const isSeed = authMode === 'anon';
+          fetch(API + (isSeed ? '/api/seed/register' : '/api/register'), {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nick: myName, password: myRawPass })
+            body: JSON.stringify(isSeed ? { nick: myName, token: myRawPass }
+                                        : { nick: myName, password: myRawPass })
           }).then(r => {
             if (!isCurrent() || ws.readyState !== 1) return;
             if (r.ok) {
@@ -1441,8 +1495,38 @@
     if (!nick) { input.focus(); input.style.borderColor='var(--accent2)'; return; }
     if (!/^[a-zA-Z0-9_]+$/.test(nick)) { input.style.borderColor='var(--accent2)'; error.style.display='block'; input.focus(); return; }
     error.style.display='none'; input.style.borderColor='';
+
+    // Регистрируем на сервере — иначе аккаунт живёт только в этом браузере
+    // и личные сообщения не работают
+    const btn = document.querySelector('#reg-form .reg-btn:last-child');
+    const oldLabel = btn ? btn.textContent : '';
+    if (btn) btn.textContent = '...';
+    const token = await seedAuthToken(currentSeed);
+    try {
+      const r = await fetch(API + '/api/seed/register', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick, token })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        error.textContent = data.error || 'Ошибка сервера';
+        error.style.display = 'block';
+        input.style.borderColor = 'var(--accent2)';
+        if (btn) btn.textContent = oldLabel;
+        return;
+      }
+    } catch(e) {
+      error.textContent = 'Нет связи с сервером';
+      error.style.display = 'block';
+      if (btn) btn.textContent = oldLabel;
+      return;
+    }
+    if (btn) btn.textContent = oldLabel;
+
     myName = nick;
     authMode = 'anon';
+    myRawPass = token;
+    storeSessionPass(token, true);
     cryptoKey = await deriveKey(currentSeed);
     finishAuth(true, 'anon');
   }
@@ -1924,10 +2008,10 @@
     // Без ключа сообщение легло бы в историю открытым текстом — не молчим об этом
     if (!cryptoKey) { showToast('Нет ключа шифрования — перезайди в аккаунт'); return; }
     // Отправка через сервер если авторизованы
-    if (authMode === 'simple' && dmWsAuthOk && dmWs?.readyState === 1) {
+    if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
       console.log('[DM] Sending dm to', currentChat);
       dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text }));
-    } else if (authMode === 'simple') {
+    } else if (myRawPass) {
       // Раньше сообщение просто оседало локально, а собеседник его не получал
       // и об этом никто не сообщал. Теперь честно говорим и жмём переподключение.
       console.warn('[DM] Not connected, message not relayed');
@@ -2448,10 +2532,10 @@
     if (!stickerData) { showToast('Стикер не найден'); return; }
     const stickerText = '__STICKER__' + type + ':' + stickerData;
     // Картинки теперь тоже уходят на сервер — они сжимаются при загрузке
-    if (authMode === 'simple' && dmWsAuthOk && dmWs?.readyState === 1) {
+    if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
       console.log('[DM] Sending sticker dm to', currentChat, '(' + stickerText.length + ' байт)');
       dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: stickerText }));
-    } else if (authMode === 'simple') {
+    } else if (myRawPass) {
       showToast('Нет связи с сервером — стикер не отправлен');
       dmWakeCheck();
       return;
