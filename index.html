@@ -295,6 +295,18 @@
   .adm-btn.good { color:var(--online); border-color:rgba(34,197,94,0.35); }
   .adm-btn.good:hover:not(:disabled) { background:rgba(34,197,94,0.12); }
   .adm-empty { text-align:center; color:var(--text3); font-size:13px; padding:26px 0; }
+  /* ===== СПИСОК АККАУНТОВ ===== */
+  .acc-list { display:flex; flex-direction:column; gap:8px; max-height:46vh; overflow-y:auto; margin:0 -4px; padding:0 4px; }
+  .acc-row { display:flex; align-items:center; gap:11px; padding:10px 12px; background:var(--bg3); border:1px solid var(--border); border-radius:13px; cursor:pointer; transition:background 0.15s,border-color 0.15s; }
+  .acc-row:hover { background:var(--glass); }
+  .acc-row.active { border-color:var(--accent); background:var(--glass); cursor:default; }
+  .acc-avatar { width:38px; height:38px; border-radius:12px; background:var(--bg2); display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:700; color:var(--text2); flex-shrink:0; overflow:hidden; }
+  .acc-avatar img { width:100%; height:100%; object-fit:cover; }
+  .acc-info { flex:1; min-width:0; }
+  .acc-nick { font-size:14px; color:var(--text); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .acc-sub { font-size:11px; color:var(--text3); margin-top:1px; }
+  .acc-badge { font-size:10px; padding:3px 8px; border-radius:20px; background:rgba(34,197,94,0.15); color:var(--online); font-family:'Space Mono',monospace; white-space:nowrap; }
+  .acc-arrow { color:var(--text3); font-size:20px; }
   .modal-input { background:var(--bg3); border:1px solid var(--border); border-radius:12px; padding:12px 16px; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; outline:none; width:100%; transition:border 0.2s; }
   .modal-input:focus { border-color:var(--accent); }
   .modal-btns { display:flex; gap:10px; }
@@ -619,6 +631,17 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
+      <div class="settings-section-label">Аккаунт</div>
+
+      <div class="settings-item" id="accounts-menu-item" style="display:none;" onclick="showAccountsModal()">
+        <div class="settings-item-icon">👥</div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Аккаунты</div>
+          <div class="settings-item-sub" id="accounts-menu-sub">Добавить ещё один</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
       <div class="settings-section-label">Система</div>
 
       <div class="settings-item" onclick="showLangModal()">
@@ -779,26 +802,98 @@
 
   const ALL_FORMS = ['simple-reg-form','reg-form','login-select','simple-login-form','login-form','unlock-form'];
 
+  // ===== АККАУНТЫ НА УСТРОЙСТВЕ =====
+  // Всё, что относится к аккаунту, лежит под своим ключом: void_acct:<ник>,
+  // void_chats:<ник>, void_pass:<ник>. Благодаря этому на устройстве может
+  // жить несколько аккаунтов, не затирая переписки друг друга.
+  function acctId(nick) { return String(nick || '').trim().toLowerCase(); }
+
+  function loadAccounts() {
+    try { return JSON.parse(localStorage.getItem('void_accounts')) || []; }
+    catch(e) { return []; }
+  }
+
+  function saveAccounts(list) {
+    try { localStorage.setItem('void_accounts', JSON.stringify(list)); } catch(e) {}
+  }
+
+  function upsertAccount(entry) {
+    const list = loadAccounts().filter(a => a.id !== entry.id);
+    list.push(entry);
+    saveAccounts(list);
+  }
+
+  // wipeChats=false оставляет переписку на устройстве — аккаунт просто
+  // перестаёт быть добавленным, но при повторном входе история на месте
+  function forgetAccount(id, wipeChats) {
+    saveAccounts(loadAccounts().filter(a => a.id !== id));
+    try {
+      localStorage.removeItem('void_acct:' + id);
+      localStorage.removeItem('void_pass:' + id);
+      sessionStorage.removeItem('void_sess:' + id);
+      if (wipeChats) localStorage.removeItem('void_chats:' + id);
+    } catch(e) {}
+    try { if (localStorage.getItem('void_active') === id) localStorage.removeItem('void_active'); } catch(e) {}
+  }
+
   // ===== ХРАНЕНИЕ ПАРОЛЯ СЕССИИ =====
   // Из пароля выводится AES-ключ для локальной переписки. sessionStorage
   // умирает вместе с вкладкой, поэтому при «запомнить» дублируем в localStorage —
   // иначе после перезапуска браузера история не расшифровывается, а WS не поднимается.
-  function storeSessionPass(pass, remember) {
-    try { sessionStorage.setItem('void_sess_pass', pass); } catch(e) {}
+  function storeSessionPass(pass, remember, nick) {
+    const id = acctId(nick || myName);
+    if (!id) return;
+    try { sessionStorage.setItem('void_sess:' + id, pass); } catch(e) {}
     try {
-      if (remember) localStorage.setItem('void_dev_pass', pass);
-      else localStorage.removeItem('void_dev_pass');
+      if (remember) localStorage.setItem('void_pass:' + id, pass);
+      else localStorage.removeItem('void_pass:' + id);
     } catch(e) {}
   }
 
-  function readSessionPass() {
-    try { return sessionStorage.getItem('void_sess_pass') || localStorage.getItem('void_dev_pass') || null; }
+  function readSessionPass(nick) {
+    const id = acctId(nick || myName);
+    if (!id) return null;
+    try { return sessionStorage.getItem('void_sess:' + id) || localStorage.getItem('void_pass:' + id) || null; }
     catch(e) { return null; }
   }
 
-  function clearSessionPass() {
-    try { sessionStorage.removeItem('void_sess_pass'); } catch(e) {}
-    try { localStorage.removeItem('void_dev_pass'); } catch(e) {}
+  function clearSessionPass(nick) {
+    const id = acctId(nick || myName);
+    if (!id) return;
+    try { sessionStorage.removeItem('void_sess:' + id); } catch(e) {}
+    try { localStorage.removeItem('void_pass:' + id); } catch(e) {}
+  }
+
+  // Переезд со старого формата (один аккаунт в void_user/void_chats)
+  function migrateLegacyStorage() {
+    let legacy = null;
+    try { legacy = JSON.parse(localStorage.getItem('void_user') || 'null'); } catch(e) {}
+    if (!legacy || !legacy.name) return;
+    const id = acctId(legacy.name);
+    try {
+      localStorage.setItem('void_acct:' + id, JSON.stringify({
+        name: legacy.name, avatar: legacy.avatar || null, seed: legacy.seed || [],
+        authMode: legacy.authMode || 'anon', passwordHash: legacy.passwordHash || null,
+        myStatus: legacy.myStatus || '', isAdmin: legacy.isAdmin === true
+      }));
+      const oldChats = localStorage.getItem('void_chats');
+      if (oldChats !== null) localStorage.setItem('void_chats:' + id, oldChats);
+      localStorage.setItem('void_prefs', JSON.stringify({
+        isDark: legacy.isDark !== false, currentAccent: legacy.currentAccent || 0, lang: legacy.lang || 'ru'
+      }));
+      const oldPass = localStorage.getItem('void_dev_pass');
+      if (oldPass) localStorage.setItem('void_pass:' + id, oldPass);
+      const oldSess = sessionStorage.getItem('void_sess_pass');
+      if (oldSess) sessionStorage.setItem('void_sess:' + id, oldSess);
+      upsertAccount({ id, nick: legacy.name, authMode: legacy.authMode || 'anon',
+                      avatar: legacy.avatar || null, isAdmin: legacy.isAdmin === true });
+      localStorage.setItem('void_active', id);
+      localStorage.removeItem('void_user');
+      localStorage.removeItem('void_chats');
+      localStorage.removeItem('void_dev_pass');
+      sessionStorage.removeItem('void_sess_pass');
+      console.log('[storage] Аккаунт', legacy.name, 'переведён на новый формат');
+    } catch(e) { console.error('[storage] Миграция не удалась', e); }
   }
 
   function hideAllForms() {
@@ -929,12 +1024,16 @@
       serverNick = data.nick;
     } catch(e) {
       // Нет связи — пускаем локально, если эта фраза уже использовалась здесь
-      const stored = JSON.parse(localStorage.getItem('void_user') || 'null');
-      if (!stored || stored.authMode !== 'anon' || (stored.seed || []).join(' ') !== words.join(' ')) {
+      const phrase = words.join(' ');
+      for (const a of loadAccounts()) {
+        let u = null;
+        try { u = JSON.parse(localStorage.getItem('void_acct:' + a.id)); } catch(e2) {}
+        if (u && u.authMode === 'anon' && (u.seed || []).join(' ') === phrase) { serverNick = u.name; break; }
+      }
+      if (!serverNick) {
         error.textContent = 'Нет связи с сервером';
         error.style.display='block'; return;
       }
-      serverNick = stored.name;
     }
 
     currentSeed = words;
@@ -943,6 +1042,10 @@
     myRawPass = token;
     storeSessionPass(token, true);
     cryptoKey = await deriveKey(currentSeed);
+    // Переписка этого аккаунта, если он уже был на устройстве
+    try { chats = JSON.parse(localStorage.getItem('void_chats:' + acctId(serverNick))) || {}; } catch(e) { chats = {}; }
+    currentChat = null;
+    applyPrefs();
     finishAuth(false, 'anon');
   }
 
@@ -950,36 +1053,60 @@
 
   // ===== LOCALSTORAGE =====
   function saveState() {
+    if (!myName) return;
+    const id = acctId(myName);
     try {
-      localStorage.setItem('void_user', JSON.stringify({ name:myName, avatar:myAvatar, seed:currentSeed, isDark, currentAccent, lang, authMode, passwordHash, myStatus, isAdmin }));
-      localStorage.setItem('void_chats', JSON.stringify(chats));
+      // Тема, акцент и язык — настройки устройства, а не аккаунта:
+      // при переключении между аккаунтами оформление не должно скакать
+      localStorage.setItem('void_prefs', JSON.stringify({ isDark, currentAccent, lang }));
+      localStorage.setItem('void_acct:' + id, JSON.stringify({
+        name:myName, avatar:myAvatar, seed:currentSeed, authMode, passwordHash, myStatus, isAdmin
+      }));
+      localStorage.setItem('void_chats:' + id, JSON.stringify(chats));
+      localStorage.setItem('void_active', id);
+      upsertAccount({ id, nick:myName, authMode, avatar:myAvatar, isAdmin });
     } catch(e) {}
+  }
+
+  function applyPrefs() {
+    let p = {};
+    try { p = JSON.parse(localStorage.getItem('void_prefs')) || {}; } catch(e) {}
+    isDark = p.isDark !== false;
+    lang = p.lang || 'ru';
+    currentAccent = p.currentAccent || 0;
+    document.body.classList.toggle('light', !isDark);
+    document.getElementById('theme-label').textContent = isDark ? 'Тёмная тема' : 'Светлая тема';
+    document.getElementById('theme-sub').textContent = 'Сейчас: ' + (isDark ? 'тёмная' : 'светлая');
+    if (currentAccent > 0) applyAccent(currentAccent);
+  }
+
+  // Поднимает в память состояние конкретного аккаунта
+  function loadAccountInto(id) {
+    let user = null;
+    try { user = JSON.parse(localStorage.getItem('void_acct:' + id)); } catch(e) {}
+    if (!user || !user.name) return false;
+    myName = user.name;
+    myAvatar = user.avatar || null;
+    currentSeed = user.seed || [];
+    authMode = user.authMode || 'anon';
+    passwordHash = user.passwordHash || null;
+    myStatus = user.myStatus || '';
+    // Только чтобы пункт меню не мигал при загрузке — реальные права
+    // всё равно подтверждает сервер при auth-ok и на каждом запросе
+    isAdmin = user.isAdmin === true;
+    updateAdminMenuVisibility();
+    try { chats = JSON.parse(localStorage.getItem('void_chats:' + id)) || {}; } catch(e) { chats = {}; }
+    delete chats['__lan__']; // очистка старого формата
+    return true;
   }
 
   function loadState() {
     try {
-      const user = JSON.parse(localStorage.getItem('void_user'));
-      if (!user || !user.name) return false;
-      myName = user.name;
-      myAvatar = user.avatar || null;
-      currentSeed = user.seed || [];
-      isDark = user.isDark !== false;
-      lang = user.lang || 'ru';
-      currentAccent = user.currentAccent || 0;
-      authMode = user.authMode || 'anon';
-      passwordHash = user.passwordHash || null;
-      myStatus = user.myStatus || '';
-      // Только чтобы пункт меню не мигал при загрузке — реальные права
-      // всё равно подтверждает сервер при auth-ok и на каждом запросе
-      isAdmin = user.isAdmin === true;
-      updateAdminMenuVisibility();
-      chats = JSON.parse(localStorage.getItem('void_chats')) || {};
-      delete chats['__lan__']; // очистка старого формата
-      document.body.classList.toggle('light', !isDark);
-      document.getElementById('theme-label').textContent = isDark ? 'Тёмная тема' : 'Светлая тема';
-      document.getElementById('theme-sub').textContent = 'Сейчас: ' + (isDark ? 'тёмная' : 'светлая');
-      if (currentAccent > 0) applyAccent(currentAccent);
-      return true;
+      migrateLegacyStorage();
+      applyPrefs();
+      const id = localStorage.getItem('void_active');
+      if (!id) return false;
+      return loadAccountInto(id);
     } catch(e) { return false; }
   }
 
@@ -1004,6 +1131,8 @@
   }
 
   function finishAuth(isNew = false, mode = 'anon') {
+    saveState();              // аккаунт должен появиться в списке до отрисовки меню
+    updateAccountsMenu();
     updateSeedMenuVisibility();
     document.getElementById('profile-nick').textContent = '@' + myName;
     const statusEl = document.getElementById('profile-status-el');
@@ -1086,6 +1215,7 @@
       if (myAvatar) { el.innerHTML = '<img src="' + myAvatar + '" alt="avatar">'; }
       else { el.textContent = myName[0].toUpperCase(); }
       document.getElementById('register-screen').style.display = 'none';
+      updateAccountsMenu();
       updateSeedMenuVisibility();
       const app = document.getElementById('app');
       app.style.display = 'flex';
@@ -1442,6 +1572,7 @@
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
     currentSeed = [];
+    chats = {}; currentChat = null;   // новый аккаунт — чужую переписку не наследуем
     finishAuth(true, 'simple');
   }
 
@@ -1465,26 +1596,24 @@
       }
       if (!r.ok) { err.textContent = 'Неверный ник или пароль'; err.style.display='block'; return; }
     } catch(e) {
-      // Если нет связи — пробуем локальный вход
-      const stored = JSON.parse(localStorage.getItem('void_user'));
-      if (!stored || stored.name !== nick || stored.authMode !== 'simple') { err.textContent='Нет связи с сервером'; err.style.display='block'; return; }
+      // Если нет связи — пробуем локальный вход по этому же аккаунту
+      let stored = null;
+      try { stored = JSON.parse(localStorage.getItem('void_acct:' + acctId(nick))); } catch(e2) {}
+      if (!stored || stored.authMode !== 'simple') { err.textContent='Нет связи с сервером'; err.style.display='block'; return; }
       const hash = await hashPassword(nick, pass);
       if (hash !== stored.passwordHash) { err.style.display='block'; return; }
     }
-    const stored = JSON.parse(localStorage.getItem('void_user')) || {};
     myName = nick;
     authMode = 'simple';
     myRawPass = pass;
     storeSessionPass(pass, document.getElementById('slogin-remember')?.checked !== false);
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
-    chats = JSON.parse(localStorage.getItem('void_chats')) || {};
+    // Переписка этого аккаунта, если он уже был на устройстве
+    try { chats = JSON.parse(localStorage.getItem('void_chats:' + acctId(nick))) || {}; } catch(e) { chats = {}; }
     currentSeed = [];
-    isDark = stored.isDark !== false;
-    lang = stored.lang || 'ru';
-    currentAccent = stored.currentAccent || 0;
-    document.body.classList.toggle('light', !isDark);
-    if (currentAccent > 0) applyAccent(currentAccent);
+    currentChat = null;
+    applyPrefs();
     finishAuth(false, 'simple');
   }
 
@@ -1528,6 +1657,7 @@
     myRawPass = token;
     storeSessionPass(token, true);
     cryptoKey = await deriveKey(currentSeed);
+    chats = {}; currentChat = null;   // новый аккаунт — чужую переписку не наследуем
     finishAuth(true, 'anon');
   }
 
@@ -1665,6 +1795,7 @@
     document.getElementById('lan-invite-item').style.display = isLan ? 'flex' : 'none';
     document.getElementById('delete-chat-item').style.display = isLan ? 'none' : 'flex';
     document.getElementById('secure-btn').style.display = isLan ? 'none' : 'flex';
+    updateSecureBtn();
     if (menu.classList.contains('open')) {
       setTimeout(() => document.addEventListener('click', closeChatMenuOutside, { once:true }), 0);
     }
@@ -1679,7 +1810,7 @@
 
   // ===== НАВИГАЦИЯ =====
   function backToChats() {
-    if (secureMode) toggleSecure();
+    hideSecureOverlay();          // защиту не выключаем: она включается осознанно
     document.getElementById('chat-view').classList.remove('active');
     document.getElementById('chats-screen').classList.remove('hidden');
     document.getElementById('fab').classList.add('visible');
@@ -2383,25 +2514,66 @@
   }
 
   function logout() {
+    const count = Object.keys(chats).length;
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
-      <div class="modal">
+      <div class="modal" style="max-width:340px;">
         <div class="modal-title">ВЫХОД</div>
-        <div style="font-size:14px;color:var(--text2);line-height:1.6;">Выйти из аккаунта?<br>Все чаты будут удалены.</div>
-        <div class="modal-btns">
-          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
-          <button class="btn-primary" style="background:#ef4444;" onclick="doLogout()">Выйти</button>
+        <div style="font-size:14px;color:var(--text2);line-height:1.6;">
+          Выйти из <b style="color:var(--text);">@${esc(myName)}</b>?<br>
+          ${count ? 'Переписок на устройстве: ' + count : 'Переписок пока нет'}
+        </div>
+        <button class="reg-btn" style="width:100%;margin-top:4px;" onclick="doLogout(false)">Оставить переписку</button>
+        <div style="font-size:11px;color:var(--text3);text-align:center;margin:-2px 0 6px;">История сохранится — при следующем входе будет на месте</div>
+        <button class="reg-btn" style="width:100%;background:transparent;border:1px solid rgba(239,68,68,0.4);color:#ef4444;" onclick="doLogout(true)">Стереть переписку</button>
+        <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:-2px;">Все сообщения этого аккаунта удалятся с устройства</div>
+        <div class="modal-btns" style="margin-top:6px;">
+          <button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
     overlay.addEventListener('click', e => { if(e.target===overlay) overlay.remove(); });
   }
 
-  function doLogout() {
+  // wipeChats=true — стереть переписку этого аккаунта с устройства.
+  // По умолчанию (false) история остаётся и вернётся при следующем входе.
+  function doLogout(wipeChats) {
     document.querySelector('.modal-overlay')?.remove();
-    chats={}; currentChat=null; myName=''; myAvatar=null;
-    try { localStorage.removeItem('void_user'); localStorage.removeItem('void_chats'); } catch(e) {}
+    const leaving = acctId(myName);
+    if (leaving) forgetAccount(leaving, wipeChats === true);
+    resetSessionState();
+
+    // Если на устройстве остались другие аккаунты — переходим в них,
+    // а не выкидываем человека на экран регистрации
+    const rest = loadAccounts();
+    if (rest.length) {
+      switchAccount(rest[rest.length - 1].id);
+      return;
+    }
+    showAuthScreen();
+  }
+
+  // Полная очистка того, что относится к текущей сессии, без трогания хранилища
+  function resetSessionState() {
+    document.getElementById('admin-overlay')?.remove();
+    document.getElementById('accounts-overlay')?.remove();
+    hideSecureOverlay();
+    chats = {}; currentChat = null; myName = ''; myAvatar = null;
+    myStatus = ''; currentSeed = []; passwordHash = null;
+    authMode = 'anon';
+    isAdmin = false; adminUsers = [];
+    updateAdminMenuVisibility();
+    myRawPass = null; cryptoKey = null;
+    dmWsGen++;                 // обработчики старого сокета больше не в счёт
+    clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
+    dmWsAttempt = 0;
+    dropDmWs();
+    const dmEl = document.getElementById('dm-conn-el'); if(dmEl) dmEl.style.display='none';
+  }
+
+  // Показать экран входа/регистрации, не удаляя сохранённые аккаунты
+  function showAuthScreen() {
     document.getElementById('profile-avatar-el').innerHTML = '?';
     document.getElementById('profile-nick').textContent = '—';
     document.getElementById('fab').classList.remove('visible');
@@ -2428,18 +2600,97 @@
     const srn = document.getElementById('sreg-nick'); if(srn) srn.value='';
     const srp = document.getElementById('sreg-pass'); if(srp) srp.value='';
     const srp2 = document.getElementById('sreg-pass2'); if(srp2) srp2.value='';
-    document.getElementById('admin-overlay')?.remove();
-    isAdmin = false; adminUsers = [];
-    updateAdminMenuVisibility();
-    clearSessionPass();
-    myRawPass = null; cryptoKey = null;
-    dmWsGen++;                 // обработчики старого сокета больше не в счёт
-    clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
-    dmWsAttempt = 0;
-    dropDmWs();
-    const dmEl = document.getElementById('dm-conn-el'); if(dmEl) dmEl.style.display='none';
-    authMode = 'anon'; passwordHash = null;
+    updateAccountsMenu();
     generateSeed();
+  }
+
+  // ===== НЕСКОЛЬКО АККАУНТОВ НА УСТРОЙСТВЕ =====
+
+  // Пункт меню показываем только когда аккаунтов больше одного —
+  // иначе он просто мешает
+  function updateAccountsMenu() {
+    const el = document.getElementById('accounts-menu-item');
+    if (!el) return;
+    const n = loadAccounts().length;
+    el.style.display = n ? 'flex' : 'none';
+    const sub = document.getElementById('accounts-menu-sub');
+    if (sub) sub.textContent = n > 1 ? 'На устройстве: ' + n : 'Добавить ещё один';
+  }
+
+  async function switchAccount(id) {
+    if (!id || id === acctId(myName)) { document.getElementById('accounts-overlay')?.remove(); return; }
+    saveState();                 // не теряем то, что успели написать
+    document.getElementById('accounts-overlay')?.remove();
+    resetSessionState();
+
+    if (!loadAccountInto(id)) { showToast('Аккаунт не найден'); showAuthScreen(); return; }
+    try { localStorage.setItem('void_active', id); } catch(e) {}
+
+    document.getElementById('profile-nick').textContent = '@' + myName;
+    const av = document.getElementById('profile-avatar-el');
+    if (myAvatar) av.innerHTML = '<img src="' + myAvatar + '" alt="avatar">';
+    else av.textContent = myName[0].toUpperCase();
+
+    if (authMode === 'anon' && currentSeed.length) {
+      // Фраза хранится вместе с аккаунтом — токен и ключ считаем сами,
+      // спрашивать пользователя нечего
+      myRawPass = await seedAuthToken(currentSeed);
+      cryptoKey = await deriveKey(currentSeed);
+    } else {
+      const saved = readSessionPass();
+      if (!saved) {
+        // Пароль не сохранён — просим его, а не пускаем в приложение без ключа
+        showUnlockScreen();
+        return;
+      }
+      myRawPass = saved;
+      cryptoKey = await deriveKey([myName, saved]);
+    }
+    showToast('Аккаунт: @' + myName);
+    finishAuth(false, authMode);
+  }
+
+  // Добавить ещё один аккаунт: текущий остаётся на устройстве
+  function addAccount() {
+    saveState();
+    document.getElementById('accounts-overlay')?.remove();
+    resetSessionState();
+    showAuthScreen();
+    showToast('Войди в другой аккаунт');
+  }
+
+  function showAccountsModal() {
+    closeSidebar();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'accounts-overlay';
+    const active = acctId(myName);
+    const rows = loadAccounts().map(a => {
+      const isActive = a.id === active;
+      const av = a.avatar
+        ? '<img src="' + a.avatar + '" alt="">'
+        : esc((a.nick || '?')[0].toUpperCase());
+      return '<div class="acc-row' + (isActive ? ' active' : '') + '"' +
+        (isActive ? '' : ' onclick="switchAccount(\'' + esc(a.id) + '\')"') + '>' +
+          '<div class="acc-avatar">' + av + '</div>' +
+          '<div class="acc-info">' +
+            '<div class="acc-nick">@' + esc(a.nick) + '</div>' +
+            '<div class="acc-sub">' + (a.authMode === 'anon' ? 'по сид-фразе' : 'ник и пароль') +
+              (a.isAdmin ? ' · админ' : '') + '</div>' +
+          '</div>' +
+          (isActive ? '<div class="acc-badge">активен</div>' : '<div class="acc-arrow">›</div>') +
+        '</div>';
+    }).join('');
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:360px;">
+        <div class="modal-title">АККАУНТЫ</div>
+        <div class="acc-list">${rows || '<div class="adm-empty">Нет сохранённых аккаунтов</div>'}</div>
+        <button class="reg-btn" style="width:100%;" onclick="addAccount()">+ Добавить аккаунт</button>
+        <div style="font-size:11px;color:var(--text3);text-align:center;margin-top:-2px;">Текущий аккаунт останется на устройстве</div>
+        <div class="modal-btns"><button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   }
 
   // ===== СТИКЕРЫ =====
@@ -2969,34 +3220,48 @@
   let secureMode = false;
   let secureOverlay = null;
 
-  function toggleSecure() {
-    secureMode = !secureMode;
+  // Слушатели вешаются один раз: раньше они снимались при выходе из чата,
+  // и защита незаметно переставала работать
+  document.addEventListener('visibilitychange', () => { if (document.hidden) showSecureOverlay(); });
+  window.addEventListener('blur', showSecureOverlay);
+  window.addEventListener('pagehide', showSecureOverlay);
+
+  function updateSecureBtn() {
     const btn = document.getElementById('secure-btn');
-    if (secureMode) {
-      btn.classList.add('active');
-      btn.title = 'Защита включена';
-      document.addEventListener('visibilitychange', handleVisibility);
-    } else {
-      btn.classList.remove('active');
-      btn.title = 'Защита выключена';
-      document.removeEventListener('visibilitychange', handleVisibility);
-      hideSecureOverlay();
-    }
+    if (!btn) return;
+    btn.classList.toggle('active', secureMode);
+    btn.textContent = secureMode ? '🛡️ Защита: вкл' : '🛡️ Защита: выкл';
+    btn.title = secureMode ? 'Защита включена' : 'Защита выключена';
   }
 
-  function handleVisibility() {
-    if (document.hidden) showSecureOverlay(); else hideSecureOverlay();
+  function loadSecureMode() {
+    try { secureMode = localStorage.getItem('void_secure') === '1'; } catch(e) { secureMode = false; }
+    updateSecureBtn();
+  }
+
+  function toggleSecure() {
+    secureMode = !secureMode;
+    try { localStorage.setItem('void_secure', secureMode ? '1' : '0'); } catch(e) {}
+    updateSecureBtn();
+    if (secureMode) {
+      showToast('🛡️ Защита включена');
+    } else {
+      hideSecureOverlay();
+      showToast('Защита выключена');
+    }
   }
 
   function showSecureOverlay() {
     if (secureOverlay || !secureMode) return;
     secureOverlay = document.createElement('div');
     secureOverlay.className = 'secure-overlay';
+    // Экран НЕ убирается сам при возврате: иначе подсмотреть содержимое можно
+    // было бы в момент переключения, да и пользователь не видел, что защита сработала
     secureOverlay.innerHTML = `
       <div class="secure-overlay-icon">🛡️</div>
-      <div class="secure-overlay-text">СОДЕРЖИМОЕ ЗАЩИЩЕНО</div>
-      <button onclick="hideSecureOverlay()" style="margin-top:24px;padding:12px 28px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:14px;color:var(--text2);font-size:14px;font-family:'Space Mono',monospace;cursor:pointer;letter-spacing:2px;">ВЕРНУТЬСЯ</button>
-      <button onclick="toggleSecure()" style="margin-top:8px;padding:10px 24px;background:transparent;border:none;color:var(--text3);font-size:12px;font-family:'Inter',sans-serif;cursor:pointer;">Выключить защиту</button>
+      <div class="secure-overlay-text">СОДЕРЖИМОЕ СКРЫТО</div>
+      <button onclick="hideSecureOverlay()" style="margin-top:24px;padding:12px 28px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:14px;color:var(--text2);font-size:14px;font-family:'Space Mono',monospace;cursor:pointer;letter-spacing:2px;">ПОКАЗАТЬ</button>
+      <button onclick="toggleSecure();hideSecureOverlay();" style="margin-top:8px;padding:10px 24px;background:transparent;border:none;color:var(--text3);font-size:12px;font-family:'Inter',sans-serif;cursor:pointer;">Выключить защиту</button>
     `;
     document.body.appendChild(secureOverlay);
   }
@@ -3004,6 +3269,8 @@
   function hideSecureOverlay() {
     if (secureOverlay) { secureOverlay.remove(); secureOverlay = null; }
   }
+
+  loadSecureMode();
 
   // ===== ОНБОРДИНГ =====
   const OB_SLIDES = {
