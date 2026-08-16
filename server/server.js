@@ -7,6 +7,8 @@ const path = require('path');
 // ===== НАСТРОЙКИ =====
 const PORT          = Number(process.env.PORT) || 3000;
 const ADMIN_KEY     = process.env.VOID_ADMIN_KEY || '';
+const ADMIN_NICK    = 'Void';                        // единственный админ-аккаунт
+const ADMIN_PASS    = process.env.VOID_ADMIN_PASSWORD || '';
 const MAX_BODY      = 16 * 1024;        // максимум тела HTTP-запроса
 const MAX_TEXT      = 4000;             // максимум длины сообщения
 const MAX_PAYLOAD   = 256 * 1024;       // максимум размера WS-кадра
@@ -42,14 +44,31 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_messages_ts       ON messages(timestamp);
 `);
 
-const qUserByNick  = db.prepare('SELECT nick, password_hash FROM users WHERE nick = ? COLLATE NOCASE');
-const qNickExists  = db.prepare('SELECT nick FROM users WHERE nick = ? COLLATE NOCASE');
+// Миграция: у существующих баз этих колонок нет, CREATE TABLE их не добавит
+{
+  const cols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
+  if (!cols.includes('banned'))     db.exec('ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0');
+  if (!cols.includes('is_admin'))   db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
+  if (!cols.includes('banned_at'))  db.exec('ALTER TABLE users ADD COLUMN banned_at INTEGER');
+  if (!cols.includes('ban_reason')) db.exec('ALTER TABLE users ADD COLUMN ban_reason TEXT');
+}
+
+const qUserByNick  = db.prepare('SELECT nick, password_hash, banned, is_admin FROM users WHERE nick = ? COLLATE NOCASE');
+const qNickExists  = db.prepare('SELECT nick, banned FROM users WHERE nick = ? COLLATE NOCASE');
 const qInsertUser  = db.prepare('INSERT INTO users (nick, password_hash) VALUES (?, ?)');
 const qUpdateHash  = db.prepare('UPDATE users SET password_hash = ? WHERE nick = ?');
 const qSearchUsers = db.prepare("SELECT nick FROM users WHERE nick LIKE ? ESCAPE '\\' ORDER BY nick LIMIT 10");
 const qInsertMsg   = db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered) VALUES (?, ?, ?, ?, ?)');
 const qPending     = db.prepare('SELECT id, from_nick, text, timestamp FROM messages WHERE to_nick = ? AND delivered = 0 ORDER BY timestamp');
 const qMarkOne     = db.prepare('UPDATE messages SET delivered = 1 WHERE id = ?');
+const qListUsers   = db.prepare(`
+  SELECT u.nick, u.created_at, u.banned, u.is_admin, u.banned_at, u.ban_reason,
+         (SELECT COUNT(*) FROM messages m WHERE m.from_nick = u.nick OR m.to_nick = u.nick) AS messages
+  FROM users u ORDER BY u.is_admin DESC, u.nick COLLATE NOCASE
+`);
+const qSetBan      = db.prepare('UPDATE users SET banned = ?, banned_at = ?, ban_reason = ? WHERE nick = ?');
+const qDeleteUser  = db.prepare('DELETE FROM users WHERE nick = ?');
+const qDeleteMsgs  = db.prepare('DELETE FROM messages WHERE from_nick = ? OR to_nick = ?');
 
 // ===== ПАРОЛИ =====
 // Новый формат: s2$<salt>$<key> (scrypt). Старый: голый sha256-hex — принимаем
@@ -86,7 +105,7 @@ function scryptVerify(pass, stored) {
   });
 }
 
-// Возвращает канонический ник (как он записан в БД) либо null.
+// Возвращает { nick, banned, is_admin } с каноническим ником либо null.
 async function verifyUser(nick, password) {
   if (typeof nick !== 'string' || typeof password !== 'string') return null;
   nick = nick.trim();
@@ -98,6 +117,7 @@ async function verifyUser(nick, password) {
     await scryptHash(password).catch(() => {});
     return null;
   }
+  const info = { nick: row.nick, banned: !!row.banned, is_admin: !!row.is_admin };
 
   if (LEGACY_HASH_RE.test(row.password_hash)) {
     const a = Buffer.from(legacyHash(row.nick, password), 'hex');
@@ -105,10 +125,57 @@ async function verifyUser(nick, password) {
     if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
     try { qUpdateHash.run(await scryptHash(password), row.nick); }
     catch (e) { console.error('[auth] Не удалось обновить хеш:', e.message); }
-    return row.nick;
+    return info;
   }
 
-  return (await scryptVerify(password, row.password_hash)) ? row.nick : null;
+  return (await scryptVerify(password, row.password_hash)) ? info : null;
+}
+
+// Разрывает живое соединение пользователя — после бана или удаления
+// он не должен оставаться подключённым до следующего обрыва.
+function kickUser(nick, reason) {
+  const ws = online[nick];
+  if (!ws) return false;
+  try { ws.send(JSON.stringify({ type: 'kicked', reason })); ws.close(4003, reason); } catch (e) {}
+  delete online[nick];
+  return true;
+}
+
+// Провижининг админа. Пароль берём только из окружения — в репозитории
+// его быть не должно. Если аккаунт занят обычным пользователем, пересоздаём.
+function ensureAdmin() {
+  if (!ADMIN_PASS) {
+    const row = qUserByNick.get(ADMIN_NICK);
+    if (!row || !row.is_admin) {
+      console.warn('[admin] VOID_ADMIN_PASSWORD не задан — админ-аккаунт не создан.');
+      console.warn('[admin] Задай пароль: pm2 set void-signal:VOID_ADMIN_PASSWORD <пароль>');
+    }
+    return;
+  }
+  if (ADMIN_PASS.length < 12) {
+    console.warn('[admin] VOID_ADMIN_PASSWORD короче 12 символов — админ не создан.');
+    return;
+  }
+  scryptHash(ADMIN_PASS).then(hash => {
+    const existing = qUserByNick.get(ADMIN_NICK);
+    if (existing) {
+      // Ник мог быть занят обычным юзером — сносим его вместе с перепиской
+      db.prepare('DELETE FROM messages WHERE from_nick = ? OR to_nick = ?').run(existing.nick, existing.nick);
+      qDeleteUser.run(existing.nick);
+      kickUser(existing.nick, 'admin-reset');
+      console.log('[admin] Старый аккаунт', existing.nick, 'удалён и пересоздан');
+    }
+    db.prepare('INSERT INTO users (nick, password_hash, banned, is_admin) VALUES (?, ?, 0, 1)')
+      .run(ADMIN_NICK, hash);
+    console.log('[admin] Админ-аккаунт', ADMIN_NICK, 'готов');
+  }).catch(e => console.error('[admin] Не удалось создать админа:', e.message));
+}
+
+// Проверка прав администратора для /api/admin/*
+async function requireAdmin(body) {
+  const u = await verifyUser(body && body.admin, body && body.password);
+  if (!u || !u.is_admin || u.banned) return null;
+  return u;
 }
 
 // ===== ЛИМИТЫ ЗАПРОСОВ =====
@@ -213,9 +280,76 @@ const server = http.createServer((req, res) => {
       return json(429, { error: 'Слишком много попыток, подожди' });
     }
     readBody(async (body) => {
-      const canon = await verifyUser(body.nick, body.password);
-      if (canon) json(200, { ok: true, nick: canon });
-      else json(401, { error: 'Неверный ник или пароль' });
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      json(200, { ok: true, nick: u.nick, admin: u.is_admin });
+    });
+    return;
+  }
+
+  // ===== АДМИН =====
+  if (req.method === 'POST' && url.pathname.startsWith('/api/admin/')) {
+    if (!rateLimit('admin:' + clientIp(req), 60, 600000)) {
+      return json(429, { error: 'Слишком много запросов' });
+    }
+    const action = url.pathname.slice('/api/admin/'.length);
+
+    readBody(async (body) => {
+      const admin = await requireAdmin(body);
+      if (!admin) {
+        console.warn('[admin] Отказано в доступе с', clientIp(req));
+        return json(403, { error: 'Нет прав администратора' });
+      }
+
+      if (action === 'users') {
+        return json(200, {
+          ok: true,
+          users: qListUsers.all().map(u => ({
+            nick: u.nick,
+            banned: !!u.banned,
+            admin: !!u.is_admin,
+            online: !!online[u.nick],
+            messages: u.messages,
+            createdAt: u.created_at,
+            bannedAt: u.banned_at || null,
+            banReason: u.ban_reason || null
+          }))
+        });
+      }
+
+      const targetNick = typeof body.nick === 'string' ? body.nick.trim() : '';
+      if (!targetNick) return json(400, { error: 'Не указан ник' });
+      const target = qUserByNick.get(targetNick);
+      if (!target) return json(404, { error: 'Пользователь не найден' });
+      if (target.is_admin) return json(400, { error: 'Нельзя трогать админ-аккаунт' });
+
+      if (action === 'ban') {
+        if (target.banned) return json(200, { ok: true, nick: target.nick, banned: true, note: 'Уже заблокирован' });
+        const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 200) : null;
+        qSetBan.run(1, Date.now(), reason, target.nick);
+        const kicked = kickUser(target.nick, 'banned');
+        console.log('[admin] BAN', target.nick, reason ? '(' + reason + ')' : '', kicked ? '| отключён' : '');
+        return json(200, { ok: true, nick: target.nick, banned: true, kicked });
+      }
+
+      if (action === 'unban') {
+        if (!target.banned) return json(200, { ok: true, nick: target.nick, banned: false, note: 'Не был заблокирован' });
+        qSetBan.run(0, null, null, target.nick);
+        console.log('[admin] UNBAN', target.nick);
+        return json(200, { ok: true, nick: target.nick, banned: false });
+      }
+
+      if (action === 'delete') {
+        // Полное удаление: ник освобождается и может быть занят заново
+        const msgs = qDeleteMsgs.run(target.nick, target.nick).changes;
+        qDeleteUser.run(target.nick);
+        const kicked = kickUser(target.nick, 'deleted');
+        console.log('[admin] DELETE', target.nick, '| сообщений удалено:', msgs);
+        return json(200, { ok: true, nick: target.nick, deleted: true, messagesDeleted: msgs, kicked });
+      }
+
+      json(404, { error: 'Неизвестное действие' });
     });
     return;
   }
@@ -309,13 +443,22 @@ wss.on('connection', (ws, req) => {
           send({ type: 'auth-fail', error: 'rate-limit' });
           return;
         }
-        const canon = await verifyUser(msg.nick, msg.password);
+        const u = await verifyUser(msg.nick, msg.password);
         if (ws.readyState !== 1) return;  // сокет закрылся, пока считался scrypt
-        if (!canon) {
+        if (!u) {
           console.log('[auth] FAIL for', msg.nick);
           send({ type: 'auth-fail' });
           return;
         }
+        if (u.banned) {
+          // auth-fail без reason клиент попытается «починить» авторегистрацией,
+          // поэтому причину указываем явно
+          console.log('[auth] BANNED', u.nick);
+          send({ type: 'auth-fail', error: 'banned' });
+          ws.close(4003, 'banned');
+          return;
+        }
+        const canon = u.nick;
 
         goOffline();                      // сбрасываем прошлую личность этого сокета
         const prev = online[canon];
@@ -356,6 +499,7 @@ wss.on('connection', (ws, req) => {
         // регистру, поэтому без этого сообщение легло бы в несуществующий ящик.
         const target = qNickExists.get(to);
         if (!target) { send({ type: 'dm-error', to, error: 'no-such-user' }); return; }
+        if (target.banned) { send({ type: 'dm-error', to, error: 'user-banned' }); return; }
 
         const toNick = target.nick;
         const timestamp = Date.now();
@@ -465,4 +609,5 @@ function shutdown(signal) {
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
 
+ensureAdmin();
 server.listen(PORT, () => console.log('VOID server running on :' + PORT));
