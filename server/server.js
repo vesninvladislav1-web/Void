@@ -468,7 +468,7 @@ wss.on('connection', (ws, req) => {
         }
         nick = canon;
         online[nick] = ws;
-        send({ type: 'auth-ok', nick });
+        send({ type: 'auth-ok', nick, admin: u.is_admin });
         console.log('[auth] OK for', nick, '| online:', Object.keys(online).length);
 
         // Доставить накопленные сообщения (помечаем каждое по id, а не пачкой:

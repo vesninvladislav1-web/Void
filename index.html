@@ -269,6 +269,32 @@
   .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:200; backdrop-filter:blur(4px); }
   .modal { background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:var(--radius-xl); padding:28px; width:320px; display:flex; flex-direction:column; gap:16px; max-height:85vh; overflow-y:auto; }
   .modal-title { font-family:'Space Mono',monospace; font-size:15px; font-weight:700; letter-spacing:2px; }
+  /* ===== АДМИН-ПАНЕЛЬ ===== */
+  .adm-modal { width:min(94vw,480px); max-height:86vh; display:flex; flex-direction:column; gap:12px; }
+  .adm-search { width:100%; padding:10px 14px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; outline:none; }
+  .adm-search:focus { border-color:var(--accent); }
+  .adm-list { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; min-height:120px; margin:0 -4px; padding:0 4px; }
+  .adm-row { background:var(--bg3); border:1px solid var(--border); border-radius:12px; padding:11px 13px; display:flex; flex-direction:column; gap:9px; }
+  .adm-row.banned { border-color:rgba(239,68,68,0.4); background:rgba(239,68,68,0.06); }
+  .adm-row.admin  { border-color:rgba(245,158,11,0.4); background:rgba(245,158,11,0.06); }
+  .adm-head { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .adm-nick { font-size:14px; color:var(--text); font-weight:600; word-break:break-all; }
+  .adm-tag { font-size:10px; padding:2px 7px; border-radius:20px; font-family:'Space Mono',monospace; letter-spacing:0.5px; white-space:nowrap; }
+  .adm-tag.on     { background:rgba(34,197,94,0.15); color:var(--online); }
+  .adm-tag.ban    { background:rgba(239,68,68,0.15); color:#ef4444; }
+  .adm-tag.adm    { background:rgba(245,158,11,0.15); color:#F59E0B; }
+  .adm-meta { font-size:11px; color:var(--text3); }
+  .adm-acts { display:flex; gap:7px; flex-wrap:wrap; }
+  .adm-btn { flex:1; min-width:88px; padding:8px 10px; border-radius:10px; border:1px solid var(--border); background:var(--bg2); color:var(--text2); font-size:12px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.15s; }
+  .adm-btn:hover:not(:disabled) { background:var(--glass); color:var(--text); }
+  .adm-btn:disabled { opacity:0.45; cursor:not-allowed; }
+  .adm-btn.warn { color:#F59E0B; border-color:rgba(245,158,11,0.35); }
+  .adm-btn.warn:hover:not(:disabled) { background:rgba(245,158,11,0.12); }
+  .adm-btn.danger { color:#ef4444; border-color:rgba(239,68,68,0.35); }
+  .adm-btn.danger:hover:not(:disabled) { background:rgba(239,68,68,0.12); }
+  .adm-btn.good { color:var(--online); border-color:rgba(34,197,94,0.35); }
+  .adm-btn.good:hover:not(:disabled) { background:rgba(34,197,94,0.12); }
+  .adm-empty { text-align:center; color:var(--text3); font-size:13px; padding:26px 0; }
   .modal-input { background:var(--bg3); border:1px solid var(--border); border-radius:12px; padding:12px 16px; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; outline:none; width:100%; transition:border 0.2s; }
   .modal-input:focus { border-color:var(--accent); }
   .modal-btns { display:flex; gap:10px; }
@@ -613,6 +639,15 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
+      <div class="settings-item" id="admin-menu-item" style="display:none;" onclick="showAdminPanel()">
+        <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);">🛡️</div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Админ-панель</div>
+          <div class="settings-item-sub">Управление аккаунтами</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
       <div class="settings-section-label">О приложении</div>
 
       <div class="settings-item" onclick="showAboutModal()">
@@ -873,7 +908,7 @@
   // ===== LOCALSTORAGE =====
   function saveState() {
     try {
-      localStorage.setItem('void_user', JSON.stringify({ name:myName, avatar:myAvatar, seed:currentSeed, isDark, currentAccent, lang, authMode, passwordHash, myStatus }));
+      localStorage.setItem('void_user', JSON.stringify({ name:myName, avatar:myAvatar, seed:currentSeed, isDark, currentAccent, lang, authMode, passwordHash, myStatus, isAdmin }));
       localStorage.setItem('void_chats', JSON.stringify(chats));
     } catch(e) {}
   }
@@ -891,6 +926,10 @@
       authMode = user.authMode || 'anon';
       passwordHash = user.passwordHash || null;
       myStatus = user.myStatus || '';
+      // Только чтобы пункт меню не мигал при загрузке — реальные права
+      // всё равно подтверждает сервер при auth-ok и на каждом запросе
+      isAdmin = user.isAdmin === true;
+      updateAdminMenuVisibility();
       chats = JSON.parse(localStorage.getItem('void_chats')) || {};
       delete chats['__lan__']; // очистка старого формата
       document.body.classList.toggle('light', !isDark);
@@ -1078,6 +1117,8 @@
   let authMode = 'anon', passwordHash = null;
   let myStatus = '';
   let replyTo = null;
+  let isAdmin = false;      // подтверждается сервером при auth-ok
+  let adminUsers = [];
 
   // ===== СЕРВЕР =====
   const API = 'https://voidm.site';
@@ -1212,6 +1253,9 @@
         if (msg.type === 'auth-ok') {
           dmWsAuthOk = true;
           dmWsAttempt = 0;
+          isAdmin = !!msg.admin;     // права подтверждает только сервер
+          updateAdminMenuVisibility();
+          saveState();
           clearTimeout(dmWsWatchdog); dmWsWatchdog = null;
           updateDmStatus('ok');
           console.log('[DM] Auth OK');
@@ -2090,6 +2134,125 @@
     overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();});
   }
 
+  // ===== АДМИН-ПАНЕЛЬ =====
+  function updateAdminMenuVisibility() {
+    const el = document.getElementById('admin-menu-item');
+    if (el) el.style.display = isAdmin ? 'flex' : 'none';
+  }
+
+  // Все админ-запросы подписываются ником и паролем текущей сессии
+  async function adminCall(action, extra) {
+    if (!isAdmin || !myRawPass) throw new Error('Нет прав администратора');
+    const r = await fetch(API + '/api/admin/' + action, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin: myName, password: myRawPass, ...extra })
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || 'Ошибка сервера');
+    return data;
+  }
+
+  function showAdminPanel() {
+    closeSidebar();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'admin-overlay';
+    overlay.innerHTML = `
+      <div class="modal adm-modal">
+        <div class="modal-title">АДМИН-ПАНЕЛЬ</div>
+        <input class="adm-search" id="adm-search" placeholder="Поиск по нику..." autocomplete="off">
+        <div class="adm-list" id="adm-list"><div class="adm-empty">Загрузка...</div></div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="loadAdminUsers()">Обновить</button>
+          <button class="btn-primary" onclick="document.getElementById('admin-overlay')?.remove()">Закрыть</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.getElementById('adm-search').addEventListener('input', renderAdminUsers);
+    loadAdminUsers();
+  }
+
+  async function loadAdminUsers() {
+    const list = document.getElementById('adm-list');
+    if (!list) return;
+    list.innerHTML = '<div class="adm-empty">Загрузка...</div>';
+    try {
+      const data = await adminCall('users', {});
+      adminUsers = data.users || [];
+      renderAdminUsers();
+    } catch (e) {
+      list.innerHTML = '<div class="adm-empty">Ошибка: ' + esc(e.message) + '</div>';
+    }
+  }
+
+  function renderAdminUsers() {
+    const list = document.getElementById('adm-list');
+    if (!list) return;
+    const q = (document.getElementById('adm-search')?.value || '').trim().toLowerCase();
+    const rows = adminUsers.filter(u => !q || u.nick.toLowerCase().includes(q));
+    if (!rows.length) {
+      list.innerHTML = '<div class="adm-empty">' + (q ? 'Ничего не найдено' : 'Аккаунтов нет') + '</div>';
+      return;
+    }
+    list.innerHTML = rows.map(u => {
+      const n = esc(u.nick);
+      const tags =
+        (u.admin  ? '<span class="adm-tag adm">АДМИН</span>' : '') +
+        (u.banned ? '<span class="adm-tag ban">ЗАБЛОКИРОВАН</span>' : '') +
+        (u.online ? '<span class="adm-tag on">онлайн</span>' : '');
+      const meta = 'Сообщений: ' + u.messages + (u.banned && u.banReason ? ' · причина: ' + esc(u.banReason) : '');
+      // Ник подставляется в onclick, поэтому пропускаем только заведомо
+      // безопасный набор символов, а не полагаемся на валидацию в другом месте
+      const safe = /^[a-zA-Z0-9_]{1,16}$/.test(u.nick);
+      // Админ-аккаунт защищён на сервере — здесь просто не показываем кнопки
+      const acts = u.admin ? '' : (safe ? `
+        <div class="adm-acts">
+          ${u.banned
+            ? `<button class="adm-btn good" onclick="adminUnban('${u.nick}')">Разблокировать</button>`
+            : `<button class="adm-btn warn" onclick="adminBan('${u.nick}')">Заблокировать</button>`}
+          <button class="adm-btn danger" onclick="adminDelete('${u.nick}')">Удалить</button>
+        </div>`
+        : '<div class="adm-meta" style="color:#ef4444;">Недопустимый ник — управляй через admin.js</div>');
+      return `<div class="adm-row ${u.admin ? 'admin' : u.banned ? 'banned' : ''}">
+          <div class="adm-head"><span class="adm-nick">${n}</span>${tags}</div>
+          <div class="adm-meta">${meta}</div>
+          ${acts}
+        </div>`;
+    }).join('');
+  }
+
+  async function adminBan(nick) {
+    const reason = prompt('Причина блокировки для ' + nick + ' (можно оставить пустым):');
+    if (reason === null) return;   // нажали «Отмена»
+    try {
+      await adminCall('ban', { nick, reason: reason.trim() || null });
+      showToast(nick + ' заблокирован');
+      loadAdminUsers();
+    } catch (e) { showToast(e.message); }
+  }
+
+  async function adminUnban(nick) {
+    try {
+      await adminCall('unban', { nick });
+      showToast(nick + ' разблокирован');
+      loadAdminUsers();
+    } catch (e) { showToast(e.message); }
+  }
+
+  async function adminDelete(nick) {
+    // Необратимо, поэтому просим ввести ник целиком
+    const typed = prompt('УДАЛИТЬ НАВСЕГДА вместе со всей перепиской.\nВведи ник "' + nick + '" для подтверждения:');
+    if (typed === null) return;
+    if (typed.trim() !== nick) { showToast('Ник не совпал — отменено'); return; }
+    try {
+      const r = await adminCall('delete', { nick });
+      showToast(nick + ' удалён (сообщений: ' + r.messagesDeleted + ')');
+      loadAdminUsers();
+    } catch (e) { showToast(e.message); }
+  }
+
   function showAboutModal() {
     const overlay=document.createElement('div');
     overlay.className='modal-overlay';
@@ -2149,6 +2312,9 @@
     const srn = document.getElementById('sreg-nick'); if(srn) srn.value='';
     const srp = document.getElementById('sreg-pass'); if(srp) srp.value='';
     const srp2 = document.getElementById('sreg-pass2'); if(srp2) srp2.value='';
+    document.getElementById('admin-overlay')?.remove();
+    isAdmin = false; adminUsers = [];
+    updateAdminMenuVisibility();
     clearSessionPass();
     myRawPass = null; cryptoKey = null;
     dmWsGen++;                 // обработчики старого сокета больше не в счёт
