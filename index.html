@@ -78,6 +78,8 @@
   .copy-seed-btn:hover { border-color:var(--accent); color:var(--accent); }
   .copy-seed-btn.copied { border-color:var(--online); color:var(--online); }
   .reg-hint { font-size:11px; color:var(--text3); text-align:center; line-height:1.6; }
+  .remember-row { display:flex; align-items:center; gap:8px; width:100%; font-size:12px; color:var(--text2); cursor:pointer; user-select:none; margin-top:2px; }
+  .remember-row input { accent-color:var(--accent); width:15px; height:15px; cursor:pointer; flex:0 0 auto; }
   .reg-btn { width:100%; padding:14px; background:var(--accent); border:none; border-radius:14px; color:white; font-size:15px; font-family:'Space Mono',monospace; font-weight:700; letter-spacing:3px; cursor:pointer; transition:opacity 0.2s,transform 0.2s; margin-top:4px; }
   .reg-btn:hover { background:#E55A3C; opacity:0.85; transform:scale(1.02); }
 
@@ -445,6 +447,7 @@
     <input type="password" class="reg-input" id="sreg-pass" placeholder="минимум 6 символов">
     <input type="password" class="reg-input" id="sreg-pass2" placeholder="повтори пароль">
     <div id="sreg-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Ошибка</div>
+    <label class="remember-row"><input type="checkbox" id="sreg-remember" checked><span>Запомнить на этом устройстве</span></label>
     <div class="reg-hint">Минимум 6 символов. Пароль нельзя восстановить.</div>
     <div style="display:flex;gap:10px;width:100%;">
       <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
@@ -482,10 +485,22 @@
     <div class="reg-label" style="margin-top:4px;">Пароль</div>
     <input type="password" class="reg-input" id="slogin-pass" placeholder="твой пароль">
     <div id="slogin-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Неверный ник или пароль</div>
+    <label class="remember-row"><input type="checkbox" id="slogin-remember" checked><span>Запомнить на этом устройстве</span></label>
     <div style="display:flex;gap:10px;width:100%;">
       <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="loginSimple()">ВОЙТИ</button>
     </div>
+  </div>
+
+  <!-- Разблокировка: сессия жива, но ключ шифрования потерян -->
+  <div class="reg-form" id="unlock-form" style="display:none;opacity:0;">
+    <div class="reg-label">С возвращением, <span id="unlock-nick">—</span></div>
+    <div class="reg-hint" style="margin:0 0 4px;">Введи пароль, чтобы расшифровать переписку.</div>
+    <input type="password" class="reg-input" id="unlock-pass" placeholder="твой пароль" onkeydown="if(event.key==='Enter') doUnlock()">
+    <div id="unlock-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Неверный пароль</div>
+    <label class="remember-row"><input type="checkbox" id="unlock-remember" checked><span>Запомнить на этом устройстве</span></label>
+    <button class="reg-btn" style="width:100%;" onclick="doUnlock()">ОТКРЫТЬ</button>
+    <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);width:100%;margin-top:4px;" onclick="doLogout()">Выйти из аккаунта</button>
   </div>
 
   <!-- Форма входа -->
@@ -727,7 +742,29 @@
   const EN_WORDS = ['stone','river','forest','flame','shadow','blade','storm','frost','crown','falcon','iron','wolf','ghost','raven','tower','shield','anchor','arrow','cloud','ember','valley','peak','hollow','bridge','lantern','crystal','cipher','signal','circuit','pulse','void','echo'];
   let currentSeed = [];
 
-  const ALL_FORMS = ['simple-reg-form','reg-form','login-select','simple-login-form','login-form'];
+  const ALL_FORMS = ['simple-reg-form','reg-form','login-select','simple-login-form','login-form','unlock-form'];
+
+  // ===== ХРАНЕНИЕ ПАРОЛЯ СЕССИИ =====
+  // Из пароля выводится AES-ключ для локальной переписки. sessionStorage
+  // умирает вместе с вкладкой, поэтому при «запомнить» дублируем в localStorage —
+  // иначе после перезапуска браузера история не расшифровывается, а WS не поднимается.
+  function storeSessionPass(pass, remember) {
+    try { sessionStorage.setItem('void_sess_pass', pass); } catch(e) {}
+    try {
+      if (remember) localStorage.setItem('void_dev_pass', pass);
+      else localStorage.removeItem('void_dev_pass');
+    } catch(e) {}
+  }
+
+  function readSessionPass() {
+    try { return sessionStorage.getItem('void_sess_pass') || localStorage.getItem('void_dev_pass') || null; }
+    catch(e) { return null; }
+  }
+
+  function clearSessionPass() {
+    try { sessionStorage.removeItem('void_sess_pass'); } catch(e) {}
+    try { localStorage.removeItem('void_dev_pass'); } catch(e) {}
+  }
 
   function hideAllForms() {
     ALL_FORMS.forEach(id => { const el = document.getElementById(id); if(el) el.style.display='none'; });
@@ -746,6 +783,51 @@
     hideAllForms();
     const ss = document.getElementById('start-screen');
     ss.style.display='flex'; ss.style.animation='fadeInUp 0.4s ease forwards';
+  }
+
+  // Сессия есть, ключа нет — просим пароль, не теряя аккаунт и историю
+  function showUnlockScreen() {
+    lV.classList.remove('dim'); lI.classList.remove('dim');  // неон остановлен, буквы не должны залипнуть
+    const app = document.getElementById('app');
+    app.classList.remove('visible');
+    app.style.display = 'none';
+    document.getElementById('fab').classList.remove('visible');
+    document.getElementById('unlock-nick').textContent = '@' + myName;
+    document.getElementById('unlock-pass').value = '';
+    document.getElementById('unlock-error').style.display = 'none';
+    const reg = document.getElementById('register-screen');
+    reg.style.display = 'flex';
+    reg.classList.remove('hide');
+    reg.style.opacity = '1';
+    showForm('unlock-form','unlock-pass');
+  }
+
+  async function doUnlock() {
+    const pass = document.getElementById('unlock-pass').value;
+    const err = document.getElementById('unlock-error');
+    if (!pass) { err.textContent = 'Введи пароль'; err.style.display='block'; return; }
+    err.style.display = 'none';
+
+    const hash = await hashPassword(myName, pass);
+    if (passwordHash && hash !== passwordHash) {
+      err.textContent = 'Неверный пароль'; err.style.display='block'; return;
+    }
+    if (!passwordHash) {
+      // Хеша локально нет — проверяем на сервере
+      try {
+        const r = await fetch(API + '/api/login', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nick: myName, password: pass })
+        });
+        if (!r.ok) { err.textContent = 'Неверный пароль'; err.style.display='block'; return; }
+      } catch(e) { err.textContent = 'Нет связи с сервером'; err.style.display='block'; return; }
+      passwordHash = hash;
+    }
+
+    myRawPass = pass;
+    storeSessionPass(pass, document.getElementById('unlock-remember').checked);
+    cryptoKey = await deriveKey([myName, pass]);
+    finishAuth(false, 'simple');
   }
 
   function showSimpleRegForm() { showForm('simple-reg-form','sreg-nick'); }
@@ -898,11 +980,16 @@
       clearInterval(neonInterval);
       requestNotifications();
       if (authMode === 'simple') {
-        const savedPass = sessionStorage.getItem('void_sess_pass');
+        const savedPass = readSessionPass();
         if (savedPass) {
           myRawPass = savedPass;
           cryptoKey = await deriveKey([myName, savedPass]);
           connectDmWs();
+        } else {
+          // Без пароля переписку не расшифровать и на сервер не войти —
+          // просим пароль, а не пускаем в наполовину рабочее приложение.
+          showUnlockScreen();
+          return;
         }
       } else if (currentSeed.length) cryptoKey = await deriveKey(currentSeed);
       document.getElementById('profile-nick').textContent = '@' + myName;
@@ -1111,7 +1198,7 @@
     myName = nick;
     authMode = 'simple';
     myRawPass = pass;
-    sessionStorage.setItem('void_sess_pass', pass);
+    storeSessionPass(pass, document.getElementById('sreg-remember')?.checked !== false);
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
     currentSeed = [];
@@ -1143,7 +1230,7 @@
     myName = nick;
     authMode = 'simple';
     myRawPass = pass;
-    sessionStorage.setItem('void_sess_pass', pass);
+    storeSessionPass(pass, document.getElementById('slogin-remember')?.checked !== false);
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
     chats = JSON.parse(localStorage.getItem('void_chats')) || {};
@@ -1643,6 +1730,8 @@
       renderChatList();
       return;
     }
+    // Без ключа сообщение легло бы в историю открытым текстом — не молчим об этом
+    if (!cryptoKey) { showToast('Нет ключа шифрования — перезайди в аккаунт'); return; }
     // Отправка через сервер если авторизованы
     if (authMode === 'simple' && dmWsAuthOk && dmWs?.readyState === 1) {
       console.log('[DM] Sending dm to', currentChat);
@@ -1920,7 +2009,8 @@
     const srn = document.getElementById('sreg-nick'); if(srn) srn.value='';
     const srp = document.getElementById('sreg-pass'); if(srp) srp.value='';
     const srp2 = document.getElementById('sreg-pass2'); if(srp2) srp2.value='';
-    sessionStorage.removeItem('void_sess_pass');
+    clearSessionPass();
+    myRawPass = null; cryptoKey = null;
     dmWsAuthOk = false;
     if(dmWs) { try { dmWs.close(); } catch(e){} dmWs = null; }
     clearInterval(dmWsHeartbeat); dmWsHeartbeat = null;
@@ -1975,6 +2065,7 @@
   async function sendSticker(val, type) {
     document.getElementById('sticker-panel').style.display = 'none';
     if (!currentChat || currentChat.startsWith('__lan__:')) return;
+    if (!cryptoKey) { showToast('Нет ключа шифрования — перезайди в аккаунт'); return; }
     let stickerData = type === 'emoji' ? val : customStickers[parseInt(val)];
     const stickerText = '__STICKER__' + type + ':' + stickerData;
     // Отправить через сервер (только emoji — custom слишком большие)
