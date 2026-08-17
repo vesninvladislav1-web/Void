@@ -1305,6 +1305,165 @@
     } catch { return '[ошибка дешифровки]'; }
   }
 
+  // ===== СКВОЗНОЕ ШИФРОВАНИЕ (E2E) =====
+  // Сообщение шифруется ключом, который знают только двое собеседников.
+  // Сервер видит и хранит один шифротекст: прочитать переписку он не может,
+  // даже имея полный доступ к базе.
+  let myKeyPair = null;          // { publicKey, privateKey }
+  let myPubJwk  = null;          // публичный ключ в виде строки
+  let peerKeyCache = {};         // ник -> CryptoKey публичного ключа | null
+  let pairKeyCache = {};         // ник -> общий AES-ключ переписки
+
+  // Спред байтов в fromCharCode падает на больших массивах (стикеры под 200 КБ),
+  // поэтому режем на куски
+  function b64(buf) {
+    const bytes = new Uint8Array(buf);
+    let out = '';
+    const CHUNK = 0x8000;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      out += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(out);
+  }
+  function unb64(str) { return Uint8Array.from(atob(str), c => c.charCodeAt(0)); }
+
+  const expKey = async (k) => JSON.stringify(await crypto.subtle.exportKey('jwk', k));
+  const impPub = (j) => crypto.subtle.importKey('jwk', JSON.parse(j), { name:'ECDH', namedCurve:'P-256' }, true, []);
+  const impPriv = (j) => crypto.subtle.importKey('jwk', JSON.parse(j), { name:'ECDH', namedCurve:'P-256' }, true, ['deriveBits']);
+
+  // Приватный ключ уезжает на сервер только в таком виде — зашифрованным
+  // тем же ключом, что и локальная переписка (выводится из пароля/фразы)
+  async function wrapPrivate(privJwk) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, cryptoKey, new TextEncoder().encode(privJwk));
+    return JSON.stringify({ iv: b64(iv), ct: b64(ct) });
+  }
+  async function unwrapPrivate(blob) {
+    const o = JSON.parse(blob);
+    const plain = await crypto.subtle.decrypt({ name:'AES-GCM', iv: unb64(o.iv) }, cryptoKey, unb64(o.ct));
+    return new TextDecoder().decode(plain);
+  }
+
+  // Достаём пару ключей: с устройства, иначе с сервера, иначе создаём новую
+  async function ensureKeyPair() {
+    if (myKeyPair) return true;
+    if (!cryptoKey || !myName || !myRawPass) return false;
+    const lsKey = 'void_e2e:' + acctId(myName);
+
+    try {
+      const local = localStorage.getItem(lsKey);
+      if (local) {
+        const o = JSON.parse(local);
+        myKeyPair = { publicKey: await impPub(o.pub), privateKey: await impPriv(await unwrapPrivate(o.priv)) };
+        myPubJwk = o.pub;
+        console.log('[e2e] Ключи взяты с устройства');
+        return true;
+      }
+    } catch(e) { console.warn('[e2e] Локальные ключи не читаются:', e.message); }
+
+    // Вход на новом устройстве: забираем свой зашифрованный ключ с сервера
+    try {
+      const r = await fetch(API + '/api/keys/mine', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ nick: myName, password: myRawPass })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d.publicKey && d.encPrivateKey) {
+        myKeyPair = { publicKey: await impPub(d.publicKey), privateKey: await impPriv(await unwrapPrivate(d.encPrivateKey)) };
+        myPubJwk = d.publicKey;
+        try { localStorage.setItem(lsKey, JSON.stringify({ pub: d.publicKey, priv: d.encPrivateKey })); } catch(e) {}
+        console.log('[e2e] Ключи восстановлены с сервера');
+        return true;
+      }
+    } catch(e) { console.warn('[e2e] Сервер не отдал ключи:', e.message); }
+
+    // Первый запуск — создаём пару
+    try {
+      const kp = await crypto.subtle.generateKey({ name:'ECDH', namedCurve:'P-256' }, true, ['deriveBits']);
+      const pub = await expKey(kp.publicKey);
+      const wrapped = await wrapPrivate(await expKey(kp.privateKey));
+      const r = await fetch(API + '/api/keys/set', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ nick: myName, password: myRawPass, publicKey: pub, encPrivateKey: wrapped })
+      });
+      if (!r.ok) { console.warn('[e2e] Сервер не принял ключи'); return false; }
+      myKeyPair = kp; myPubJwk = pub;
+      try { localStorage.setItem(lsKey, JSON.stringify({ pub, priv: wrapped })); } catch(e) {}
+      console.log('[e2e] Создана новая пара ключей');
+      return true;
+    } catch(e) { console.error('[e2e] Не удалось создать ключи:', e.message); return false; }
+  }
+
+  async function peerPublicKey(nick) {
+    if (peerKeyCache[nick] !== undefined) return peerKeyCache[nick];
+    try {
+      const r = await fetch(API + '/api/keys/get', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ nicks: [nick] })
+      });
+      const d = await r.json().catch(() => ({}));
+      const keys = d.keys || {};
+      // Сервер отвечает каноническим ником — он может отличаться регистром
+      const jwk = keys[nick] !== undefined ? keys[nick] : (Object.values(keys)[0] || null);
+      peerKeyCache[nick] = jwk ? await impPub(jwk) : null;
+    } catch(e) { peerKeyCache[nick] = null; }
+    return peerKeyCache[nick];
+  }
+
+  // Общий ключ переписки: ECDH даёт обоим одинаковый секрет,
+  // HKDF привязывает его к конкретной паре ников
+  async function pairKey(nick) {
+    if (pairKeyCache[nick]) return pairKeyCache[nick];
+    if (!(await ensureKeyPair())) return null;
+    const pub = await peerPublicKey(nick);
+    if (!pub) return null;
+    try {
+      const bits = await crypto.subtle.deriveBits({ name:'ECDH', public: pub }, myKeyPair.privateKey, 256);
+      const hk = await crypto.subtle.importKey('raw', bits, 'HKDF', false, ['deriveKey']);
+      const label = [String(myName).toLowerCase(), String(nick).toLowerCase()].sort().join('|');
+      const key = await crypto.subtle.deriveKey(
+        { name:'HKDF', hash:'SHA-256',
+          salt: new TextEncoder().encode('VOID_E2E_v1'),
+          info: new TextEncoder().encode(label) },
+        hk, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+      pairKeyCache[nick] = key;
+      return key;
+    } catch(e) { console.error('[e2e] Не удалось вывести общий ключ:', e.message); return null; }
+  }
+
+  const E2E_PREFIX = '{"v":1';
+
+  async function e2eEncrypt(nick, text) {
+    const key = await pairKey(nick);
+    if (!key) return null;
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, new TextEncoder().encode(text));
+    return JSON.stringify({ v:1, iv: b64(iv), ct: b64(ct) });
+  }
+
+  async function e2eDecrypt(nick, payload) {
+    // Сообщения, отправленные до включения шифрования, приходят как есть
+    if (typeof payload !== 'string' || !payload.startsWith(E2E_PREFIX)) return payload;
+    const key = await pairKey(nick);
+    if (!key) return '[не удалось расшифровать]';
+    try {
+      const o = JSON.parse(payload);
+      const plain = await crypto.subtle.decrypt({ name:'AES-GCM', iv: unb64(o.iv) }, key, unb64(o.ct));
+      return new TextDecoder().decode(plain);
+    } catch(e) { return '[не удалось расшифровать]'; }
+  }
+
+  // Пометка в шапке чата: видно, что переписка защищена
+  async function updateE2EBadge(nick) {
+    const el = document.getElementById('cv-sub');
+    if (!el || !nick || nick.startsWith('__lan__:')) return;
+    el.textContent = '';
+    const key = await pairKey(nick);
+    if (currentChat !== nick) return;
+    el.textContent = key ? '🔒 Сквозное шифрование' : '⚠️ Собеседник не обновил приложение';
+    el.style.color = key ? 'var(--online)' : '#F59E0B';
+  }
+
   // ===== РЕГИСТРАЦИЯ =====
   let myName = '', myAvatar = null;
   let isDark = true, chats = {}, currentChat = null;
@@ -1410,6 +1569,22 @@
     else                         { el.textContent = '🔴 Нет связи';        el.style.color = '#EF4444'; }
   }
 
+  async function handleIncomingDm(msg) {
+    const key = msg.from;
+    const text = await e2eDecrypt(key, msg.text);
+    if (!chats[key]) chats[key] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
+    const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    // Раньше входящие ложились в localStorage открытым текстом, в отличие от
+    // отправленных. Теперь шифруются так же.
+    const enc = await encryptText(text);
+    chats[key].messages.push({ enc, own: false, time: timeStr, timestamp: msg.timestamp });
+    if (currentChat !== key) { chats[key].unread = (chats[key].unread || 0) + 1; }
+    saveState();
+    if (currentChat === key) renderMessages();
+    renderChatList();
+    sendNotification(key, text.startsWith('__STICKER__') ? '🎭 Стикер' : text);
+  }
+
   function connectDmWs() {
     if (!myName || !myRawPass) return;
     // Живым считаем ТОЛЬКО авторизованное соединение. Раньше проверка была
@@ -1458,6 +1633,7 @@
           isAdmin = !!msg.admin;     // права подтверждает только сервер
           updateAdminMenuVisibility();
           saveState();
+          ensureKeyPair();           // без ключей отправлять будет нечем
           clearTimeout(dmWsWatchdog); dmWsWatchdog = null;
           updateDmStatus('ok');
           console.log('[DM] Auth OK');
@@ -1531,15 +1707,9 @@
         }
 
         if (msg.type === 'dm') {
-          const key = msg.from;
-          if (!chats[key]) chats[key] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
-          const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-          chats[key].messages.push({ enc: { plain: msg.text }, own: false, time: timeStr, timestamp: msg.timestamp });
-          if (currentChat !== key) { chats[key].unread = (chats[key].unread || 0) + 1; }
-          saveState();
-          if (currentChat === key) renderMessages();
-          renderChatList();
-          sendNotification(key, msg.text.startsWith('__STICKER__') ? '🎭 Стикер' : msg.text);
+          // Расшифровка и запись асинхронны, поэтому выносим в отдельную функцию
+          handleIncomingDm(msg);
+          return;
         }
       } catch(ex) { console.error('[DM] Parse error', ex); }
     };
@@ -2104,6 +2274,7 @@
     av.style.fontSize = '';
     document.getElementById('cv-name').textContent = '@' + nick;
     document.getElementById('cv-sub').textContent = '';
+    updateE2EBadge(nick);
     applyBg(chats[nick].bg || '');
     renderMessages();
     renderChatList();
@@ -2236,8 +2407,14 @@
     if (!cryptoKey) { showToast('Нет ключа шифрования — перезайди в аккаунт'); return; }
     // Отправка через сервер если авторизованы
     if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
-      console.log('[DM] Sending dm to', currentChat);
-      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text }));
+      // Шифруем ключом пары: на сервер уходит только шифротекст
+      const payload = await e2eEncrypt(currentChat, text);
+      if (!payload) {
+        showToast('Собеседник ещё не обновил приложение — сообщение не отправлено');
+        return;
+      }
+      console.log('[DM] Sending dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
+      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: payload }));
     } else if (myRawPass) {
       // Раньше сообщение просто оседало локально, а собеседник его не получал
       // и об этом никто не сообщал. Теперь честно говорим и жмём переподключение.
@@ -2486,6 +2663,7 @@
         <div class="modal-title">АДМИН-ПАНЕЛЬ</div>
         <input class="adm-search" id="adm-search" placeholder="Поиск по нику..." autocomplete="off">
         <div class="adm-list" id="adm-list"><div class="adm-empty">Загрузка...</div></div>
+        <button class="adm-btn danger" style="width:100%;" onclick="adminPurgeMessages()">🗑️ Очистить все сообщения на сервере</button>
         <div class="modal-btns">
           <button class="btn-secondary" onclick="loadAdminUsers()">Обновить</button>
           <button class="btn-primary" onclick="document.getElementById('admin-overlay')?.remove()">Закрыть</button>
@@ -2559,6 +2737,19 @@
       if (row.querySelector('.adm-nick')?.textContent !== nick) return;
       row.querySelectorAll('.adm-btn').forEach(b => { b.disabled = busy; });
     });
+  }
+
+  // Полная очистка переписки на сервере. Локальные копии у пользователей
+  // останутся — сервер ими не управляет.
+  async function adminPurgeMessages() {
+    const typed = prompt('Удалить ВСЕ сообщения с сервера?\nЭто необратимо.\nВведи слово УДАЛИТЬ для подтверждения:');
+    if (typed === null) return;
+    if (typed.trim().toUpperCase() !== 'УДАЛИТЬ') { showToast('Не подтверждено — отменено'); return; }
+    try {
+      const r = await adminCall('purge-messages', {});
+      applyAdminResult(r);
+      showToast('Удалено сообщений: ' + r.removed);
+    } catch (e) { showToast(e.message); }
   }
 
   async function adminBan(nick) {
@@ -2661,6 +2852,8 @@
     isAdmin = false; adminUsers = [];
     updateAdminMenuVisibility();
     myRawPass = null; cryptoKey = null;
+    myKeyPair = null; myPubJwk = null;
+    peerKeyCache = {}; pairKeyCache = {};
     dmWsGen++;                 // обработчики старого сокета больше не в счёт
     clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
     dmWsAttempt = 0;
@@ -2881,8 +3074,13 @@
     const stickerText = '__STICKER__' + type + ':' + stickerData;
     // Картинки теперь тоже уходят на сервер — они сжимаются при загрузке
     if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
-      console.log('[DM] Sending sticker dm to', currentChat, '(' + stickerText.length + ' байт)');
-      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: stickerText }));
+      const payload = await e2eEncrypt(currentChat, stickerText);
+      if (!payload) {
+        showToast('Собеседник ещё не обновил приложение — стикер не отправлен');
+        return;
+      }
+      console.log('[DM] Sending sticker dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
+      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: payload }));
     } else if (myRawPass) {
       showToast('Нет связи с сервером — стикер не отправлен');
       dmWakeCheck();

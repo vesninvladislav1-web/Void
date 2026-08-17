@@ -10,11 +10,16 @@ const ADMIN_KEY     = process.env.VOID_ADMIN_KEY || '';
 const ADMIN_NICK    = 'Void';                        // единственный админ-аккаунт
 const ADMIN_PASS    = process.env.VOID_ADMIN_PASSWORD || '';
 const MAX_BODY      = 16 * 1024;        // максимум тела HTTP-запроса
-const MAX_TEXT      = 4000;             // максимум длины сообщения
+const MAX_TEXT      = 4000;             // максимум длины НЕшифрованного сообщения
 const MAX_STICKER   = 128 * 1024;       // картинка-стикер приходит как data:URI
+// После E2E сервер не может отличить текст от стикера — всё это шифротекст,
+// поэтому лимит общий и с запасом на base64 (+33%)
+const MAX_E2E       = 260 * 1024;
+const MAX_KEY       = 4 * 1024;         // публичный ключ / зашифрованный приватный
+const MAX_KEY_BODY  = 16 * 1024;
 const MAX_AVATAR    = 96 * 1024;        // аватар тоже data:URI
 const MAX_AVATAR_BODY = 128 * 1024;     // тело запроса с аватаром
-const MAX_PAYLOAD   = 256 * 1024;       // максимум размера WS-кадра
+const MAX_PAYLOAD   = 512 * 1024;       // максимум размера WS-кадра (шифротекст крупнее)
 const MAX_PEERS     = 16;               // максимум участников LAN-комнаты
 const MAX_ROOMS     = 500;              // максимум одновременных LAN-комнат
 const PING_INTERVAL = 30000;
@@ -59,6 +64,10 @@ db.exec(`
   if (!cols.includes('seed_lookup')) db.exec('ALTER TABLE users ADD COLUMN seed_lookup TEXT');
   // Аватар виден собеседникам, поэтому живёт на сервере, а не только локально
   if (!cols.includes('avatar')) db.exec('ALTER TABLE users ADD COLUMN avatar TEXT');
+  // Сквозное шифрование: публичный ключ открыт, приватный лежит зашифрованным
+  // паролем владельца — сервер расшифровать его не может
+  if (!cols.includes('public_key'))      db.exec('ALTER TABLE users ADD COLUMN public_key TEXT');
+  if (!cols.includes('enc_private_key')) db.exec('ALTER TABLE users ADD COLUMN enc_private_key TEXT');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_seed ON users(seed_lookup) WHERE seed_lookup IS NOT NULL');
 }
 
@@ -67,6 +76,10 @@ const qNickExists  = db.prepare('SELECT nick, banned FROM users WHERE nick = ? C
 const qInsertUser  = db.prepare('INSERT INTO users (nick, password_hash) VALUES (?, ?)');
 const qInsertSeed  = db.prepare('INSERT INTO users (nick, password_hash, seed_lookup) VALUES (?, ?, ?)');
 const qSetAvatar   = db.prepare('UPDATE users SET avatar = ? WHERE nick = ?');
+const qSetKeys     = db.prepare('UPDATE users SET public_key = ?, enc_private_key = ? WHERE nick = ?');
+const qGetPubKey   = db.prepare('SELECT nick, public_key FROM users WHERE nick = ? COLLATE NOCASE');
+const qGetMyKeys   = db.prepare('SELECT public_key, enc_private_key FROM users WHERE nick = ?');
+const qPurgeMsgs   = db.prepare('DELETE FROM messages');
 const qGetAvatar   = db.prepare('SELECT nick, avatar FROM users WHERE nick = ? COLLATE NOCASE');
 const qUserBySeed  = db.prepare('SELECT nick, password_hash, banned, is_admin, ban_reason FROM users WHERE seed_lookup = ?');
 const qUpdateHash  = db.prepare('UPDATE users SET password_hash = ? WHERE nick = ?');
@@ -379,6 +392,62 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ===== КЛЮЧИ СКВОЗНОГО ШИФРОВАНИЯ =====
+  // Публичный ключ открыт всем — по нему собеседник шифрует сообщение.
+  // Приватный приходит УЖЕ зашифрованным паролем владельца: сервер хранит его
+  // только чтобы аккаунт открывался на новом устройстве, прочитать не может.
+  if (req.method === 'POST' && url.pathname === '/api/keys/set') {
+    if (!rateLimit('keys:' + clientIp(req), 40, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      const pub = body.publicKey, priv = body.encPrivateKey;
+      if (typeof pub !== 'string' || typeof priv !== 'string' || !pub || !priv) {
+        return json(400, { error: 'Нужны оба ключа' });
+      }
+      if (pub.length > MAX_KEY || priv.length > MAX_KEY) {
+        return json(413, { error: 'Ключ слишком большой' });
+      }
+      qSetKeys.run(pub, priv, u.nick);
+      console.log('[e2e] Ключи сохранены для', u.nick);
+      json(200, { ok: true, nick: u.nick });
+    }, MAX_KEY_BODY);
+    return;
+  }
+
+  // Свой зашифрованный приватный ключ — для входа на новом устройстве
+  if (req.method === 'POST' && url.pathname === '/api/keys/mine') {
+    if (!rateLimit('keys:' + clientIp(req), 40, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      const row = qGetMyKeys.get(u.nick) || {};
+      json(200, { ok: true, publicKey: row.public_key || null, encPrivateKey: row.enc_private_key || null });
+    });
+    return;
+  }
+
+  // Публичные ключи собеседников — пачкой, как аватары
+  if (req.method === 'POST' && url.pathname === '/api/keys/get') {
+    readBody((body) => {
+      const nicks = Array.isArray(body.nicks) ? body.nicks.slice(0, 50) : [];
+      const out = {};
+      for (const n of nicks) {
+        if (typeof n !== 'string' || !n.trim()) continue;
+        const row = qGetPubKey.get(n.trim());
+        if (row) out[row.nick] = row.public_key || null;
+      }
+      json(200, { ok: true, keys: out });
+    });
+    return;
+  }
+
   // ===== АВАТАРЫ =====
   // Аватар публичный по смыслу: его должны видеть собеседники.
   // Читать может кто угодно, менять — только владелец аккаунта.
@@ -437,6 +506,14 @@ const server = http.createServer((req, res) => {
       }
 
       if (action === 'users') return json(200, { ok: true, users: listUsers() });
+
+      // Полная очистка переписки на сервере. Локальные копии у пользователей
+      // остаются — сервер их не контролирует.
+      if (action === 'purge-messages') {
+        const removed = qPurgeMsgs.run().changes;
+        console.log('[admin] PURGE: удалено сообщений с сервера:', removed);
+        return json(200, { ok: true, removed, users: listUsers() });
+      }
 
       const targetNick = typeof body.nick === 'string' ? body.nick.trim() : '';
       if (!targetNick) return json(400, { error: 'Не указан ник' });
@@ -617,8 +694,10 @@ wss.on('connection', (ws, req) => {
         const to   = typeof msg.to === 'string' ? msg.to.trim() : '';
         const text = typeof msg.text === 'string' ? msg.text : '';
         if (!to || !text) return;
-        // Стикер-картинка приходит как data:URI и заведомо длиннее текста
-        const limit = text.startsWith('__STICKER__') ? MAX_STICKER : MAX_TEXT;
+        // При сквозном шифровании сервер видит только шифротекст и не может
+        // отличить сообщение от стикера, поэтому лимит для них общий.
+        const isE2E = text.startsWith('{"v":1');
+        const limit = isE2E ? MAX_E2E : (text.startsWith('__STICKER__') ? MAX_STICKER : MAX_TEXT);
         if (text.length > limit) { send({ type: 'dm-error', to, error: 'too-long' }); return; }
         if (!rateLimit('dm:' + nick, 60, 10000)) { send({ type: 'dm-error', to, error: 'rate-limit' }); return; }
 
