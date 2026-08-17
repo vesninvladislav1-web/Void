@@ -240,7 +240,8 @@
   .msg-time { font-size:10px; color:var(--text3); font-family:'Space Mono',monospace; margin-top:3px; padding:0 4px; display:flex; align-items:center; gap:3px; }
   .msg-time.own { justify-content:flex-end; }
   .msg-time.other { padding-left:36px; }
-  .check { color:var(--accent); font-size:10px; }
+  .check { color:var(--accent); display:inline-flex; align-items:center; }
+  .check-ico { width:11px; height:11px; }
 
   /* Typing indicator */
   .typing-bubble { display:flex; gap:4px; align-items:center; padding:12px 16px; }
@@ -355,6 +356,9 @@
   .sticker-upload-btn:hover { border-color:var(--accent); color:var(--accent); }
   .msg-sticker { width:96px; height:96px; border-radius:16px; object-fit:cover; }
   .msg-sticker-emoji { font-size:72px; line-height:1; }
+  .msg-sticker-void { width:104px; height:104px; }
+  .msg-sticker-void svg { width:100%; height:100%; display:block; }
+  .sticker-item svg { width:78%; height:78%; display:block; }
 
   /* Защита от скриншота */
   .secure-overlay { position:fixed; inset:0; background:var(--bg); z-index:9999; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; }
@@ -535,7 +539,7 @@
   <!-- Разблокировка: сессия жива, но ключ шифрования потерян -->
   <div class="reg-form" id="unlock-form" style="display:none;opacity:0;">
     <div class="reg-label">С возвращением, <span id="unlock-nick">—</span></div>
-    <div class="reg-hint" style="margin:0 0 4px;">Введи пароль, чтобы расшифровать переписку.</div>
+    <div class="reg-hint" style="margin:0 0 4px;">Введи пароль, чтобы открыть переписку.</div>
     <input type="password" class="reg-input" id="unlock-pass" placeholder="твой пароль" onkeydown="if(event.key==='Enter') doUnlock()">
     <div id="unlock-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Неверный пароль</div>
     <label class="remember-row"><input type="checkbox" id="unlock-remember" checked><span>Запомнить на этом устройстве</span></label>
@@ -1296,13 +1300,13 @@
   async function decryptText(data) {
     if (!data) return '';
     if (data.plain !== undefined) return data.plain;
-    if (!cryptoKey || !data.ct) return '[зашифровано]';
+    if (!cryptoKey || !data.ct) return '[недоступно]';
     try {
       const plain = await crypto.subtle.decrypt(
         { name:'AES-GCM', iv: new Uint8Array(data.iv) }, cryptoKey, new Uint8Array(data.ct)
       );
       return new TextDecoder().decode(plain);
-    } catch { return '[ошибка дешифровки]'; }
+    } catch { return '[не удалось открыть]'; }
   }
 
   // ===== СКВОЗНОЕ ШИФРОВАНИЕ (E2E) =====
@@ -1445,23 +1449,18 @@
     // Сообщения, отправленные до включения шифрования, приходят как есть
     if (typeof payload !== 'string' || !payload.startsWith(E2E_PREFIX)) return payload;
     const key = await pairKey(nick);
-    if (!key) return '[не удалось расшифровать]';
+    if (!key) return '[не удалось открыть]';
     try {
       const o = JSON.parse(payload);
       const plain = await crypto.subtle.decrypt({ name:'AES-GCM', iv: unb64(o.iv) }, key, unb64(o.ct));
       return new TextDecoder().decode(plain);
-    } catch(e) { return '[не удалось расшифровать]'; }
+    } catch(e) { return '[не удалось открыть]'; }
   }
 
   // Пометка в шапке чата: видно, что переписка защищена
-  async function updateE2EBadge(nick) {
+  function updateE2EBadge(nick) {
     const el = document.getElementById('cv-sub');
-    if (!el || !nick || nick.startsWith('__lan__:')) return;
-    el.textContent = '';
-    const key = await pairKey(nick);
-    if (currentChat !== nick) return;
-    el.textContent = key ? '🔒 Сквозное шифрование' : '⚠️ Собеседник не обновил приложение';
-    el.style.color = key ? 'var(--online)' : '#F59E0B';
+    if (el) el.textContent = '';
   }
 
   // ===== РЕГИСТРАЦИЯ =====
@@ -2318,9 +2317,11 @@
         const colonIdx = rest.indexOf(':');
         const stype = rest.slice(0, colonIdx);
         const sval = rest.slice(colonIdx + 1);
-        bubbleContent = stype === 'emoji'
-          ? `<div class="msg-sticker-emoji">${sval}</div>`
-          : `<img class="msg-sticker" src="${sval}">`;
+        bubbleContent = stype === 'void'
+          ? `<div class="msg-sticker-void">${VOID_STICKERS[sval] || ''}</div>`
+          : stype === 'emoji'
+            ? `<div class="msg-sticker-emoji">${sval}</div>`
+            : `<img class="msg-sticker" src="${sval}">`;
       } else if (isLocked) {
         bubbleContent = `<div class="capsule-bubble">🔒<br><span style="font-size:11px;color:var(--text2);font-family:'Space Mono',monospace;">Откроется ${unlockDate}</span><br><span class="capsule-countdown" data-unlock="${msg.unlockAt}">${formatCountdown(msg.unlockAt)}</span></div>`;
       } else {
@@ -2330,7 +2331,7 @@
       const bubbleStyle = isSticker ? 'style="background:transparent;border:none;padding:4px;"' : '';
       const replyQuote = msg.reply ? `<div class="reply-quote">↩ ${esc(msg.reply.text.slice(0,60))}</div>` : '';
       const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">↩</button>`;
-      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${msg.time}${msg.own?' <span class="check">✓</span>':''}</span>`;
+      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${msg.time}${msg.own?' <span class="check">'+CHECK_ICON+'</span>':''}</span>`;
       const reactionsHtml = (msg.reactions && msg.reactions.length)
         ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
@@ -2404,13 +2405,13 @@
       return;
     }
     // Без ключа сообщение легло бы в историю открытым текстом — не молчим об этом
-    if (!cryptoKey) { showToast('Нет ключа шифрования — перезайди в аккаунт'); return; }
+    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
     // Отправка через сервер если авторизованы
     if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
       // Шифруем ключом пары: на сервер уходит только шифротекст
       const payload = await e2eEncrypt(currentChat, text);
       if (!payload) {
-        showToast('Собеседник ещё не обновил приложение — сообщение не отправлено');
+        showToast('Не удалось отправить — собеседник недоступен');
         return;
       }
       console.log('[DM] Sending dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
@@ -2983,7 +2984,34 @@
   }
 
   // ===== СТИКЕРЫ =====
-  const DEFAULT_STICKERS = ['😂','❤️','🔥','👍','😭','🙏','💀','🤣','😍','🥺','✨','💯','😎','🤝','👻','🫡'];
+  // ===== СВОИ СТИКЕРЫ =====
+  // Рисуем сами, а не берём системные эмодзи: на разных телефонах они
+  // выглядят по-разному, а эти везде одинаковые. В сообщении передаётся
+  // только имя стикера, поэтому оно занимает считанные байты.
+  const F = '#FFC44D', D = '#3A2214';      // цвет лица и черт
+  const VOID_STICKERS = {
+    smile: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="${F}"/><circle cx="23" cy="26" r="4" fill="${D}"/><circle cx="41" cy="26" r="4" fill="${D}"/><path d="M20 38c4 8 20 8 24 0" stroke="${D}" stroke-width="4" fill="none" stroke-linecap="round"/></svg>`,
+    laugh: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="${F}"/><path d="M16 27c3-5 9-5 12 0M36 27c3-5 9-5 12 0" stroke="${D}" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M18 37h28c0 9-6 15-14 15s-14-6-14-15z" fill="${D}"/><path d="M23 45h18c-2 4-5 6-9 6s-7-2-9-6z" fill="#FF6B6B"/><ellipse cx="11" cy="32" rx="3" ry="5" fill="#4AA8FF"/><ellipse cx="53" cy="32" rx="3" ry="5" fill="#4AA8FF"/></svg>`,
+    sad: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="${F}"/><circle cx="23" cy="25" r="4" fill="${D}"/><circle cx="41" cy="25" r="4" fill="${D}"/><path d="M21 46c4-7 18-7 22 0" stroke="${D}" stroke-width="4" fill="none" stroke-linecap="round"/><path d="M23 32c0 5-4 7-4 11a4 4 0 008 0c0-4-4-6-4-11z" fill="#4AA8FF"/></svg>`,
+    wow: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="${F}"/><circle cx="22" cy="25" r="5" fill="${D}"/><circle cx="42" cy="25" r="5" fill="${D}"/><ellipse cx="32" cy="43" rx="7" ry="9" fill="${D}"/></svg>`,
+    cool: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="${F}"/><path d="M10 22h44v4c0 7-5 11-11 11s-11-4-11-9v-2h-0.6v2c0 5-5 9-11 9S10 33 10 26z" fill="#252525"/><path d="M22 43c4 6 16 6 20 0" stroke="${D}" stroke-width="4" fill="none" stroke-linecap="round"/></svg>`,
+    angry: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="#FF7A5C"/><path d="M15 20l14 7M49 20l-14 7" stroke="${D}" stroke-width="4" stroke-linecap="round"/><circle cx="23" cy="33" r="4" fill="${D}"/><circle cx="41" cy="33" r="4" fill="${D}"/><path d="M22 47h20" stroke="${D}" stroke-width="4" stroke-linecap="round"/></svg>`,
+    love: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="${F}"/><path d="M23 33s-8-5-8-10c0-3 2-5 4.5-5 1.8 0 3 1 3.5 2 .5-1 1.7-2 3.5-2 2.5 0 4.5 2 4.5 5 0 5-8 10-8 10z" fill="#FF3B5C"/><path d="M43 33s-8-5-8-10c0-3 2-5 4.5-5 1.8 0 3 1 3.5 2 .5-1 1.7-2 3.5-2 2.5 0 4.5 2 4.5 5 0 5-8 10-8 10z" fill="#FF3B5C"/><path d="M21 42c4 8 18 8 22 0" stroke="${D}" stroke-width="4" fill="none" stroke-linecap="round"/></svg>`,
+    sleep: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="${F}"/><path d="M16 27h11M37 27h11" stroke="${D}" stroke-width="4" stroke-linecap="round"/><ellipse cx="32" cy="43" rx="5" ry="6" fill="${D}"/><path d="M44 10h9l-9 10h9" stroke="#4AA8FF" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    check: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="#22C55E"/><path d="M18 33l9 10 19-21" stroke="#fff" stroke-width="7" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    cross: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="29" fill="#EF4444"/><path d="M21 21l22 22M43 21L21 43" stroke="#fff" stroke-width="7" stroke-linecap="round"/></svg>`,
+    heart: `<svg viewBox="0 0 64 64"><path d="M32 57S5 40 5 23C5 14 12 8 20 8c5 0 10 3 12 7 2-4 7-7 12-7 8 0 15 6 15 15 0 17-27 34-27 34z" fill="#FF3B5C"/></svg>`,
+    fire: `<svg viewBox="0 0 64 64"><path d="M33 3c6 11 1 15 5 19 3 3 7 1 9-3 5 7 8 14 8 21 0 12-10 21-23 21S9 52 9 40c0-11 7-20 14-24 5-3 8-8 10-13z" fill="#FF6B2C"/><path d="M33 29c3 6 1 8 3 10 2 2 4 0 5-2 3 4 4 8 4 11 0 7-5 12-12 12s-12-5-12-12c0-6 4-11 7-13 3-2 4-4 5-6z" fill="#FFD23B"/></svg>`,
+    bolt: `<svg viewBox="0 0 64 64"><path d="M38 3L13 37h15l-5 24 25-36H32z" fill="#FFD23B" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round"/></svg>`,
+    star: `<svg viewBox="0 0 64 64"><path d="M32 4l9 18 20 3-15 14 4 20-18-10-18 10 4-20L3 25l20-3z" fill="#FFD23B" stroke="#F59E0B" stroke-width="2" stroke-linejoin="round"/></svg>`,
+    skull: `<svg viewBox="0 0 64 64"><path d="M32 5C18 5 8 15 8 28c0 8 3 14 9 17v8a4 4 0 004 4h4v-7h4v7h6v-7h4v7h4a4 4 0 004-4v-8c6-3 9-9 9-17C56 15 46 5 32 5z" fill="#EDEDED"/><circle cx="22" cy="29" r="6.5" fill="#2A2A2A"/><circle cx="42" cy="29" r="6.5" fill="#2A2A2A"/><path d="M32 37l-4 7h8z" fill="#2A2A2A"/></svg>`,
+    void: `<svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" fill="none" stroke="#FF6B4A" stroke-width="7"/><circle cx="32" cy="32" r="9" fill="#FF6B4A"/></svg>`
+  };
+  const VOID_STICKER_NAMES = Object.keys(VOID_STICKERS);
+
+  // Галочка «доставлено» — тоже своя, а не системный символ
+  const CHECK_ICON = '<svg class="check-ico" viewBox="0 0 16 16"><path d="M2 8.6l4 4L14 3.4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
   let customStickers = [];
 
   function loadStickers() {
@@ -3004,8 +3032,8 @@
 
   function renderStickerGrid() {
     const grid = document.getElementById('sticker-grid');
-    const emojis = DEFAULT_STICKERS.map(e =>
-      `<div class="sticker-item" onclick="sendSticker('${e}','emoji')">${e}</div>`
+    const emojis = VOID_STICKER_NAMES.map(n =>
+      `<div class="sticker-item" onclick="sendSticker('${n}','void')">${VOID_STICKERS[n]}</div>`
     ).join('');
     const customs = customStickers.map((src, i) =>
       `<div class="sticker-item" onclick="sendSticker('${i}','custom')"><img src="${src}"></div>`
@@ -3068,15 +3096,15 @@
   async function sendSticker(val, type) {
     document.getElementById('sticker-panel').style.display = 'none';
     if (!currentChat || currentChat.startsWith('__lan__:')) return;
-    if (!cryptoKey) { showToast('Нет ключа шифрования — перезайди в аккаунт'); return; }
-    const stickerData = type === 'emoji' ? val : customStickers[parseInt(val)];
+    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
+    const stickerData = (type === 'emoji' || type === 'void') ? val : customStickers[parseInt(val)];
     if (!stickerData) { showToast('Стикер не найден'); return; }
     const stickerText = '__STICKER__' + type + ':' + stickerData;
     // Картинки теперь тоже уходят на сервер — они сжимаются при загрузке
     if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
       const payload = await e2eEncrypt(currentChat, stickerText);
       if (!payload) {
-        showToast('Собеседник ещё не обновил приложение — стикер не отправлен');
+        showToast('Не удалось отправить — собеседник недоступен');
         return;
       }
       console.log('[DM] Sending sticker dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
