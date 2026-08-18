@@ -649,6 +649,15 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
+      <div class="settings-item" id="delete-account-item" onclick="showDeleteAccountModal()">
+        <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);">🗑️</div>
+        <div class="settings-item-info">
+          <div class="settings-item-name" style="color:#ef4444;">Удалить аккаунт</div>
+          <div class="settings-item-sub">Навсегда, вместе с перепиской</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
       <div class="settings-section-label">Система</div>
 
       <div class="settings-item" onclick="showLangModal()">
@@ -842,6 +851,7 @@
     try {
       localStorage.removeItem('void_acct:' + id);
       localStorage.removeItem('void_pass:' + id);
+      localStorage.removeItem('void_e2e:' + id);
       sessionStorage.removeItem('void_sess:' + id);
       if (wipeChats) localStorage.removeItem('void_chats:' + id);
     } catch(e) {}
@@ -3154,6 +3164,79 @@
     const srp2 = document.getElementById('sreg-pass2'); if(srp2) srp2.value='';
     updateAccountsMenu();
     generateSeed();
+  }
+
+  // ===== УДАЛЕНИЕ СВОЕГО АККАУНТА =====
+  function showDeleteAccountModal() {
+    closeSidebar();
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'delacc-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title" style="color:#ef4444;">УДАЛЕНИЕ АККАУНТА</div>
+        <div style="font-size:14px;color:var(--text2);line-height:1.6;">
+          Аккаунт <b style="color:var(--text);">@${esc(myName)}</b> будет удалён
+          безвозвратно. Вместе с ним пропадут:
+        </div>
+        <ul style="font-size:13px;color:var(--text2);line-height:1.7;margin:0 0 0 18px;padding:0;">
+          <li>вся переписка на сервере и на этом устройстве</li>
+          <li>аватар и ключи шифрования</li>
+          <li>сам ник — его сможет занять кто угодно</li>
+        </ul>
+        <div style="font-size:12px;color:#ef4444;">Восстановить это будет невозможно.</div>
+        <div class="reg-label" style="margin-top:2px;">Введи ник для подтверждения</div>
+        <input class="adm-search" id="delacc-nick" placeholder="${esc(myName)}" autocomplete="off">
+        <div class="reg-label">Пароль${authMode === 'anon' ? ' не нужен — вход по фразе' : ''}</div>
+        ${authMode === 'anon' ? '' :
+          '<input type="password" class="adm-search" id="delacc-pass" placeholder="твой пароль">'}
+        <div id="delacc-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+        <button class="reg-btn" style="width:100%;background:#ef4444;" id="delacc-btn" onclick="doDeleteAccount()">УДАЛИТЬ НАВСЕГДА</button>
+        <div class="modal-btns"><button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Отмена</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    setTimeout(() => document.getElementById('delacc-nick')?.focus(), 150);
+  }
+
+  async function doDeleteAccount() {
+    const err = document.getElementById('delacc-err');
+    const btn = document.getElementById('delacc-btn');
+    const typed = (document.getElementById('delacc-nick')?.value || '').trim();
+    if (typed !== myName) {
+      err.textContent = 'Ник не совпадает'; err.style.display = 'block'; return;
+    }
+    // У аккаунта по фразе роль пароля играет выведенный из неё токен —
+    // он уже есть в памяти, спрашивать нечего
+    const pass = authMode === 'anon'
+      ? myRawPass
+      : (document.getElementById('delacc-pass')?.value || '');
+    if (!pass) { err.textContent = 'Введи пароль'; err.style.display = 'block'; return; }
+    err.style.display = 'none';
+    const label = btn.textContent;
+    btn.textContent = 'УДАЛЯЮ...';
+    btn.disabled = true;
+
+    try {
+      const r = await fetch(API + '/api/account/delete', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: pass })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        err.textContent = d.error || 'Не удалось удалить';
+        err.style.display = 'block';
+        btn.textContent = label; btn.disabled = false;
+        return;
+      }
+      document.getElementById('delacc-overlay')?.remove();
+      showToast('Аккаунт удалён' + (d.messagesDeleted ? ' (сообщений: ' + d.messagesDeleted + ')' : ''));
+      doLogout(true);   // стираем всё локальное тоже
+    } catch (e) {
+      err.textContent = 'Нет связи с сервером';
+      err.style.display = 'block';
+      btn.textContent = label; btn.disabled = false;
+    }
   }
 
   // ===== НЕСКОЛЬКО АККАУНТОВ НА УСТРОЙСТВЕ =====

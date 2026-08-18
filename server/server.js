@@ -521,6 +521,29 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ===== УДАЛЕНИЕ СОБСТВЕННОГО АККАУНТА =====
+  // Требование Google Play: пользователь должен уметь удалить аккаунт сам,
+  // без обращения к разработчику. Нужен только пароль владельца.
+  if (req.method === 'POST' && url.pathname === '/api/account/delete') {
+    if (!rateLimit('acctdel:' + clientIp(req), 5, 600000)) {
+      return json(429, { error: 'Слишком много попыток, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      // Админ-аккаунт восстанавливается при запуске сервера, удалять его так
+      // бессмысленно — только запутает
+      if (u.is_admin) return json(400, { error: 'Этот аккаунт удалить нельзя' });
+
+      const msgs = qDeleteMsgs.run(u.nick, u.nick).changes;
+      qDeleteUser.run(u.nick);
+      kickUser(u.nick, 'deleted');
+      console.log('[account] Удалён самим владельцем:', u.nick, '| сообщений удалено:', msgs);
+      json(200, { ok: true, nick: u.nick, messagesDeleted: msgs });
+    });
+    return;
+  }
+
   // ===== КЛЮЧИ СКВОЗНОГО ШИФРОВАНИЯ =====
   // Публичный ключ открыт всем — по нему собеседник шифрует сообщение.
   // Приватный приходит УЖЕ зашифрованным паролем владельца: сервер хранит его
