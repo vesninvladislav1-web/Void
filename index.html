@@ -2770,15 +2770,33 @@
     if (el) el.style.display = isAdmin ? 'flex' : 'none';
   }
 
-  // Все админ-запросы подписываются ником и паролем текущей сессии
+  let adminSession = null;   // пропуск на полчаса, выдаётся после ввода кода
+
+  // Все админ-запросы подписываются ником и паролем текущей сессии.
+  // Если включена двухфакторная защита, сервер попросит код — спрашиваем
+  // его один раз и дальше ходим с пропуском.
   async function adminCall(action, extra) {
     if (!isAdmin || !myRawPass) throw new Error('Нет прав администратора');
-    const r = await fetch(API + '/api/admin/' + action, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ admin: myName, password: myRawPass, ...extra })
-    });
-    const data = await r.json().catch(() => ({}));
+
+    const attempt = async (code) => {
+      const r = await fetch(API + '/api/admin/' + action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ admin: myName, password: myRawPass, session: adminSession, code, ...extra })
+      });
+      const data = await r.json().catch(() => ({}));
+      if (data.session) adminSession = data.session;
+      return { r, data };
+    };
+
+    let { r, data } = await attempt(undefined);
+    if (r.status === 403 && data.needCode) {
+      adminSession = null;
+      const code = prompt('Код из приложения-аутентификатора (6 цифр):');
+      if (code === null) throw new Error('Отменено');
+      ({ r, data } = await attempt(code.trim()));
+      if (r.status === 403 && data.needCode) throw new Error('Код не подошёл');
+    }
     if (!r.ok) throw new Error(data.error || 'Ошибка сервера');
     return data;
   }
@@ -2793,6 +2811,7 @@
         <div class="modal-title">АДМИН-ПАНЕЛЬ</div>
         <input class="adm-search" id="adm-search" placeholder="Поиск по нику..." autocomplete="off">
         <div class="adm-list" id="adm-list"><div class="adm-empty">Загрузка...</div></div>
+        <button class="adm-btn" style="width:100%;" id="adm-totp-btn" onclick="showTotpModal()">🔐 Двухфакторная защита</button>
         <button class="adm-btn danger" style="width:100%;" onclick="adminPurgeMessages()">🗑️ Очистить все сообщения на сервере</button>
         <div class="modal-btns">
           <button class="btn-secondary" onclick="loadAdminUsers()">Обновить</button>
@@ -2803,6 +2822,7 @@
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
     document.getElementById('adm-search').addEventListener('input', renderAdminUsers);
     loadAdminUsers();
+    refreshTotpBtn();
   }
 
   async function loadAdminUsers() {
@@ -2852,6 +2872,106 @@
           ${acts}
         </div>`;
     }).join('');
+  }
+
+  // ===== ДВУХФАКТОРНАЯ ЗАЩИТА =====
+  async function refreshTotpBtn() {
+    const btn = document.getElementById('adm-totp-btn');
+    if (!btn) return;
+    try {
+      const r = await adminCall('totp-status', {});
+      btn.textContent = r.enabled ? '🔐 Двухфакторная защита: включена' : '🔐 Двухфакторная защита: выключена';
+      btn.classList.toggle('good', !!r.enabled);
+    } catch (e) { /* панель откроется и без этого */ }
+  }
+
+  async function showTotpModal() {
+    let status = { enabled: false };
+    try { status = await adminCall('totp-status', {}); }
+    catch (e) { showToast(e.message); return; }
+
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'totp-overlay';
+    ov.innerHTML = status.enabled ? `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">ДВУХФАКТОРНАЯ ЗАЩИТА</div>
+        <div class="adm-row good-row" style="border-color:rgba(34,197,94,0.4);background:rgba(34,197,94,0.06);">
+          <div class="adm-head"><span class="adm-tag on">ВКЛЮЧЕНА</span></div>
+          <div class="adm-meta">Вход в панель требует код из приложения. Одного пароля недостаточно.</div>
+        </div>
+        <button class="adm-btn danger" style="width:100%;" onclick="totpDisable()">Выключить защиту</button>
+        <div class="modal-btns"><button class="btn-primary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+      </div>` : `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">ДВУХФАКТОРНАЯ ЗАЩИТА</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6;">
+          Пароля станет недостаточно: для входа в панель понадобится ещё и код
+          из приложения на твоём телефоне.
+        </div>
+        <button class="reg-btn" style="width:100%;" onclick="totpSetup()">Настроить</button>
+        <div class="modal-btns"><button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Отмена</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  }
+
+  async function totpSetup() {
+    let r;
+    try { r = await adminCall('totp-setup', {}); }
+    catch (e) { showToast(e.message); return; }
+
+    const ov = document.getElementById('totp-overlay');
+    if (!ov) return;
+    // Ссылка otpauth:// открывает приложение-аутентификатор прямо с телефона,
+    // поэтому сканировать код камерой не нужно. Ключ рядом — на случай,
+    // если приложение стоит на другом устройстве.
+    ov.innerHTML = `
+      <div class="modal" style="max-width:350px;">
+        <div class="modal-title">НАСТРОЙКА</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6;">
+          1. Установи Google Authenticator (или любой похожий)<br>
+          2. Нажми кнопку ниже — приложение откроется само
+        </div>
+        <a href="${esc(r.uri)}" class="reg-btn" style="width:100%;display:block;text-align:center;text-decoration:none;line-height:1.2;">ДОБАВИТЬ В ПРИЛОЖЕНИЕ</a>
+        <div style="font-size:11px;color:var(--text3);text-align:center;">Не открылось? Введи ключ вручную:</div>
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px;font-family:'Space Mono',monospace;font-size:12px;color:var(--text);word-break:break-all;text-align:center;letter-spacing:1px;">${esc(r.secret)}</div>
+        <button class="adm-btn" style="width:100%;" onclick="copyMsg('${esc(r.secret)}');showToast('Ключ скопирован')">📋 Скопировать ключ</button>
+        <div style="font-size:13px;color:var(--text2);">3. Введи код, который показывает приложение:</div>
+        <input class="adm-search" id="totp-code" placeholder="000000" inputmode="numeric" maxlength="6" autocomplete="off" style="text-align:center;letter-spacing:6px;font-size:20px;font-family:'Space Mono',monospace;">
+        <div id="totp-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+        <button class="reg-btn" style="width:100%;" onclick="totpEnable()">ВКЛЮЧИТЬ</button>
+        <div class="modal-btns"><button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Отмена</button></div>
+      </div>`;
+    setTimeout(() => document.getElementById('totp-code')?.focus(), 150);
+  }
+
+  async function totpEnable() {
+    const inp = document.getElementById('totp-code');
+    const err = document.getElementById('totp-err');
+    const code = (inp?.value || '').trim();
+    if (!/^[0-9]{6}$/.test(code)) { err.textContent = 'Нужно 6 цифр'; err.style.display = 'block'; return; }
+    err.style.display = 'none';
+    try {
+      await adminCall('totp-enable', { setupCode: code });
+      document.getElementById('totp-overlay')?.remove();
+      showToast('Двухфакторная защита включена');
+      refreshTotpBtn();
+    } catch (e) {
+      err.textContent = e.message;
+      err.style.display = 'block';
+    }
+  }
+
+  async function totpDisable() {
+    if (!confirm('Выключить двухфакторную защиту?\nДля входа в панель снова хватит одного пароля.')) return;
+    try {
+      await adminCall('totp-disable', {});
+      adminSession = null;
+      document.getElementById('totp-overlay')?.remove();
+      showToast('Защита выключена');
+      refreshTotpBtn();
+    } catch (e) { showToast(e.message); }
   }
 
   // Сервер отдаёт обновлённый список прямо в ответе — второй запрос
@@ -2979,7 +3099,7 @@
     chats = {}; currentChat = null; myName = ''; myAvatar = null;
     myStatus = ''; currentSeed = []; passwordHash = null;
     authMode = 'anon';
-    isAdmin = false; adminUsers = [];
+    isAdmin = false; adminUsers = []; adminSession = null;
     updateAdminMenuVisibility();
     myRawPass = null; cryptoKey = null;
     myKeyPair = null; myPubJwk = null;

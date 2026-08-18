@@ -23,6 +23,7 @@ const MAX_PAYLOAD   = 512 * 1024;       // максимум размера WS-к
 const MAX_PEERS     = 16;               // максимум участников LAN-комнаты
 const MAX_ROOMS     = 500;              // максимум одновременных LAN-комнат
 const PING_INTERVAL = 30000;
+const PENDING_BUFFER_LIMIT = 2 * 1024 * 1024;  // предел исходящего буфера при догрузке накопленного
 const TTL_DELIVERED = 30 * 86400000;    // храним доставленные 30 дней
 const TTL_PENDING   = 90 * 86400000;    // храним недоставленные 90 дней
 
@@ -74,6 +75,11 @@ db.exec(`
   // паролем владельца — сервер расшифровать его не может
   if (!cols.includes('public_key'))      db.exec('ALTER TABLE users ADD COLUMN public_key TEXT');
   if (!cols.includes('enc_private_key')) db.exec('ALTER TABLE users ADD COLUMN enc_private_key TEXT');
+  // Двухфакторная защита: pending — секрет в процессе настройки, secret —
+  // подтверждённый и работающий, last — последний использованный шаг времени
+  if (!cols.includes('totp_secret'))  db.exec('ALTER TABLE users ADD COLUMN totp_secret TEXT');
+  if (!cols.includes('totp_pending')) db.exec('ALTER TABLE users ADD COLUMN totp_pending TEXT');
+  if (!cols.includes('totp_last'))    db.exec('ALTER TABLE users ADD COLUMN totp_last INTEGER');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_seed ON users(seed_lookup) WHERE seed_lookup IS NOT NULL');
 }
 
@@ -92,8 +98,16 @@ const qUpdateHash  = db.prepare('UPDATE users SET password_hash = ? WHERE nick =
 const qSearchUsers = db.prepare("SELECT nick FROM users WHERE nick LIKE ? ESCAPE '\\' ORDER BY nick LIMIT 10");
 const qInsertMsg   = db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered, mid) VALUES (?, ?, ?, ?, ?, ?)');
 // Править и удалять может только автор — отсюда условие по from_nick
-const qDropByMid   = db.prepare('DELETE FROM messages WHERE mid = ? AND from_nick = ?');
-const qEditByMid   = db.prepare('UPDATE messages SET text = ? WHERE mid = ? AND from_nick = ?');
+// Сверяем и отправителя, и получателя: иначе запросом «изменить письмо для Kim»
+// можно было испортить своё же неотправленное письмо Тому
+const qDropByMid   = db.prepare('DELETE FROM messages WHERE mid = ? AND from_nick = ? AND to_nick = ?');
+const qEditByMid   = db.prepare('UPDATE messages SET text = ? WHERE mid = ? AND from_nick = ? AND to_nick = ?');
+const qMidExists   = db.prepare('SELECT 1 FROM messages WHERE mid = ? LIMIT 1');
+const qGetTotp     = db.prepare('SELECT totp_secret, totp_pending, totp_last FROM users WHERE nick = ?');
+const qSetPending  = db.prepare('UPDATE users SET totp_pending = ? WHERE nick = ?');
+const qEnableTotp  = db.prepare('UPDATE users SET totp_secret = ?, totp_pending = NULL, totp_last = ? WHERE nick = ?');
+const qDisableTotp = db.prepare('UPDATE users SET totp_secret = NULL, totp_pending = NULL, totp_last = NULL WHERE nick = ?');
+const qTotpLast    = db.prepare('UPDATE users SET totp_last = ? WHERE nick = ?');
 const qPending     = db.prepare('SELECT id, from_nick, text, timestamp, mid FROM messages WHERE to_nick = ? AND delivered = 0 ORDER BY timestamp');
 const qMarkOne     = db.prepare('UPDATE messages SET delivered = 1 WHERE id = ?');
 // Счётчик сообщений считается одним проходом по таблице. Раньше здесь был
@@ -177,6 +191,82 @@ async function verifyUser(nick, password) {
   return (await scryptVerify(password, row.password_hash)) ? info : null;
 }
 
+// ===== ОДНОРАЗОВЫЕ КОДЫ (TOTP, RFC 6238) =====
+// Тот самый шестизначный код из Google Authenticator. Считается из общего
+// секрета и текущего времени, поэтому приложению не нужен ни интернет,
+// ни аккаунт Google.
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+
+function base32Encode(buf) {
+  let bits = 0, value = 0, out = '';
+  for (const b of buf) {
+    value = (value << 8) | b; bits += 8;
+    while (bits >= 5) { out += B32[(value >>> (bits - 5)) & 31]; bits -= 5; }
+  }
+  if (bits > 0) out += B32[(value << (5 - bits)) & 31];
+  return out;
+}
+
+function base32Decode(str) {
+  let bits = 0, value = 0; const out = [];
+  for (const ch of String(str).toUpperCase().replace(/[^A-Z2-7]/g, '')) {
+    value = (value << 5) | B32.indexOf(ch); bits += 5;
+    if (bits >= 8) { out.push((value >>> (bits - 8)) & 255); bits -= 8; }
+  }
+  return Buffer.from(out);
+}
+
+// Код для конкретного 30-секундного шага
+function totpCode(secret, counter) {
+  const buf = Buffer.alloc(8);
+  buf.writeUInt32BE(Math.floor(counter / 0x100000000), 0);
+  buf.writeUInt32BE(counter >>> 0, 4);
+  const h = crypto.createHmac('sha1', base32Decode(secret)).update(buf).digest();
+  const off = h[h.length - 1] & 0x0f;
+  const num = ((h[off] & 0x7f) << 24) | (h[off + 1] << 16) | (h[off + 2] << 8) | h[off + 3];
+  return String(num % 1000000).padStart(6, '0');
+}
+
+// Принимаем соседние шаги: часы на телефоне и сервере расходятся на секунды.
+// Использованный шаг запоминаем, чтобы один код нельзя было применить дважды.
+function totpVerify(secret, code, lastStep) {
+  const c = String(code || '');
+  if (!/^[0-9]{6}$/.test(c)) return null;
+  const now = Math.floor(Date.now() / 30000);
+  for (let d = -1; d <= 1; d++) {
+    const step = now + d;
+    if (lastStep != null && step <= lastStep) continue;
+    const expected = totpCode(secret, step);
+    if (crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(c))) return step;
+  }
+  return null;
+}
+
+// Ввёл код — получил пропуск на полчаса. Без этого код пришлось бы вводить
+// на каждое действие: он одноразовый, повторно тот же не примут.
+const ADMIN_SESSION_TTL = 30 * 60 * 1000;
+const adminSessions = new Map();   // токен -> { nick, expires }
+
+function newAdminSession(nick) {
+  const token = crypto.randomBytes(32).toString('hex');
+  adminSessions.set(token, { nick, expires: Date.now() + ADMIN_SESSION_TTL });
+  return token;
+}
+
+function checkAdminSession(token, nick) {
+  if (typeof token !== 'string' || !token) return false;
+  const sess = adminSessions.get(token);
+  if (!sess) return false;
+  if (sess.nick !== nick || sess.expires < Date.now()) { adminSessions.delete(token); return false; }
+  return true;
+}
+
+const sessionSweep = setInterval(() => {
+  const now = Date.now();
+  for (const [t, sess] of adminSessions) if (sess.expires < now) adminSessions.delete(t);
+}, 5 * 60 * 1000);
+sessionSweep.unref();
+
 // Разрывает живое соединение пользователя — после бана или удаления
 // он не должен оставаться подключённым до следующего обрыва.
 // note — текст причины, который увидит сам пользователь
@@ -200,24 +290,35 @@ function ensureAdmin() {
       console.warn('[admin] VOID_ADMIN_PASSWORD не задан — админ-аккаунт не создан.');
       console.warn('[admin] Задай пароль: pm2 set void-signal:VOID_ADMIN_PASSWORD <пароль>');
     }
-    return;
+    return Promise.resolve();
   }
   if (ADMIN_PASS.length < 12) {
     console.warn('[admin] VOID_ADMIN_PASSWORD короче 12 символов — админ не создан.');
-    return;
+    return Promise.resolve();
   }
-  scryptHash(ADMIN_PASS).then(hash => {
+  return scryptHash(ADMIN_PASS).then(hash => {
     const existing = qUserByNick.get(ADMIN_NICK);
+
+    // Аккаунт уже наш — только освежаем пароль. Раньше здесь было безусловное
+    // удаление, и каждый перезапуск сервера стирал переписку админа, аватар
+    // и ключи шифрования: после рестарта ему никто не мог написать.
+    if (existing && existing.is_admin) {
+      qUpdateHash.run(hash, existing.nick);
+      if (existing.banned) qSetBan.run(0, null, null, existing.nick);
+      console.log('[admin] Админ-аккаунт', existing.nick, 'на месте, пароль обновлён');
+      return;
+    }
+
+    // Ник занят обычным пользователем — вот теперь действительно сносим
     if (existing) {
-      // Ник мог быть занят обычным юзером — сносим его вместе с перепиской
-      db.prepare('DELETE FROM messages WHERE from_nick = ? OR to_nick = ?').run(existing.nick, existing.nick);
+      qDeleteMsgs.run(existing.nick, existing.nick);
       qDeleteUser.run(existing.nick);
       kickUser(existing.nick, 'admin-reset');
-      console.log('[admin] Старый аккаунт', existing.nick, 'удалён и пересоздан');
+      console.log('[admin] Ник', existing.nick, 'был занят обычным аккаунтом — освобождён');
     }
     db.prepare('INSERT INTO users (nick, password_hash, banned, is_admin) VALUES (?, ?, 0, 1)')
       .run(ADMIN_NICK, hash);
-    console.log('[admin] Админ-аккаунт', ADMIN_NICK, 'готов');
+    console.log('[admin] Админ-аккаунт', ADMIN_NICK, 'создан');
   }).catch(e => console.error('[admin] Не удалось создать админа:', e.message));
 }
 
@@ -234,11 +335,24 @@ function listUsers() {
   }));
 }
 
-// Проверка прав администратора для /api/admin/*
+// Проверка прав администратора для /api/admin/*.
+// Возвращает { ok } либо { reason: 'auth' | 'totp' } — клиенту важно
+// различать «неверный пароль» и «нужен код», иначе он не поймёт, что спросить.
 async function requireAdmin(body) {
   const u = await verifyUser(body && body.admin, body && body.password);
-  if (!u || !u.is_admin || u.banned) return null;
-  return u;
+  if (!u || !u.is_admin || u.banned) return { reason: 'auth' };
+
+  const row = qGetTotp.get(u.nick);
+  if (row && row.totp_secret) {
+    // Действующий пропуск — код не спрашиваем
+    if (checkAdminSession(body && body.session, u.nick)) return { ok: true, user: u };
+
+    const step = totpVerify(row.totp_secret, body && body.code, row.totp_last);
+    if (step === null) return { reason: 'totp' };
+    qTotpLast.run(step, u.nick);
+    return { ok: true, user: u, session: newAdminSession(u.nick) };
+  }
+  return { ok: true, user: u };
 }
 
 // ===== ЛИМИТЫ ЗАПРОСОВ =====
@@ -261,15 +375,21 @@ const bucketSweep = setInterval(() => {
 }, 300000);
 bucketSweep.unref();
 
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
 function clientIp(req) {
-  // nginx дописывает реальный IP в конец X-Forwarded-For, поэтому берём
-  // последний элемент — подделать его клиент не может.
-  const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string') {
-    const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1];
+  const peer = req.socket.remoteAddress || '';
+  // Заголовку верим ТОЛЬКО если запрос пришёл от nginx с этой же машины.
+  // Раньше верили всегда, и любой, кто достучится до порта напрямую в обход
+  // nginx, мог подставить произвольный адрес и обойти все ограничения.
+  if (LOOPBACK.has(peer)) {
+    const xff = req.headers['x-forwarded-for'];
+    if (typeof xff === 'string') {
+      const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
+      if (parts.length) return parts[parts.length - 1];
+    }
   }
-  return req.socket.remoteAddress || 'unknown';
+  return peer || 'unknown';
 }
 
 // ===== HTTP API =====
@@ -444,6 +564,9 @@ const server = http.createServer((req, res) => {
 
   // Публичные ключи собеседников — пачкой, как аватары
   if (req.method === 'POST' && url.pathname === '/api/keys/get') {
+    if (!rateLimit('pub:' + clientIp(req), 120, 60000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
     readBody((body) => {
       const nicks = Array.isArray(body.nicks) ? body.nicks.slice(0, 50) : [];
       const out = {};
@@ -487,6 +610,11 @@ const server = http.createServer((req, res) => {
 
   // Пачкой: клиенту нужны аватары всех собеседников сразу
   if (req.method === 'POST' && url.pathname === '/api/avatars') {
+    // Запрос может вернуть до 50 картинок, поэтому лимит строже остальных:
+    // без него это самый дешёвый способ забить канал сервера
+    if (!rateLimit('avget:' + clientIp(req), 60, 60000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
     readBody((body) => {
       const nicks = Array.isArray(body.nicks) ? body.nicks.slice(0, 50) : [];
       const out = {};
@@ -508,20 +636,63 @@ const server = http.createServer((req, res) => {
     const action = url.pathname.slice('/api/admin/'.length);
 
     readBody(async (body) => {
-      const admin = await requireAdmin(body);
-      if (!admin) {
+      const check = await requireAdmin(body);
+      if (!check.ok) {
+        if (check.reason === 'totp') {
+          return json(403, { error: 'Нужен код подтверждения', needCode: true });
+        }
         console.warn('[admin] Отказано в доступе с', clientIp(req));
         return json(403, { error: 'Нет прав администратора' });
       }
+      const admin = check.user;
+      // Новый пропуск отдаём один раз — при следующем запросе клиент пришлёт его сам
+      const issued = check.session || null;
+      const withSession = (code, data) => json(code, issued ? { ...data, session: issued } : data);
 
-      if (action === 'users') return json(200, { ok: true, users: listUsers() });
+      if (action === 'users') return withSession(200, { ok: true, users: listUsers() });
+
+      // --- Двухфакторная защита ---
+      if (action === 'totp-status') {
+        const row = qGetTotp.get(admin.nick) || {};
+        return withSession(200, { ok: true, enabled: !!row.totp_secret });
+      }
+
+      // Готовим новый секрет. Пока он в pending, вход по-прежнему без кода —
+      // включится только после того, как пользователь докажет, что код читает
+      if (action === 'totp-setup') {
+        const secret = base32Encode(crypto.randomBytes(20));
+        qSetPending.run(secret, admin.nick);
+        const uri = 'otpauth://totp/' + encodeURIComponent('Void:' + admin.nick) +
+                    '?secret=' + secret + '&issuer=Void&algorithm=SHA1&digits=6&period=30';
+        console.log('[totp] Подготовлен новый секрет для', admin.nick);
+        return withSession(200, { ok: true, secret, uri });
+      }
+
+      if (action === 'totp-enable') {
+        const row = qGetTotp.get(admin.nick) || {};
+        if (!row.totp_pending) return json(400, { error: 'Сначала запроси настройку' });
+        const step = totpVerify(row.totp_pending, body.setupCode, null);
+        if (step === null) return json(400, { error: 'Код не подходит' });
+        qEnableTotp.run(row.totp_pending, step, admin.nick);
+        console.log('[totp] Включена для', admin.nick);
+        return json(200, { ok: true, enabled: true, session: newAdminSession(admin.nick) });
+      }
+
+      if (action === 'totp-disable') {
+        const row = qGetTotp.get(admin.nick) || {};
+        if (!row.totp_secret) return json(200, { ok: true, enabled: false });
+        qDisableTotp.run(admin.nick);
+        for (const [t, sess] of adminSessions) if (sess.nick === admin.nick) adminSessions.delete(t);
+        console.log('[totp] Выключена для', admin.nick);
+        return json(200, { ok: true, enabled: false });
+      }
 
       // Полная очистка переписки на сервере. Локальные копии у пользователей
       // остаются — сервер их не контролирует.
       if (action === 'purge-messages') {
         const removed = qPurgeMsgs.run().changes;
         console.log('[admin] PURGE: удалено сообщений с сервера:', removed);
-        return json(200, { ok: true, removed, users: listUsers() });
+        return withSession(200, { ok: true, removed, users: listUsers() });
       }
 
       const targetNick = typeof body.nick === 'string' ? body.nick.trim() : '';
@@ -539,14 +710,14 @@ const server = http.createServer((req, res) => {
         qSetBan.run(1, Date.now(), reason, target.nick);
         const kicked = kickUser(target.nick, 'banned', reason);
         console.log('[admin] BAN', target.nick, reason ? '(' + reason + ')' : '', kicked ? '| отключён' : '');
-        return json(200, { ok: true, nick: target.nick, banned: true, kicked, users: listUsers() });
+        return withSession(200, { ok: true, nick: target.nick, banned: true, kicked, users: listUsers() });
       }
 
       if (action === 'unban') {
         if (!target.banned) return json(200, { ok: true, nick: target.nick, banned: false, note: 'Не был заблокирован', users: listUsers() });
         qSetBan.run(0, null, null, target.nick);
         console.log('[admin] UNBAN', target.nick);
-        return json(200, { ok: true, nick: target.nick, banned: false, users: listUsers() });
+        return withSession(200, { ok: true, nick: target.nick, banned: false, users: listUsers() });
       }
 
       if (action === 'delete') {
@@ -567,6 +738,9 @@ const server = http.createServer((req, res) => {
 
   // GET /api/search?q=...
   if (req.method === 'GET' && url.pathname === '/api/search') {
+    if (!rateLimit('search:' + clientIp(req), 60, 60000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
     const q = (url.searchParams.get('q') || '').trim();
     if (q.length < 2 || q.length > 32) return json(200, { users: [] });
     const pattern = '%' + q.replace(/[\\%_]/g, c => '\\' + c) + '%';
@@ -687,10 +861,23 @@ wss.on('connection', (ws, req) => {
         const pending = qPending.all(nick);
         if (pending.length) {
           console.log('[auth] Delivering', pending.length, 'pending messages to', nick);
+          let sentCount = 0;
           for (const m of pending) {
             if (ws.readyState !== 1) break;
-            send({ type: 'dm', from: m.from_nick, text: m.text, timestamp: m.timestamp, mid: m.mid });
+            // Не заваливаем сокет: если исходящий буфер уже распух, остальное
+            // подождёт следующего подключения — оно не потеряется
+            if (ws.bufferedAmount > PENDING_BUFFER_LIMIT) {
+              console.warn('[auth] Буфер переполнен, остаток догоним позже:', pending.length - sentCount);
+              break;
+            }
+            try {
+              ws.send(JSON.stringify({ type: 'dm', from: m.from_nick, text: m.text, timestamp: m.timestamp, mid: m.mid }));
+            } catch (e) {
+              console.error('[auth] Обрыв при доставке накопленного:', e.message);
+              break;
+            }
             qMarkOne.run(m.id);
+            sentCount++;
           }
         }
         return;
@@ -718,12 +905,21 @@ wss.on('connection', (ws, req) => {
 
         const toNick = target.nick;
         const timestamp = Date.now();
-        const mid = typeof msg.mid === 'string' && msg.mid.length <= 40 ? msg.mid : crypto.randomUUID();
+        // Повторный опознаватель сломал бы правку и удаление: они задели бы
+        // сразу два сообщения, поэтому при совпадении выдаём свой
+        let mid = typeof msg.mid === 'string' && msg.mid.length >= 8 && msg.mid.length <= 40 ? msg.mid : null;
+        if (!mid || qMidExists.get(mid)) mid = crypto.randomUUID();
         const recipientWs = online[toNick];
-        const live = recipientWs && recipientWs.readyState === 1;
-        if (live) {
-          try { recipientWs.send(JSON.stringify({ type: 'dm', from: nick, text, timestamp, mid })); }
-          catch (e) {}
+        // Помечаем доставленным только если запись в сокет реально удалась:
+        // раньше при сбое отправки сообщение считалось доставленным и пропадало
+        let live = false;
+        if (recipientWs && recipientWs.readyState === 1) {
+          try {
+            recipientWs.send(JSON.stringify({ type: 'dm', from: nick, text, timestamp, mid }));
+            live = true;
+          } catch (e) {
+            console.error('[dm] Не удалось отправить', toNick + ':', e.message);
+          }
         }
         qInsertMsg.run(nick, toNick, text, timestamp, live ? 1 : 0, mid);
         console.log(live ? '[dm] Delivered' : '[dm] Stored (offline)', nick, '->', toNick);
@@ -734,13 +930,14 @@ wss.on('connection', (ws, req) => {
       // --- Удаление сообщения у обеих сторон ---
       if (msg.type === 'dm-delete') {
         if (!nick) return;
+        if (!rateLimit('dmmod:' + nick, 60, 10000)) { send({ type: 'dm-error', error: 'rate-limit' }); return; }
         const to = typeof msg.to === 'string' ? msg.to.trim() : '';
         const mid = typeof msg.mid === 'string' ? msg.mid : '';
         if (!to || !mid) return;
         const target = qNickExists.get(to);
         if (!target) return;
         // Если сообщение ещё не доставлено, оно просто исчезнет из очереди
-        qDropByMid.run(mid, nick);
+        qDropByMid.run(mid, nick, target.nick);
         const ws2 = online[target.nick];
         if (ws2 && ws2.readyState === 1) {
           try { ws2.send(JSON.stringify({ type: 'dm-delete', from: nick, mid })); } catch (e) {}
@@ -752,6 +949,7 @@ wss.on('connection', (ws, req) => {
       // --- Изменение текста сообщения ---
       if (msg.type === 'dm-edit') {
         if (!nick) return;
+        if (!rateLimit('dmmod:' + nick, 60, 10000)) { send({ type: 'dm-error', error: 'rate-limit' }); return; }
         const to = typeof msg.to === 'string' ? msg.to.trim() : '';
         const mid = typeof msg.mid === 'string' ? msg.mid : '';
         const text = typeof msg.text === 'string' ? msg.text : '';
@@ -760,7 +958,7 @@ wss.on('connection', (ws, req) => {
         if (text.length > limit) { send({ type: 'dm-error', to, error: 'too-long' }); return; }
         const target = qNickExists.get(to);
         if (!target) return;
-        qEditByMid.run(text, mid, nick);
+        qEditByMid.run(text, mid, nick, target.nick);
         const ws2 = online[target.nick];
         if (ws2 && ws2.readyState === 1) {
           try { ws2.send(JSON.stringify({ type: 'dm-edit', from: nick, mid, text })); } catch (e) {}
@@ -847,7 +1045,13 @@ cleanup.unref();
 server.on('error', e => console.error('[http] Server error:', e.message));
 wss.on('error', e => console.error('[ws] Server error:', e.message));
 process.on('unhandledRejection', e => console.error('[fatal] Unhandled rejection:', e && e.message));
-process.on('uncaughtException', e => console.error('[fatal] Uncaught exception:', e && e.stack));
+// После необработанной ошибки состояние процесса неизвестно. Раньше он
+// продолжал работать как ни в чём не бывало; теперь корректно закрываемся,
+// а pm2 поднимет заново.
+process.on('uncaughtException', e => {
+  console.error('[fatal] Uncaught exception:', e && e.stack);
+  shutdown('uncaughtException');
+});
 
 let shuttingDown = false;
 function shutdown(signal) {
@@ -856,12 +1060,18 @@ function shutdown(signal) {
   console.log('[shutdown]', signal);
   clearInterval(heartbeat);
   clearInterval(cleanup);
+  clearInterval(sessionSweep);
   wss.clients.forEach(c => { try { c.close(1001, 'server restart'); } catch (e) {} });
-  server.close(() => { try { db.close(); } catch (e) {} process.exit(0); });
-  setTimeout(() => process.exit(0), 5000).unref();
+  const closeDb = () => { try { if (db.open) db.close(); } catch (e) {} };
+  server.close(() => { closeDb(); process.exit(0); });
+  // Если соединения зависли, всё равно закрываем базу перед выходом
+  setTimeout(() => { closeDb(); process.exit(0); }, 5000).unref();
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT',  () => shutdown('SIGINT'));
 
-ensureAdmin();
-server.listen(PORT, () => console.log('VOID server running on :' + PORT));
+// Слушаем только после того, как админ-аккаунт готов: иначе первые запросы
+// попадали в окно, когда его ещё нет
+ensureAdmin().finally(() => {
+  server.listen(PORT, () => console.log('VOID server running on :' + PORT));
+});
