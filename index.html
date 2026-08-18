@@ -241,6 +241,7 @@
   .msg-time.own { justify-content:flex-end; }
   .msg-time.other { padding-left:36px; }
   .check { color:var(--accent); display:inline-flex; align-items:center; }
+  .msg-edited { font-size:10px; color:var(--text3); font-style:italic; }
   .check-ico { width:11px; height:11px; }
 
   /* Typing indicator */
@@ -763,6 +764,11 @@
       <div class="reply-bar" id="reply-bar" style="display:none;">
         <div class="reply-bar-quote" id="reply-bar-quote"></div>
         <button class="reply-bar-cancel" onclick="clearReply()">✕</button>
+      </div>
+
+      <div class="reply-bar" id="edit-bar" style="display:none;">
+        <div class="reply-bar-quote" id="edit-bar-quote" style="border-left-color:#F59E0B;"></div>
+        <button class="reply-bar-cancel" onclick="cancelEdit()">✕</button>
       </div>
       <div class="input-area">
         <button class="icon-btn" onclick="toggleStickerPanel()" title="Стикеры" style="flex-shrink:0;">😊</button>
@@ -1469,6 +1475,8 @@
   let authMode = 'anon', passwordHash = null;
   let myStatus = '';
   let replyTo = null;
+  let editingMid = null;    // опознаватель правящегося сообщения
+  let editingIdx = -1;
   let isAdmin = false;      // подтверждается сервером при auth-ok
   let adminUsers = [];
 
@@ -1568,6 +1576,11 @@
     else                         { el.textContent = '🔴 Нет связи';        el.style.color = '#EF4444'; }
   }
 
+  // Случайный опознаватель сообщения — по нему его находят обе стороны
+  function newMid() {
+    return (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).slice(0, 36);
+  }
+
   async function handleIncomingDm(msg) {
     const key = msg.from;
     const text = await e2eDecrypt(key, msg.text);
@@ -1576,12 +1589,25 @@
     // Раньше входящие ложились в localStorage открытым текстом, в отличие от
     // отправленных. Теперь шифруются так же.
     const enc = await encryptText(text);
-    chats[key].messages.push({ enc, own: false, time: timeStr, timestamp: msg.timestamp });
+    chats[key].messages.push({ enc, own: false, time: timeStr, timestamp: msg.timestamp, mid: msg.mid });
     if (currentChat !== key) { chats[key].unread = (chats[key].unread || 0) + 1; }
     saveState();
     if (currentChat === key) renderMessages();
     renderChatList();
     sendNotification(key, text.startsWith('__STICKER__') ? '🎭 Стикер' : text);
+  }
+
+  async function handleIncomingEdit(msg) {
+    const chat = chats[msg.from];
+    if (!chat) return;
+    const target = chat.messages.find(m => m.mid && m.mid === msg.mid);
+    if (!target) return;
+    const text = await e2eDecrypt(msg.from, msg.text);
+    target.enc = await encryptText(text);
+    target.edited = true;
+    saveState();
+    if (currentChat === msg.from) renderMessages();
+    renderChatList();
   }
 
   function connectDmWs() {
@@ -1708,6 +1734,23 @@
         if (msg.type === 'dm') {
           // Расшифровка и запись асинхронны, поэтому выносим в отдельную функцию
           handleIncomingDm(msg);
+          return;
+        }
+
+        if (msg.type === 'dm-delete') {
+          const chat = chats[msg.from];
+          if (!chat) return;
+          const i = chat.messages.findIndex(m => m.mid && m.mid === msg.mid);
+          if (i < 0) return;
+          chat.messages.splice(i, 1);
+          saveState();
+          if (currentChat === msg.from) renderMessages();
+          renderChatList();
+          return;
+        }
+
+        if (msg.type === 'dm-edit') {
+          handleIncomingEdit(msg);
           return;
         }
       } catch(ex) { console.error('[DM] Parse error', ex); }
@@ -2076,6 +2119,7 @@
   // ===== НАВИГАЦИЯ =====
   function backToChats() {
     hideSecureOverlay();          // защиту не выключаем: она включается осознанно
+    cancelEdit();
     document.getElementById('chat-view').classList.remove('active');
     document.getElementById('chats-screen').classList.remove('hidden');
     document.getElementById('fab').classList.add('visible');
@@ -2152,25 +2196,52 @@
   function showMsgMenu(idx, msg) {
     const existing = document.querySelector('.msg-menu');
     if (existing) existing.remove();
+    const isLan = currentChat && currentChat.startsWith('__lan__:');
+    const isSticker = (msg.text || '').startsWith('__STICKER__');
+    // Изменить можно только свой текст: у стикера менять нечего, а чужое
+    // сообщение подделывать нельзя
+    const canEdit = msg.own && !isSticker;
+    // «Удалить у всех» работает через сервер, значит только для личных чатов
+    // и только если у сообщения есть опознаватель
+    const canUnsend = msg.own && !isLan && !!msg.mid;
+    const B = (style) => 'width:100%;padding:11px;border-radius:12px;font-size:14px;cursor:pointer;text-align:left;' + style;
+    const plain = B('background:var(--bg3);border:1px solid var(--border);color:var(--text);');
+    const danger = B('background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444;');
+    menuHtml = `
+      <div class="modal" style="width:270px;gap:8px;">
+        <div class="modal-title" style="font-size:13px;">СООБЩЕНИЕ</div>
+        <button onclick="copyMsg('${esc(msg.text).replace(/'/g,"\\'")}');this.closest('.modal-overlay').remove();" style="${plain}">📋 Скопировать</button>
+        ${canEdit?`<button onclick="startEdit(${idx});this.closest('.modal-overlay').remove();" style="${plain}">✏️ Изменить</button>`:''}
+        <button onclick="deleteMsg(${idx},false);this.closest('.modal-overlay').remove();" style="${danger}">🗑️ Удалить у себя</button>
+        ${canUnsend?`<button onclick="deleteMsg(${idx},true);this.closest('.modal-overlay').remove();" style="${danger}">🗑️ Удалить у всех</button>`:''}
+        <button onclick="this.closest('.modal-overlay').remove();" style="${B('background:var(--bg3);border:1px solid var(--border);color:var(--text2);text-align:center;')}">Отмена</button>
+      </div>`;
     const menu = document.createElement('div');
     menu.className = 'msg-menu modal-overlay';
-    menu.innerHTML = `
-      <div class="modal" style="width:260px;gap:8px;">
-        <div class="modal-title" style="font-size:13px;">СООБЩЕНИЕ</div>
-        <button onclick="copyMsg('${esc(msg.text).replace(/'/g,"\\'")}');this.closest('.modal-overlay').remove();" style="width:100%;padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text);font-size:14px;cursor:pointer;text-align:left;">📋 Скопировать</button>
-        ${msg.own?`<button onclick="deleteMsg(${idx});this.closest('.modal-overlay').remove();" style="width:100%;padding:11px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:12px;color:#ef4444;font-size:14px;cursor:pointer;text-align:left;">🗑️ Удалить</button>`:''}
-        <button onclick="this.closest('.modal-overlay').remove();" style="width:100%;padding:11px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text2);font-size:14px;cursor:pointer;">Отмена</button>
-      </div>`;
+    menu.innerHTML = menuHtml;
     document.body.appendChild(menu);
     menu.addEventListener('click', e => { if(e.target===menu) menu.remove(); });
   }
+  let menuHtml = '';
 
   function copyMsg(text) {
     navigator.clipboard.writeText(text).catch(()=>{});
   }
 
-  function deleteMsg(idx) {
-    chats[currentChat].messages.splice(idx, 1);
+  // forEveryone=true — убрать сообщение и у собеседника
+  function deleteMsg(idx, forEveryone) {
+    const chat = chats[currentChat];
+    if (!chat) return;
+    const msg = chat.messages[idx];
+    if (!msg) return;
+    if (forEveryone && msg.mid && dmWsAuthOk && dmWs?.readyState === 1) {
+      dmWs.send(JSON.stringify({ type: 'dm-delete', to: currentChat, mid: msg.mid }));
+    } else if (forEveryone) {
+      showToast('Нет связи — удалено только у себя');
+    }
+    chat.messages.splice(idx, 1);
+    if (editingMid && editingMid === msg.mid) cancelEdit();
+    saveState();          // без этого сообщение возвращалось после перезагрузки
     renderMessages();
     renderChatList();
   }
@@ -2331,7 +2402,8 @@
       const bubbleStyle = isSticker ? 'style="background:transparent;border:none;padding:4px;"' : '';
       const replyQuote = msg.reply ? `<div class="reply-quote">↩ ${esc(msg.reply.text.slice(0,60))}</div>` : '';
       const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">↩</button>`;
-      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${msg.time}${msg.own?' <span class="check">'+CHECK_ICON+'</span>':''}</span>`;
+      const editedMark = msg.edited ? '<span class="msg-edited">изменено</span> ' : '';
+      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${editedMark}${msg.time}${msg.own?' <span class="check">'+CHECK_ICON+'</span>':''}</span>`;
       const reactionsHtml = (msg.reactions && msg.reactions.length)
         ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
@@ -2388,6 +2460,8 @@
     const input = document.getElementById('msg-input');
     const text = input.value.trim();
     if (!text||!currentChat) return;
+    if (editingMid) { await applyEdit(text); return; }   // правим, а не отправляем новое
+    const outMid = newMid();
     if (currentChat.startsWith('__lan__:')) {
       if (!lanRoom) { showToast('Нет соединения'); return; }
       const timeStr = now();
@@ -2415,7 +2489,7 @@
         return;
       }
       console.log('[DM] Sending dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
-      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: payload }));
+      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: payload, mid: outMid }));
     } else if (myRawPass) {
       // Раньше сообщение просто оседало локально, а собеседник его не получал
       // и об этом никто не сообщал. Теперь честно говорим и жмём переподключение.
@@ -2425,7 +2499,7 @@
       return;
     }
     const enc = await encryptText(text);
-    const msg = {enc, own:true, time:now(), timestamp:Date.now()};
+    const msg = {enc, own:true, time:now(), timestamp:Date.now(), mid:outMid};
     if (pendingCapsuleTime) { msg.unlockAt = pendingCapsuleTime; cancelCapsule(); }
     if (replyTo) { msg.reply = { text: replyTo.text, own: replyTo.own }; clearReply(); }
     chats[currentChat].messages.push(msg);
@@ -2504,6 +2578,61 @@
     bar.style.display = 'flex';
     document.getElementById('reply-bar-quote').textContent = '↩ ' + replyTo.text.slice(0,60);
     document.getElementById('msg-input').focus();
+  }
+
+  // ===== ПРАВКА СООБЩЕНИЯ =====
+  // Текст подставляется в то же поле ввода, что и обычная отправка —
+  // так же, как это работает при ответе на сообщение
+  async function startEdit(idx) {
+    const msg = chats[currentChat]?.messages[idx];
+    if (!msg || !msg.own) return;
+    const text = await decryptText(msg.enc);
+    if (text.startsWith('__STICKER__')) { showToast('Стикер изменить нельзя'); return; }
+    clearReply();
+    editingMid = msg.mid || null;
+    editingIdx = idx;
+    const bar = document.getElementById('edit-bar');
+    if (bar) bar.style.display = 'flex';
+    const q = document.getElementById('edit-bar-quote');
+    if (q) q.textContent = '✏️ ' + text.slice(0, 60);
+    const input = document.getElementById('msg-input');
+    input.value = text;
+    input.focus();
+  }
+
+  function cancelEdit() {
+    editingMid = null;
+    editingIdx = -1;
+    const bar = document.getElementById('edit-bar');
+    if (bar) bar.style.display = 'none';
+    const input = document.getElementById('msg-input');
+    if (input) input.value = '';
+  }
+
+  async function applyEdit(text) {
+    const chat = chats[currentChat];
+    const msg = chat?.messages[editingIdx];
+    if (!msg) { cancelEdit(); return; }
+    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
+
+    // Сначала отправляем: если не выйдет, локально ничего не портим
+    if (msg.mid && !currentChat.startsWith('__lan__:')) {
+      if (!(dmWsAuthOk && dmWs?.readyState === 1)) {
+        showToast('Нет связи с сервером — изменение не сохранено');
+        dmWakeCheck();
+        return;
+      }
+      const payload = await e2eEncrypt(currentChat, text);
+      if (!payload) { showToast('Не удалось изменить — собеседник недоступен'); return; }
+      dmWs.send(JSON.stringify({ type: 'dm-edit', to: currentChat, mid: msg.mid, text: payload }));
+    }
+
+    msg.enc = await encryptText(text);
+    msg.edited = true;
+    cancelEdit();
+    saveState();
+    renderMessages();
+    renderChatList();
   }
 
   function clearReply() {
@@ -3100,6 +3229,7 @@
     const stickerData = (type === 'emoji' || type === 'void') ? val : customStickers[parseInt(val)];
     if (!stickerData) { showToast('Стикер не найден'); return; }
     const stickerText = '__STICKER__' + type + ':' + stickerData;
+    const stickerMid = newMid();
     // Картинки теперь тоже уходят на сервер — они сжимаются при загрузке
     if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
       const payload = await e2eEncrypt(currentChat, stickerText);
@@ -3108,14 +3238,14 @@
         return;
       }
       console.log('[DM] Sending sticker dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
-      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: payload }));
+      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: payload, mid: stickerMid }));
     } else if (myRawPass) {
       showToast('Нет связи с сервером — стикер не отправлен');
       dmWakeCheck();
       return;
     }
     const enc = await encryptText(stickerText);
-    chats[currentChat].messages.push({enc, own:true, time:now(), timestamp:Date.now(), isSticker:true});
+    chats[currentChat].messages.push({enc, own:true, time:now(), timestamp:Date.now(), isSticker:true, mid:stickerMid});
     playSound();
     renderMessages();
     renderChatList();

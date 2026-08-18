@@ -55,6 +55,12 @@ db.exec(`
 
 // Миграция: у существующих баз этих колонок нет, CREATE TABLE их не добавит
 {
+  const mcols = db.prepare('PRAGMA table_info(messages)').all().map(c => c.name);
+  // Опознаватель сообщения: нужен, чтобы удалять и править его у обеих сторон.
+  // Значение случайное и о содержимом ничего не говорит.
+  if (!mcols.includes('mid')) db.exec('ALTER TABLE messages ADD COLUMN mid TEXT');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_messages_mid ON messages(mid)');
+
   const cols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
   if (!cols.includes('banned'))     db.exec('ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0');
   if (!cols.includes('is_admin'))   db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
@@ -84,8 +90,11 @@ const qGetAvatar   = db.prepare('SELECT nick, avatar FROM users WHERE nick = ? C
 const qUserBySeed  = db.prepare('SELECT nick, password_hash, banned, is_admin, ban_reason FROM users WHERE seed_lookup = ?');
 const qUpdateHash  = db.prepare('UPDATE users SET password_hash = ? WHERE nick = ?');
 const qSearchUsers = db.prepare("SELECT nick FROM users WHERE nick LIKE ? ESCAPE '\\' ORDER BY nick LIMIT 10");
-const qInsertMsg   = db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered) VALUES (?, ?, ?, ?, ?)');
-const qPending     = db.prepare('SELECT id, from_nick, text, timestamp FROM messages WHERE to_nick = ? AND delivered = 0 ORDER BY timestamp');
+const qInsertMsg   = db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered, mid) VALUES (?, ?, ?, ?, ?, ?)');
+// Править и удалять может только автор — отсюда условие по from_nick
+const qDropByMid   = db.prepare('DELETE FROM messages WHERE mid = ? AND from_nick = ?');
+const qEditByMid   = db.prepare('UPDATE messages SET text = ? WHERE mid = ? AND from_nick = ?');
+const qPending     = db.prepare('SELECT id, from_nick, text, timestamp, mid FROM messages WHERE to_nick = ? AND delivered = 0 ORDER BY timestamp');
 const qMarkOne     = db.prepare('UPDATE messages SET delivered = 1 WHERE id = ?');
 // Счётчик сообщений считается одним проходом по таблице. Раньше здесь был
 // коррелированный подзапрос с OR — он сканировал messages целиком для КАЖДОГО
@@ -680,7 +689,7 @@ wss.on('connection', (ws, req) => {
           console.log('[auth] Delivering', pending.length, 'pending messages to', nick);
           for (const m of pending) {
             if (ws.readyState !== 1) break;
-            send({ type: 'dm', from: m.from_nick, text: m.text, timestamp: m.timestamp });
+            send({ type: 'dm', from: m.from_nick, text: m.text, timestamp: m.timestamp, mid: m.mid });
             qMarkOne.run(m.id);
           }
         }
@@ -709,15 +718,54 @@ wss.on('connection', (ws, req) => {
 
         const toNick = target.nick;
         const timestamp = Date.now();
+        const mid = typeof msg.mid === 'string' && msg.mid.length <= 40 ? msg.mid : crypto.randomUUID();
         const recipientWs = online[toNick];
         const live = recipientWs && recipientWs.readyState === 1;
         if (live) {
-          try { recipientWs.send(JSON.stringify({ type: 'dm', from: nick, text, timestamp })); }
+          try { recipientWs.send(JSON.stringify({ type: 'dm', from: nick, text, timestamp, mid })); }
           catch (e) {}
         }
-        qInsertMsg.run(nick, toNick, text, timestamp, live ? 1 : 0);
+        qInsertMsg.run(nick, toNick, text, timestamp, live ? 1 : 0, mid);
         console.log(live ? '[dm] Delivered' : '[dm] Stored (offline)', nick, '->', toNick);
         send({ type: 'dm-ack', to: toNick, timestamp, delivered: live ? 1 : 0 });
+        return;
+      }
+
+      // --- Удаление сообщения у обеих сторон ---
+      if (msg.type === 'dm-delete') {
+        if (!nick) return;
+        const to = typeof msg.to === 'string' ? msg.to.trim() : '';
+        const mid = typeof msg.mid === 'string' ? msg.mid : '';
+        if (!to || !mid) return;
+        const target = qNickExists.get(to);
+        if (!target) return;
+        // Если сообщение ещё не доставлено, оно просто исчезнет из очереди
+        qDropByMid.run(mid, nick);
+        const ws2 = online[target.nick];
+        if (ws2 && ws2.readyState === 1) {
+          try { ws2.send(JSON.stringify({ type: 'dm-delete', from: nick, mid })); } catch (e) {}
+        }
+        console.log('[dm] Deleted', nick, '->', target.nick);
+        return;
+      }
+
+      // --- Изменение текста сообщения ---
+      if (msg.type === 'dm-edit') {
+        if (!nick) return;
+        const to = typeof msg.to === 'string' ? msg.to.trim() : '';
+        const mid = typeof msg.mid === 'string' ? msg.mid : '';
+        const text = typeof msg.text === 'string' ? msg.text : '';
+        if (!to || !mid || !text) return;
+        const limit = text.startsWith('{"v":1') ? MAX_E2E : MAX_TEXT;
+        if (text.length > limit) { send({ type: 'dm-error', to, error: 'too-long' }); return; }
+        const target = qNickExists.get(to);
+        if (!target) return;
+        qEditByMid.run(text, mid, nick);
+        const ws2 = online[target.nick];
+        if (ws2 && ws2.readyState === 1) {
+          try { ws2.send(JSON.stringify({ type: 'dm-edit', from: nick, mid, text })); } catch (e) {}
+        }
+        console.log('[dm] Edited', nick, '->', target.nick);
         return;
       }
 
