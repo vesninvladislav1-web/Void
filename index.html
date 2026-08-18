@@ -1404,8 +1404,17 @@
     } catch(e) { console.error('[e2e] Не удалось создать ключи:', e.message); return false; }
   }
 
+  const NO_KEY_RETRY = 20000;   // как скоро переспросить, если ключа не было
+
   async function peerPublicKey(nick) {
-    if (peerKeyCache[nick] !== undefined) return peerKeyCache[nick];
+    const hit = peerKeyCache[nick];
+    // Найденный ключ держим сколько угодно, а вот «ключа нет» запоминать
+    // насовсем нельзя: человек мог зайти секунду назад и ключ уже появился.
+    // Раньше отказ кэшировался навсегда, и написать ему можно было только
+    // после перезапуска приложения.
+    if (hit && hit.key) return hit.key;
+    if (hit && !hit.key && Date.now() - hit.at < NO_KEY_RETRY) return null;
+
     try {
       const r = await fetch(API + '/api/keys/get', {
         method:'POST', headers:{'Content-Type':'application/json'},
@@ -1415,9 +1424,13 @@
       const keys = d.keys || {};
       // Сервер отвечает каноническим ником — он может отличаться регистром
       const jwk = keys[nick] !== undefined ? keys[nick] : (Object.values(keys)[0] || null);
-      peerKeyCache[nick] = jwk ? await impPub(jwk) : null;
-    } catch(e) { peerKeyCache[nick] = null; }
-    return peerKeyCache[nick];
+      const key = jwk ? await impPub(jwk) : null;
+      peerKeyCache[nick] = { key, at: Date.now() };
+      return key;
+    } catch(e) {
+      peerKeyCache[nick] = { key: null, at: Date.now() };
+      return null;
+    }
   }
 
   // Общий ключ переписки: ECDH даёт обоим одинаковый секрет,
@@ -2485,7 +2498,7 @@
       // Шифруем ключом пары: на сервер уходит только шифротекст
       const payload = await e2eEncrypt(currentChat, text);
       if (!payload) {
-        showToast('Не удалось отправить — собеседник недоступен');
+        showToast('Собеседник ещё ни разу не заходил — написать ему пока нельзя');
         return;
       }
       console.log('[DM] Sending dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
@@ -3354,7 +3367,7 @@
     if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
       const payload = await e2eEncrypt(currentChat, stickerText);
       if (!payload) {
-        showToast('Не удалось отправить — собеседник недоступен');
+        showToast('Собеседник ещё ни разу не заходил — написать ему пока нельзя');
         return;
       }
       console.log('[DM] Sending sticker dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
