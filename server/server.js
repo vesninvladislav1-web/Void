@@ -29,7 +29,9 @@ const TTL_PENDING   = 90 * 86400000;    // храним недоставленн
 
 // ===== СОСТОЯНИЕ =====
 const rooms  = {};   // LAN сигналинг: roomId -> { peerId: ws }
-const online = {};   // Личные чаты: nick -> ws
+// Раньше здесь был один сокет на аккаунт, и вход со второго устройства
+// выбивал первое. Теперь у ника набор подключений — по одному на устройство.
+const online = {};   // nick -> Set(ws)
 
 // ===== БАЗА ДАННЫХ =====
 const db = new Database(path.join(__dirname, 'void.db'));
@@ -48,6 +50,15 @@ db.exec(`
     timestamp INTEGER NOT NULL,
     delivered INTEGER DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS devices (
+    nick TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    name TEXT,
+    created_at INTEGER NOT NULL,
+    last_seen INTEGER NOT NULL,
+    PRIMARY KEY (nick, device_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_devices_nick ON devices(nick);
   CREATE INDEX IF NOT EXISTS idx_users_nick_nocase ON users(nick COLLATE NOCASE);
   CREATE INDEX IF NOT EXISTS idx_messages_inbox    ON messages(to_nick, delivered);
   CREATE INDEX IF NOT EXISTS idx_messages_from     ON messages(from_nick);
@@ -103,6 +114,16 @@ const qInsertMsg   = db.prepare('INSERT INTO messages (from_nick, to_nick, text,
 const qDropByMid   = db.prepare('DELETE FROM messages WHERE mid = ? AND from_nick = ? AND to_nick = ?');
 const qEditByMid   = db.prepare('UPDATE messages SET text = ? WHERE mid = ? AND from_nick = ? AND to_nick = ?');
 const qMidExists   = db.prepare('SELECT 1 FROM messages WHERE mid = ? LIMIT 1');
+// IP-адреса намеренно не сохраняем: в политике конфиденциальности написано,
+// что они в базу не попадают. Хватает названия устройства и времени.
+const qUpsertDevice = db.prepare(`
+  INSERT INTO devices (nick, device_id, name, created_at, last_seen) VALUES (?, ?, ?, ?, ?)
+  ON CONFLICT(nick, device_id) DO UPDATE SET last_seen = excluded.last_seen, name = excluded.name
+`);
+const qListDevices = db.prepare('SELECT device_id, name, created_at, last_seen FROM devices WHERE nick = ? ORDER BY last_seen DESC');
+const qDropDevice  = db.prepare('DELETE FROM devices WHERE nick = ? AND device_id = ?');
+const qDropDevices = db.prepare('DELETE FROM devices WHERE nick = ?');
+const qSetPassword = db.prepare('UPDATE users SET password_hash = ?, enc_private_key = ? WHERE nick = ?');
 const qGetTotp     = db.prepare('SELECT totp_secret, totp_pending, totp_last FROM users WHERE nick = ?');
 const qSetPending  = db.prepare('UPDATE users SET totp_pending = ? WHERE nick = ?');
 const qEnableTotp  = db.prepare('UPDATE users SET totp_secret = ?, totp_pending = NULL, totp_last = ? WHERE nick = ?');
@@ -129,6 +150,20 @@ const qListUsers   = db.prepare(`
 const qSetBan      = db.prepare('UPDATE users SET banned = ?, banned_at = ?, ban_reason = ? WHERE nick = ?');
 const qDeleteUser  = db.prepare('DELETE FROM users WHERE nick = ?');
 const qDeleteMsgs  = db.prepare('DELETE FROM messages WHERE from_nick = ? OR to_nick = ?');
+
+function addOnline(nick, ws) {
+  if (!online[nick]) online[nick] = new Set();
+  online[nick].add(ws);
+}
+function removeOnline(nick, ws) {
+  const set = online[nick];
+  if (!set) return;
+  set.delete(ws);
+  if (!set.size) delete online[nick];
+}
+function socketsOf(nick) { return online[nick] ? [...online[nick]] : []; }
+function isOnline(nick) { return !!(online[nick] && online[nick].size); }
+function deviceCount(nick) { return online[nick] ? online[nick].size : 0; }
 
 // ===== ПАРОЛИ =====
 // Новый формат: s2$<salt>$<key> (scrypt). Старый: голый sha256-hex — принимаем
@@ -271,14 +306,31 @@ sessionSweep.unref();
 // он не должен оставаться подключённым до следующего обрыва.
 // note — текст причины, который увидит сам пользователь
 function kickUser(nick, reason, note) {
-  const ws = online[nick];
-  if (!ws) return false;
-  try {
-    ws.send(JSON.stringify({ type: 'kicked', reason, note: note || null }));
-    ws.close(4003, reason);
-  } catch (e) {}
+  const list = socketsOf(nick);
+  if (!list.length) return false;
+  for (const ws of list) {
+    try {
+      ws.send(JSON.stringify({ type: 'kicked', reason, note: note || null }));
+      ws.close(4003, reason);
+    } catch (e) {}
+  }
   delete online[nick];
   return true;
+}
+
+// Отключить одно конкретное устройство
+function kickDevice(nick, deviceId, reason) {
+  let hit = false;
+  for (const ws of socketsOf(nick)) {
+    if (ws.deviceId !== deviceId) continue;
+    hit = true;
+    try {
+      ws.send(JSON.stringify({ type: 'kicked', reason: reason || 'device-revoked' }));
+      ws.close(4004, 'device revoked');
+    } catch (e) {}
+    removeOnline(nick, ws);
+  }
+  return hit;
 }
 
 // Провижининг админа. Пароль берём только из окружения — в репозитории
@@ -327,7 +379,8 @@ function listUsers() {
     nick: u.nick,
     banned: !!u.banned,
     admin: !!u.is_admin,
-    online: !!online[u.nick],
+    online: isOnline(u.nick),
+    devices: deviceCount(u.nick),
     messages: u.messages,
     createdAt: u.created_at,
     bannedAt: u.banned_at || null,
@@ -536,10 +589,90 @@ const server = http.createServer((req, res) => {
       if (u.is_admin) return json(400, { error: 'Этот аккаунт удалить нельзя' });
 
       const msgs = qDeleteMsgs.run(u.nick, u.nick).changes;
+      qDropDevices.run(u.nick);
       qDeleteUser.run(u.nick);
       kickUser(u.nick, 'deleted');
       console.log('[account] Удалён самим владельцем:', u.nick, '| сообщений удалено:', msgs);
       json(200, { ok: true, nick: u.nick, messagesDeleted: msgs });
+    });
+    return;
+  }
+
+  // ===== СМЕНА ПАРОЛЯ =====
+  // Из пароля выводится ключ, которым зашифрован закрытый ключ переписки,
+  // поэтому вместе с новым паролем клиент присылает его перешифрованную копию.
+  // Сервер по-прежнему не может её прочитать — он лишь заменяет одну на другую.
+  if (req.method === 'POST' && url.pathname === '/api/account/password') {
+    if (!rateLimit('pwch:' + clientIp(req), 10, 600000)) {
+      return json(429, { error: 'Слишком много попыток, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Текущий пароль неверный' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+
+      const next = typeof body.newPassword === 'string' ? body.newPassword : '';
+      if (next.length < 6 || next.length > 200) {
+        return json(400, { error: 'Новый пароль: от 6 символов' });
+      }
+      if (next === body.password) {
+        return json(400, { error: 'Новый пароль совпадает со старым' });
+      }
+      const encPriv = typeof body.encPrivateKey === 'string' ? body.encPrivateKey : null;
+      if (encPriv !== null && encPriv.length > MAX_KEY) {
+        return json(413, { error: 'Ключ слишком большой' });
+      }
+
+      const current = qGetMyKeys.get(u.nick) || {};
+      // Если клиент прислал перешифрованный ключ — ставим его, иначе оставляем
+      // прежний (он есть у аккаунтов, которые ещё не заводили ключи)
+      qSetPassword.run(await scryptHash(next), encPriv !== null ? encPriv : (current.enc_private_key || null), u.nick);
+      console.log('[account] Пароль изменён:', u.nick);
+      json(200, { ok: true, nick: u.nick });
+    }, MAX_KEY_BODY);
+    return;
+  }
+
+  // ===== УСТРОЙСТВА НА АККАУНТЕ =====
+  if (req.method === 'POST' && url.pathname === '/api/account/devices') {
+    if (!rateLimit('dev:' + clientIp(req), 60, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      const live = new Set(socketsOf(u.nick).map(w => w.deviceId));
+      json(200, {
+        ok: true,
+        devices: qListDevices.all(u.nick).map(d => ({
+          id: d.device_id,
+          name: d.name || 'Устройство',
+          online: live.has(d.device_id),
+          firstSeen: d.created_at,
+          lastSeen: d.last_seen
+        }))
+      });
+    });
+    return;
+  }
+
+  // Отключить устройство: оно потеряет связь и исчезнет из списка
+  if (req.method === 'POST' && url.pathname === '/api/account/devices/revoke') {
+    if (!rateLimit('dev:' + clientIp(req), 60, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      const id = typeof body.deviceId === 'string' ? body.deviceId : '';
+      if (!id) return json(400, { error: 'Не указано устройство' });
+
+      const removed = qDropDevice.run(u.nick, id).changes;
+      const kicked = kickDevice(u.nick, id, 'device-revoked');
+      console.log('[device] Отключено', id.slice(0, 8), 'у', u.nick, kicked ? '(было на связи)' : '');
+      json(200, { ok: true, removed: removed > 0, kicked });
     });
     return;
   }
@@ -748,6 +881,7 @@ const server = http.createServer((req, res) => {
         // Причину успеваем показать пользователю до отключения, а в базе её
         // хранить негде — аккаунта не остаётся, поэтому пишем в лог сервера.
         const msgs = qDeleteMsgs.run(target.nick, target.nick).changes;
+        qDropDevices.run(target.nick);
         qDeleteUser.run(target.nick);
         const kicked = kickUser(target.nick, 'deleted', reason);
         console.log('[admin] DELETE', target.nick, reason ? '(' + reason + ')' : '', '| сообщений удалено:', msgs);
@@ -829,9 +963,9 @@ wss.on('connection', (ws, req) => {
   };
 
   const goOffline = () => {
-    if (nick && online[nick] === ws) {
-      delete online[nick];
-      console.log('[close]', nick, 'offline | online:', Object.keys(online).length);
+    if (nick) {
+      removeOnline(nick, ws);
+      console.log('[close]', nick, '| всего онлайн:', Object.keys(online).length);
     }
     nick = null;
   };
@@ -869,15 +1003,21 @@ wss.on('connection', (ws, req) => {
         const canon = u.nick;
 
         goOffline();                      // сбрасываем прошлую личность этого сокета
-        const prev = online[canon];
-        if (prev && prev !== ws) {        // повторный вход под тем же ником — рвём старую сессию
-          try { prev.send(JSON.stringify({ type: 'session-replaced' })); prev.close(4001, 'session replaced'); }
-          catch (e) {}
-        }
         nick = canon;
-        online[nick] = ws;
-        send({ type: 'auth-ok', nick, admin: u.is_admin });
-        console.log('[auth] OK for', nick, '| online:', Object.keys(online).length);
+
+        // Запоминаем устройство. Вход со второго устройства больше не выбивает
+        // первое — оба остаются на связи, как в обычном мессенджере.
+        const dev = msg.device && typeof msg.device === 'object' ? msg.device : {};
+        ws.deviceId = typeof dev.id === 'string' && dev.id.length >= 8 && dev.id.length <= 64
+          ? dev.id : crypto.randomUUID();
+        const devName = typeof dev.name === 'string' ? dev.name.trim().slice(0, 60) : '';
+        const nowTs = Date.now();
+        try { qUpsertDevice.run(nick, ws.deviceId, devName || 'Устройство', nowTs, nowTs); }
+        catch (e) { console.error('[device]', e.message); }
+
+        addOnline(nick, ws);
+        send({ type: 'auth-ok', nick, admin: u.is_admin, device: ws.deviceId });
+        console.log('[auth] OK for', nick, '|', devName || 'устройство', '| всего онлайн:', Object.keys(online).length);
 
         // Доставить накопленные сообщения (помечаем каждое по id, а не пачкой:
         // иначе пришедшее в этот момент новое сообщение было бы потеряно)
@@ -932,18 +1072,24 @@ wss.on('connection', (ws, req) => {
         // сразу два сообщения, поэтому при совпадении выдаём свой
         let mid = typeof msg.mid === 'string' && msg.mid.length >= 8 && msg.mid.length <= 40 ? msg.mid : null;
         if (!mid || qMidExists.get(mid)) mid = crypto.randomUUID();
-        const recipientWs = online[toNick];
-        // Помечаем доставленным только если запись в сокет реально удалась:
+        // Помечаем доставленным только если запись хотя бы в один сокет удалась:
         // раньше при сбое отправки сообщение считалось доставленным и пропадало
+        const payload = JSON.stringify({ type: 'dm', from: nick, text, timestamp, mid });
         let live = false;
-        if (recipientWs && recipientWs.readyState === 1) {
-          try {
-            recipientWs.send(JSON.stringify({ type: 'dm', from: nick, text, timestamp, mid }));
-            live = true;
-          } catch (e) {
-            console.error('[dm] Не удалось отправить', toNick + ':', e.message);
-          }
+        for (const rws of socketsOf(toNick)) {
+          if (rws.readyState !== 1) continue;
+          try { rws.send(payload); live = true; }
+          catch (e) { console.error('[dm] Не удалось отправить', toNick + ':', e.message); }
         }
+
+        // Отголосок на другие устройства отправителя: иначе на втором телефоне
+        // не было бы того, что он написал с первого
+        const echo = JSON.stringify({ type: 'dm-echo', to: toNick, text, timestamp, mid });
+        for (const ows of socketsOf(nick)) {
+          if (ows === ws || ows.readyState !== 1) continue;
+          try { ows.send(echo); } catch (e) {}
+        }
+
         qInsertMsg.run(nick, toNick, text, timestamp, live ? 1 : 0, mid);
         console.log(live ? '[dm] Delivered' : '[dm] Stored (offline)', nick, '->', toNick);
         send({ type: 'dm-ack', to: toNick, timestamp, delivered: live ? 1 : 0 });
@@ -961,10 +1107,11 @@ wss.on('connection', (ws, req) => {
         if (!target) return;
         // Если сообщение ещё не доставлено, оно просто исчезнет из очереди
         qDropByMid.run(mid, nick, target.nick);
-        const ws2 = online[target.nick];
-        if (ws2 && ws2.readyState === 1) {
-          try { ws2.send(JSON.stringify({ type: 'dm-delete', from: nick, mid })); } catch (e) {}
-        }
+        const delMsg = JSON.stringify({ type: 'dm-delete', from: nick, mid });
+        for (const w of socketsOf(target.nick)) { if (w.readyState === 1) { try { w.send(delMsg); } catch (e) {} } }
+        // и на прочие устройства автора
+        const delEcho = JSON.stringify({ type: 'dm-delete-echo', to: target.nick, mid });
+        for (const w of socketsOf(nick)) { if (w !== ws && w.readyState === 1) { try { w.send(delEcho); } catch (e) {} } }
         console.log('[dm] Deleted', nick, '->', target.nick);
         return;
       }
@@ -982,10 +1129,10 @@ wss.on('connection', (ws, req) => {
         const target = qNickExists.get(to);
         if (!target) return;
         qEditByMid.run(text, mid, nick, target.nick);
-        const ws2 = online[target.nick];
-        if (ws2 && ws2.readyState === 1) {
-          try { ws2.send(JSON.stringify({ type: 'dm-edit', from: nick, mid, text })); } catch (e) {}
-        }
+        const editMsg = JSON.stringify({ type: 'dm-edit', from: nick, mid, text });
+        for (const w of socketsOf(target.nick)) { if (w.readyState === 1) { try { w.send(editMsg); } catch (e) {} } }
+        const editEcho = JSON.stringify({ type: 'dm-edit-echo', to: target.nick, mid, text });
+        for (const w of socketsOf(nick)) { if (w !== ws && w.readyState === 1) { try { w.send(editEcho); } catch (e) {} } }
         console.log('[dm] Edited', nick, '->', target.nick);
         return;
       }

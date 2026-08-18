@@ -649,6 +649,24 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
+      <div class="settings-item" id="change-pass-item" onclick="showChangePassModal()">
+        <div class="settings-item-icon">🔑</div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Сменить пароль</div>
+          <div class="settings-item-sub">Переписка сохранится</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
+      <div class="settings-item" id="devices-item" onclick="showDevicesModal()">
+        <div class="settings-item-icon">📱</div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Устройства</div>
+          <div class="settings-item-sub" id="devices-sub">Где выполнен вход</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
       <div class="settings-item" id="delete-account-item" onclick="showDeleteAccountModal()">
         <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);">🗑️</div>
         <div class="settings-item-info">
@@ -1165,6 +1183,7 @@
   function finishAuth(isNew = false, mode = 'anon') {
     saveState();              // аккаунт должен появиться в списке до отрисовки меню
     updateAccountsMenu();
+    updateAuthMenus();
     updateSeedMenuVisibility();
     document.getElementById('profile-nick').textContent = '@' + myName;
     const statusEl = document.getElementById('profile-status-el');
@@ -1250,6 +1269,7 @@
       document.getElementById('register-screen').style.display = 'none';
       syncAvatars();
       updateAccountsMenu();
+      updateAuthMenus();
       updateSeedMenuVisibility();
       const app = document.getElementById('app');
       app.style.display = 'flex';
@@ -1599,6 +1619,41 @@
     else                         { el.textContent = '🔴 Нет связи';        el.style.color = '#EF4444'; }
   }
 
+  // ===== ОПОЗНАНИЕ УСТРОЙСТВА =====
+  // Постоянный на устройстве, общий для всех аккаунтов на нём. Нужен, чтобы
+  // в списке устройств строки не плодились при каждом входе.
+  function deviceId() {
+    try {
+      let id = localStorage.getItem('void_device_id');
+      if (!id) {
+        id = (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36));
+        localStorage.setItem('void_device_id', id);
+      }
+      return id;
+    } catch(e) { return 'temp-' + Math.random().toString(36).slice(2); }
+  }
+
+  // Название собираем из строки браузера. Ни модели, ни серийников —
+  // только то, что и так видно любому сайту.
+  function deviceName() {
+    const ua = navigator.userAgent || '';
+    let os = 'Неизвестная система';
+    if (/Android/i.test(ua)) os = 'Android';
+    else if (/iPhone|iPad|iPod/i.test(ua)) os = 'iPhone/iPad';
+    else if (/Windows/i.test(ua)) os = 'Windows';
+    else if (/Mac OS X/i.test(ua)) os = 'Mac';
+    else if (/Linux/i.test(ua)) os = 'Linux';
+    let br = 'браузер';
+    if (/Edg\//.test(ua)) br = 'Edge';
+    else if (/OPR\/|Opera/.test(ua)) br = 'Opera';
+    else if (/YaBrowser/.test(ua)) br = 'Яндекс';
+    else if (/Firefox\//.test(ua)) br = 'Firefox';
+    else if (/Chrome\//.test(ua)) br = 'Chrome';
+    else if (/Safari\//.test(ua)) br = 'Safari';
+    const pwa = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+    return os + ' · ' + (pwa ? 'приложение' : br);
+  }
+
   // Случайный опознаватель сообщения — по нему его находят обе стороны
   function newMid() {
     return (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).slice(0, 36);
@@ -1618,6 +1673,34 @@
     if (currentChat === key) renderMessages();
     renderChatList();
     sendNotification(key, text.startsWith('__STICKER__') ? '🎭 Стикер' : text);
+  }
+
+  // Сообщение, отправленное с другого устройства этого же аккаунта
+  async function handleOwnEcho(msg) {
+    const key = msg.to;
+    if (!chats[key]) chats[key] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
+    if (chats[key].messages.some(m => m.mid && m.mid === msg.mid)) return;   // уже есть
+    const text = await e2eDecrypt(key, msg.text);
+    const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const enc = await encryptText(text);
+    chats[key].messages.push({ enc, own: true, time: timeStr, timestamp: msg.timestamp, mid: msg.mid,
+                               isSticker: text.startsWith('__STICKER__') });
+    chats[key].messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    saveState();
+    if (currentChat === key) renderMessages();
+    renderChatList();
+  }
+
+  async function handleOwnEditEcho(msg) {
+    const chat = chats[msg.to];
+    if (!chat) return;
+    const target = chat.messages.find(m => m.mid && m.mid === msg.mid);
+    if (!target) return;
+    target.enc = await encryptText(await e2eDecrypt(msg.to, msg.text));
+    target.edited = true;
+    saveState();
+    if (currentChat === msg.to) renderMessages();
+    renderChatList();
   }
 
   async function handleIncomingEdit(msg) {
@@ -1667,7 +1750,8 @@
     ws.onopen = () => {
       if (!isCurrent()) return;
       console.log('[DM] Connected, sending auth for', myName);
-      ws.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
+      ws.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass,
+        device: { id: deviceId(), name: deviceName() } }));
     };
 
     ws.onmessage = e => {
@@ -1745,7 +1829,8 @@
             if (!isCurrent() || ws.readyState !== 1) return;
             if (r.ok) {
               console.log('[DM] Auto-registered, retrying auth');
-              ws.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass }));
+              ws.send(JSON.stringify({ type: 'auth', nick: myName, password: myRawPass,
+        device: { id: deviceId(), name: deviceName() } }));
             } else {
               console.warn('[DM] Auto-register failed (nick taken with different password?)');
               updateDmStatus('off');
@@ -1757,6 +1842,25 @@
         if (msg.type === 'dm') {
           // Расшифровка и запись асинхронны, поэтому выносим в отдельную функцию
           handleIncomingDm(msg);
+          return;
+        }
+
+        // Написано с другого моего устройства — кладём к себе как своё
+        if (msg.type === 'dm-echo') {
+          handleOwnEcho(msg);
+          return;
+        }
+
+        if (msg.type === 'dm-delete-echo') {
+          const chat = chats[msg.to];
+          if (!chat) return;
+          const i = chat.messages.findIndex(m => m.mid && m.mid === msg.mid);
+          if (i >= 0) { chat.messages.splice(i, 1); saveState(); renderMessages(); renderChatList(); }
+          return;
+        }
+
+        if (msg.type === 'dm-edit-echo') {
+          handleOwnEditEcho(msg);
           return;
         }
 
@@ -3166,6 +3270,189 @@
     generateSeed();
   }
 
+  // ===== СМЕНА ПАРОЛЯ =====
+  // Из пароля выводится ключ, которым зашифрована переписка и закрытый ключ.
+  // Поэтому мало поменять пароль на сервере — надо ещё перешифровать всё,
+  // что было закрыто старым ключом, иначе история станет нечитаемой.
+  function showChangePassModal() {
+    closeSidebar();
+    if (authMode === 'anon') {
+      showToast('У аккаунта по сид-фразе пароля нет');
+      return;
+    }
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'chpass-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">СМЕНА ПАРОЛЯ</div>
+        <div class="reg-label">Текущий пароль</div>
+        <input type="password" class="adm-search" id="chpass-old" autocomplete="current-password">
+        <div class="reg-label">Новый пароль</div>
+        <input type="password" class="adm-search" id="chpass-new" placeholder="минимум 6 символов" autocomplete="new-password">
+        <div class="reg-label">Ещё раз</div>
+        <input type="password" class="adm-search" id="chpass-new2" autocomplete="new-password">
+        <div id="chpass-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.5;">
+          Переписка и ключи будут перешифрованы под новый пароль. На других
+          устройствах понадобится войти заново.
+        </div>
+        <button class="reg-btn" style="width:100%;" id="chpass-btn" onclick="doChangePass()">СМЕНИТЬ</button>
+        <div class="modal-btns"><button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Отмена</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    setTimeout(() => document.getElementById('chpass-old')?.focus(), 150);
+  }
+
+  async function doChangePass() {
+    const err = document.getElementById('chpass-err');
+    const btn = document.getElementById('chpass-btn');
+    const oldPass = document.getElementById('chpass-old').value;
+    const p1 = document.getElementById('chpass-new').value;
+    const p2 = document.getElementById('chpass-new2').value;
+    const fail = t => { err.textContent = t; err.style.display = 'block'; };
+
+    if (!oldPass) return fail('Введи текущий пароль');
+    if (p1.length < 6) return fail('Новый пароль: минимум 6 символов');
+    if (p1 !== p2) return fail('Пароли не совпадают');
+    if (p1 === oldPass) return fail('Новый пароль совпадает со старым');
+    if ((await hashPassword(myName, oldPass)) !== passwordHash) return fail('Текущий пароль неверный');
+    err.style.display = 'none';
+
+    const label = btn.textContent;
+    btn.textContent = 'МЕНЯЮ...'; btn.disabled = true;
+    try {
+      const newKey = await deriveKey([myName, p1]);
+
+      // Закрытый ключ переписки заново закрываем новым ключом
+      let encPriv = null;
+      if (myKeyPair) {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const jwk = await expKey(myKeyPair.privateKey);
+        const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, newKey, new TextEncoder().encode(jwk));
+        encPriv = JSON.stringify({ iv: b64(iv), ct: b64(ct) });
+      }
+
+      const r = await fetch(API + '/api/account/password', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ nick: myName, password: oldPass, newPassword: p1, encPrivateKey: encPriv })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { btn.textContent = label; btn.disabled = false; return fail(d.error || 'Не удалось сменить'); }
+
+      // Сервер согласился — перешифровываем всё локальное под новый ключ.
+      // Порядок важен: сначала расшифровываем старым, потом закрываем новым.
+      const oldKey = cryptoKey;
+      let count = 0;
+      for (const chat of Object.values(chats)) {
+        for (const m of chat.messages || []) {
+          if (!m.enc || !m.enc.ct) continue;
+          try {
+            const plain = await crypto.subtle.decrypt(
+              { name:'AES-GCM', iv: new Uint8Array(m.enc.iv) }, oldKey, new Uint8Array(m.enc.ct));
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, newKey, plain);
+            m.enc = { iv: Array.from(iv), ct: Array.from(new Uint8Array(ct)) };
+            count++;
+          } catch (e) { /* нечитаемое оставляем как есть */ }
+        }
+      }
+
+      cryptoKey = newKey;
+      myRawPass = p1;
+      passwordHash = await hashPassword(myName, p1);
+      storeSessionPass(p1, !!readSessionPass());
+      if (encPriv) { try { localStorage.setItem('void_e2e:' + acctId(myName), JSON.stringify({ pub: myPubJwk, priv: encPriv })); } catch(e) {} }
+      saveState();
+
+      document.getElementById('chpass-overlay')?.remove();
+      showToast('Пароль изменён' + (count ? ' · перешифровано сообщений: ' + count : ''));
+    } catch (e) {
+      btn.textContent = label; btn.disabled = false;
+      fail('Нет связи с сервером');
+    }
+  }
+
+  // ===== УСТРОЙСТВА =====
+  async function showDevicesModal() {
+    closeSidebar();
+    if (!myRawPass) { showToast('Нужно войти в аккаунт'); return; }
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'devices-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:360px;">
+        <div class="modal-title">УСТРОЙСТВА</div>
+        <div class="acc-list" id="dev-list"><div class="adm-empty">Загрузка...</div></div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.5;">
+          Отключение устройства разрывает его связь с сервером. Переписка,
+          сохранённая на нём, остаётся — стереть её можно только на самом устройстве.
+        </div>
+        <div class="modal-btns"><button class="btn-primary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    loadDevices();
+  }
+
+  function whenSeen(ts) {
+    if (!ts) return '';
+    const diff = Date.now() - ts;
+    if (diff < 120000) return 'только что';
+    if (diff < 3600000) return Math.floor(diff / 60000) + ' мин назад';
+    if (diff < 86400000) return Math.floor(diff / 3600000) + ' ч назад';
+    return new Date(ts).toLocaleDateString('ru', { day: 'numeric', month: 'long' });
+  }
+
+  async function loadDevices() {
+    const list = document.getElementById('dev-list');
+    if (!list) return;
+    try {
+      const r = await fetch(API + '/api/account/devices', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ nick: myName, password: myRawPass })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { list.innerHTML = '<div class="adm-empty">' + esc(d.error || 'Ошибка') + '</div>'; return; }
+
+      const me = deviceId();
+      const sub = document.getElementById('devices-sub');
+      if (sub) sub.textContent = 'На аккаунте: ' + (d.devices || []).length;
+      if (!d.devices || !d.devices.length) { list.innerHTML = '<div class="adm-empty">Устройств пока нет</div>'; return; }
+
+      list.innerHTML = d.devices.map(dev => {
+        const current = dev.id === me;
+        const safe = /^[A-Za-z0-9_-]+$/.test(dev.id);
+        return '<div class="acc-row' + (current ? ' active' : '') + '" style="cursor:default;">' +
+            '<div class="acc-avatar">' + (dev.online ? '🟢' : '📱') + '</div>' +
+            '<div class="acc-info">' +
+              '<div class="acc-nick">' + esc(dev.name) + (current ? ' · это устройство' : '') + '</div>' +
+              '<div class="acc-sub">' + (dev.online ? 'на связи' : 'был(а) ' + whenSeen(dev.lastSeen)) + '</div>' +
+            '</div>' +
+            (current || !safe ? '' :
+              '<button class="adm-btn danger" style="flex:0 0 auto;min-width:0;padding:7px 11px;" onclick="revokeDevice(\'' + dev.id + '\')">Отключить</button>') +
+          '</div>';
+      }).join('');
+    } catch (e) {
+      list.innerHTML = '<div class="adm-empty">Нет связи с сервером</div>';
+    }
+  }
+
+  async function revokeDevice(id) {
+    if (!confirm('Отключить это устройство от аккаунта?')) return;
+    try {
+      const r = await fetch(API + '/api/account/devices/revoke', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ nick: myName, password: myRawPass, deviceId: id })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { showToast(d.error || 'Не удалось'); return; }
+      showToast('Устройство отключено');
+      loadDevices();
+    } catch (e) { showToast('Нет связи с сервером'); }
+  }
+
   // ===== УДАЛЕНИЕ СВОЕГО АККАУНТА =====
   function showDeleteAccountModal() {
     closeSidebar();
@@ -3243,6 +3530,13 @@
 
   // Пункт меню показываем только когда аккаунтов больше одного —
   // иначе он просто мешает
+  function updateAuthMenus() {
+    const cp = document.getElementById('change-pass-item');
+    if (cp) cp.style.display = (authMode === 'anon' || !myName) ? 'none' : 'flex';
+    const dv = document.getElementById('devices-item');
+    if (dv) dv.style.display = myName ? 'flex' : 'none';
+  }
+
   function updateAccountsMenu() {
     const el = document.getElementById('accounts-menu-item');
     if (!el) return;
