@@ -18,6 +18,9 @@ const MAX_E2E       = 260 * 1024;
 const MAX_KEY       = 4 * 1024;         // публичный ключ / зашифрованный приватный
 const MAX_KEY_BODY  = 16 * 1024;
 const MAX_AVATAR    = 96 * 1024;        // аватар тоже data:URI
+const MAX_EVIDENCE      = 3;            // сколько скриншотов можно приложить к бану
+const MAX_EVIDENCE_SIZE = 200 * 1024;   // на каждый
+const MAX_BAN_BODY      = 1024 * 1024;  // тело запроса на блокировку
 const MAX_AVATAR_BODY = 128 * 1024;     // тело запроса с аватаром
 const MAX_PAYLOAD   = 512 * 1024;       // максимум размера WS-кадра (шифротекст крупнее)
 const MAX_PEERS     = 16;               // максимум участников LAN-комнаты
@@ -78,6 +81,9 @@ db.exec(`
   if (!cols.includes('is_admin'))   db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
   if (!cols.includes('banned_at'))  db.exec('ALTER TABLE users ADD COLUMN banned_at INTEGER');
   if (!cols.includes('ban_reason')) db.exec('ALTER TABLE users ADD COLUMN ban_reason TEXT');
+  // Скриншоты-доказательства к блокировке. Лежат отдельно от списка аккаунтов
+  // и запрашиваются по одному аккаунту, иначе список весил бы мегабайты.
+  if (!cols.includes('ban_evidence')) db.exec('ALTER TABLE users ADD COLUMN ban_evidence TEXT');
   // Аккаунты по сид-фразе: ищем владельца по одной только фразе, без ника
   if (!cols.includes('seed_lookup')) db.exec('ALTER TABLE users ADD COLUMN seed_lookup TEXT');
   // Аватар виден собеседникам, поэтому живёт на сервере, а не только локально
@@ -135,7 +141,7 @@ const qMarkOne     = db.prepare('UPDATE messages SET delivered = 1 WHERE id = ?'
 // коррелированный подзапрос с OR — он сканировал messages целиком для КАЖДОГО
 // пользователя, и на живой базе список открывался несколько секунд.
 const qListUsers   = db.prepare(`
-  SELECT u.nick, u.created_at, u.banned, u.is_admin, u.banned_at, u.ban_reason,
+  SELECT u.nick, u.created_at, u.banned, u.is_admin, u.banned_at, u.ban_reason, u.ban_evidence,
          COALESCE(c.cnt, 0) AS messages
   FROM users u
   LEFT JOIN (
@@ -147,7 +153,8 @@ const qListUsers   = db.prepare(`
   ) c ON c.nick = u.nick
   ORDER BY u.is_admin DESC, u.nick COLLATE NOCASE
 `);
-const qSetBan      = db.prepare('UPDATE users SET banned = ?, banned_at = ?, ban_reason = ? WHERE nick = ?');
+const qSetBan      = db.prepare('UPDATE users SET banned = ?, banned_at = ?, ban_reason = ?, ban_evidence = ? WHERE nick = ?');
+const qGetEvidence = db.prepare('SELECT ban_evidence FROM users WHERE nick = ?');
 const qDeleteUser  = db.prepare('DELETE FROM users WHERE nick = ?');
 const qDeleteMsgs  = db.prepare('DELETE FROM messages WHERE from_nick = ? OR to_nick = ?');
 
@@ -356,7 +363,7 @@ function ensureAdmin() {
     // и ключи шифрования: после рестарта ему никто не мог написать.
     if (existing && existing.is_admin) {
       qUpdateHash.run(hash, existing.nick);
-      if (existing.banned) qSetBan.run(0, null, null, existing.nick);
+      if (existing.banned) qSetBan.run(0, null, null, null, existing.nick);
       console.log('[admin] Админ-аккаунт', existing.nick, 'на месте, пароль обновлён');
       return;
     }
@@ -374,6 +381,28 @@ function ensureAdmin() {
   }).catch(e => console.error('[admin] Не удалось создать админа:', e.message));
 }
 
+function countEvidence(raw) {
+  if (!raw) return 0;
+  try { const a = JSON.parse(raw); return Array.isArray(a) ? a.length : 0; }
+  catch (e) { return 0; }
+}
+
+// Отсеиваем всё, что не является картинкой, и держим объём в рамках
+function cleanEvidence(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  // Сначала отсеиваем негодное и только потом ограничиваем количество:
+  // при обратном порядке мусор в начале списка съедал бы места настоящих картинок
+  for (const item of list.slice(0, 50)) {
+    if (out.length >= MAX_EVIDENCE) break;
+    if (typeof item !== 'string') continue;
+    if (!/^data:image\/(png|jpeg|webp);base64,/.test(item)) continue;
+    if (item.length > MAX_EVIDENCE_SIZE) continue;
+    out.push(item);
+  }
+  return out;
+}
+
 function listUsers() {
   return qListUsers.all().map(u => ({
     nick: u.nick,
@@ -384,7 +413,9 @@ function listUsers() {
     messages: u.messages,
     createdAt: u.created_at,
     bannedAt: u.banned_at || null,
-    banReason: u.ban_reason || null
+    banReason: u.ban_reason || null,
+    // Только количество: сами картинки запрашиваются отдельно
+    evidence: countEvidence(u.ban_evidence)
   }));
 }
 
@@ -790,6 +821,8 @@ const server = http.createServer((req, res) => {
       return json(429, { error: 'Слишком много запросов' });
     }
     const action = url.pathname.slice('/api/admin/'.length);
+    // К блокировке прикладываются скриншоты, поэтому её тело крупнее прочих
+    const bodyLimit = action === 'ban' ? MAX_BAN_BODY : MAX_BODY;
 
     readBody(async (body) => {
       const check = await requireAdmin(body);
@@ -862,16 +895,28 @@ const server = http.createServer((req, res) => {
       const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 200) || null : null;
 
       if (action === 'ban') {
-        if (target.banned) return json(200, { ok: true, nick: target.nick, banned: true, note: 'Уже заблокирован', users: listUsers() });
-        qSetBan.run(1, Date.now(), reason, target.nick);
+        if (target.banned) return withSession(200, { ok: true, nick: target.nick, banned: true, note: 'Уже заблокирован', users: listUsers() });
+        const shots = cleanEvidence(body.evidence);
+        qSetBan.run(1, Date.now(), reason, shots.length ? JSON.stringify(shots) : null, target.nick);
+        // Доказательства получателю не отправляем: они для журнала модерации,
+        // ему достаточно причины
         const kicked = kickUser(target.nick, 'banned', reason);
-        console.log('[admin] BAN', target.nick, reason ? '(' + reason + ')' : '', kicked ? '| отключён' : '');
-        return withSession(200, { ok: true, nick: target.nick, banned: true, kicked, users: listUsers() });
+        console.log('[admin] BAN', target.nick, reason ? '(' + reason + ')' : '',
+                    shots.length ? '| скриншотов: ' + shots.length : '', kicked ? '| отключён' : '');
+        return withSession(200, { ok: true, nick: target.nick, banned: true, kicked, evidence: shots.length, users: listUsers() });
+      }
+
+      // Картинки отдаём по одному аккаунту — в общий список они не влезают
+      if (action === 'ban-evidence') {
+        const row = qGetEvidence.get(target.nick) || {};
+        let shots = [];
+        try { shots = row.ban_evidence ? JSON.parse(row.ban_evidence) : []; } catch (e) {}
+        return withSession(200, { ok: true, nick: target.nick, evidence: Array.isArray(shots) ? shots : [] });
       }
 
       if (action === 'unban') {
-        if (!target.banned) return json(200, { ok: true, nick: target.nick, banned: false, note: 'Не был заблокирован', users: listUsers() });
-        qSetBan.run(0, null, null, target.nick);
+        if (!target.banned) return withSession(200, { ok: true, nick: target.nick, banned: false, note: 'Не был заблокирован', users: listUsers() });
+        qSetBan.run(0, null, null, null, target.nick);
         console.log('[admin] UNBAN', target.nick);
         return withSession(200, { ok: true, nick: target.nick, banned: false, users: listUsers() });
       }
@@ -889,7 +934,7 @@ const server = http.createServer((req, res) => {
       }
 
       json(404, { error: 'Неизвестное действие' });
-    });
+    }, bodyLimit);
     return;
   }
 

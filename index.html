@@ -299,6 +299,12 @@
   .adm-btn.good { color:var(--online); border-color:rgba(34,197,94,0.35); }
   .adm-btn.good:hover:not(:disabled) { background:rgba(34,197,94,0.12); }
   .adm-empty { text-align:center; color:var(--text3); font-size:13px; padding:26px 0; }
+  .shot-grid { display:flex; gap:8px; flex-wrap:wrap; }
+  .shot { position:relative; width:72px; height:72px; border-radius:10px; overflow:hidden; border:1px solid var(--border); flex-shrink:0; }
+  .shot img { width:100%; height:100%; object-fit:cover; display:block; }
+  .shot-x { position:absolute; top:2px; right:2px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(0,0,0,0.65); color:#fff; font-size:11px; line-height:1; cursor:pointer; padding:0; }
+  .shot-view { display:flex; flex-direction:column; gap:10px; max-height:60vh; overflow-y:auto; }
+  .shot-view img { width:100%; border-radius:12px; border:1px solid var(--border); display:block; }
   /* ===== СПИСОК АККАУНТОВ ===== */
   .acc-list { display:flex; flex-direction:column; gap:8px; max-height:46vh; overflow-y:auto; margin:0 -4px; padding:0 4px; }
   .acc-row { display:flex; align-items:center; gap:11px; padding:10px 12px; background:var(--bg3); border:1px solid var(--border); border-radius:13px; cursor:pointer; transition:background 0.15s,border-color 0.15s; }
@@ -2981,6 +2987,9 @@
         (u.banned ? '<span class="adm-tag ban">ЗАБЛОКИРОВАН</span>' : '') +
         (u.online ? '<span class="adm-tag on">онлайн</span>' : '');
       const meta = 'Сообщений: ' + u.messages + (u.banned && u.banReason ? ' · причина: ' + esc(u.banReason) : '');
+      const shots = (u.banned && u.evidence)
+        ? '<button class="adm-btn" style="width:100%;" onclick="showBanEvidence(\'' + u.nick + '\')">🖼 Скриншоты: ' + u.evidence + '</button>'
+        : '';
       // Ник подставляется в onclick, поэтому пропускаем только заведомо
       // безопасный набор символов, а не полагаемся на валидацию в другом месте
       const safe = /^[a-zA-Z0-9_]{1,16}$/.test(u.nick);
@@ -2996,6 +3005,7 @@
       return `<div class="adm-row ${u.admin ? 'admin' : u.banned ? 'banned' : ''}">
           <div class="adm-head"><span class="adm-nick">${n}</span>${tags}</div>
           <div class="adm-meta">${meta}</div>
+          ${shots}
           ${acts}
         </div>`;
     }).join('');
@@ -3129,14 +3139,108 @@
     } catch (e) { showToast(e.message); }
   }
 
-  async function adminBan(nick) {
-    const reason = prompt('Причина блокировки для ' + nick + ' (можно оставить пустым):');
-    if (reason === null) return;   // нажали «Отмена»
-    setAdminRowBusy(nick, true);
+  const EVIDENCE_MAX = 3;
+  const EVIDENCE_BYTES = 190 * 1024;    // с запасом под лимит сервера (200 КБ)
+  let banShots = [];                    // прикреплённые скриншоты текущего окна
+
+  function adminBan(nick) {
+    banShots = [];
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'ban-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:350px;">
+        <div class="modal-title">БЛОКИРОВКА</div>
+        <div style="font-size:14px;color:var(--text2);">
+          Аккаунт <b style="color:var(--text);">@${esc(nick)}</b> останется в базе,
+          ник за ним сохранится. Переписка не удаляется.
+        </div>
+        <div class="reg-label">Причина</div>
+        <input class="adm-search" id="ban-reason" placeholder="например: спам" autocomplete="off" maxlength="200">
+        <div class="reg-label">Скриншоты <span style="color:var(--text3);font-weight:400;">— до ${EVIDENCE_MAX}, необязательно</span></div>
+        <div class="shot-grid" id="ban-shots"></div>
+        <button class="adm-btn" id="ban-add" style="width:100%;" onclick="document.getElementById('ban-file').click()">📎 Прикрепить картинку</button>
+        <input type="file" id="ban-file" accept="image/*" multiple style="display:none;" onchange="addBanShots(event)">
+        <div id="ban-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+        <button class="reg-btn" style="width:100%;background:#F59E0B;" id="ban-btn" onclick="doAdminBan('${nick}')">ЗАБЛОКИРОВАТЬ</button>
+        <div class="modal-btns"><button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Отмена</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    setTimeout(() => document.getElementById('ban-reason')?.focus(), 150);
+  }
+
+  function renderBanShots() {
+    const box = document.getElementById('ban-shots');
+    if (!box) return;
+    box.innerHTML = banShots.map((src, i) =>
+      '<div class="shot"><img src="' + src + '" alt=""><button class="shot-x" onclick="removeBanShot(' + i + ')">✕</button></div>'
+    ).join('');
+    const add = document.getElementById('ban-add');
+    if (add) {
+      add.disabled = banShots.length >= EVIDENCE_MAX;
+      add.textContent = banShots.length >= EVIDENCE_MAX
+        ? 'Больше ' + EVIDENCE_MAX + ' нельзя'
+        : '📎 Прикрепить картинку' + (banShots.length ? ' (' + banShots.length + '/' + EVIDENCE_MAX + ')' : '');
+    }
+  }
+
+  function removeBanShot(i) { banShots.splice(i, 1); renderBanShots(); }
+
+  async function addBanShots(e) {
+    const files = [...(e.target.files || [])];
+    e.target.value = '';
+    const err = document.getElementById('ban-err');
+    err.style.display = 'none';
+    for (const f of files) {
+      if (banShots.length >= EVIDENCE_MAX) { err.textContent = 'Максимум ' + EVIDENCE_MAX + ' картинки'; err.style.display = 'block'; break; }
+      if (!f.type.startsWith('image/')) { err.textContent = 'Нужны картинки'; err.style.display = 'block'; continue; }
+      try {
+        // Скриншот должен остаться читаемым, поэтому сторона крупнее,
+        // чем у аватара или стикера
+        banShots.push(await compressImage(f, 1200, EVIDENCE_BYTES));
+      } catch (ex) {
+        err.textContent = ex.message || 'Не удалось обработать картинку';
+        err.style.display = 'block';
+      }
+    }
+    renderBanShots();
+  }
+
+  async function doAdminBan(nick) {
+    const btn = document.getElementById('ban-btn');
+    const err = document.getElementById('ban-err');
+    const reason = (document.getElementById('ban-reason')?.value || '').trim();
+    const label = btn.textContent;
+    btn.textContent = 'БЛОКИРУЮ...'; btn.disabled = true;
     try {
-      applyAdminResult(await adminCall('ban', { nick, reason: reason.trim() || null }));
-      showToast(nick + ' заблокирован');
-    } catch (e) { setAdminRowBusy(nick, false); showToast(e.message); }
+      const r = await adminCall('ban', { nick, reason: reason || null, evidence: banShots });
+      document.getElementById('ban-overlay')?.remove();
+      applyAdminResult(r);
+      showToast(nick + ' заблокирован' + (r.evidence ? ' · скриншотов: ' + r.evidence : ''));
+      banShots = [];
+    } catch (e) {
+      btn.textContent = label; btn.disabled = false;
+      err.textContent = e.message; err.style.display = 'block';
+    }
+  }
+
+  // Просмотр приложенных скриншотов
+  async function showBanEvidence(nick) {
+    let r;
+    try { r = await adminCall('ban-evidence', { nick }); }
+    catch (e) { showToast(e.message); return; }
+    if (!r.evidence || !r.evidence.length) { showToast('Скриншотов нет'); return; }
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:400px;">
+        <div class="modal-title">ДОКАЗАТЕЛЬСТВА · @${esc(nick)}</div>
+        <div class="shot-view">${r.evidence.map(src => '<img src="' + src + '" alt="">').join('')}</div>
+        <div class="modal-btns"><button class="btn-primary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
   }
 
   async function adminUnban(nick) {
