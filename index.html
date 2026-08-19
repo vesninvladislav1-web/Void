@@ -477,6 +477,9 @@
   .reaction-emoji { font-size:26px; cursor:pointer; padding:4px; border-radius:50%; transition:transform 0.15s; line-height:1; border:none; background:none; }
   .reaction-emoji:hover { transform:scale(1.3); }
   .msg-ttl { font-size:10px; opacity:0.8; }
+  .grp-chip { display:inline-flex; align-items:center; gap:5px; background:var(--bg3); border:1px solid var(--border);
+              border-radius:20px; padding:4px 8px 4px 10px; font-size:12px; font-family:'Space Mono',monospace; }
+  .grp-chip button { border:none; background:none; color:var(--text3); cursor:pointer; font-size:12px; line-height:1; padding:0; }
   .msg-menu-reactions { display:flex; justify-content:space-between; gap:2px; background:var(--bg3); border:1px solid var(--border); border-radius:14px; padding:6px; }
   .msg-menu-reactions .reaction-emoji { font-size:21px; padding:2px; }
   .fwd-head { font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; margin-bottom:4px; border-left:2px solid var(--accent); padding-left:6px; }
@@ -789,6 +792,7 @@
         <div class="chat-menu-wrap">
           <button class="icon-btn" onclick="toggleChatsMenu()" id="chats-menu-btn">⋮</button>
           <div class="chat-menu" id="chats-menu">
+            <button class="chat-menu-item" onclick="showNewGroupModal()">👥 Новая группа</button>
             <button class="chat-menu-item" onclick="showLanModal();closeChatsMenu()">📡 LAN чат</button>
           </div>
         </div>
@@ -824,6 +828,7 @@
               <button class="chat-menu-item" onclick="showBgModal();closeChatMenu()">🖼️ Фон чата</button>
               <button class="chat-menu-item" id="secure-btn" onclick="toggleSecure();closeChatMenu()">🛡️ Защита</button>
               <button class="chat-menu-item" id="lan-invite-item" onclick="lanInvite()" style="display:none">📋 Код комнаты</button>
+              <button class="chat-menu-item" id="group-info-item" onclick="showGroupInfo();closeChatMenu()" style="display:none">👥 Состав группы</button>
               <button class="chat-menu-item" id="safety-item" onclick="showSafetyModal();closeChatMenu()">🔐 Сверить ключи</button>
               <button class="chat-menu-item" id="ttl-item" onclick="showTtlModal();closeChatMenu()">🔥 Исчезающие сообщения</button>
               <button class="chat-menu-item" id="block-item" onclick="toggleBlockCurrent();closeChatMenu()">🚫 Заблокировать</button>
@@ -1591,7 +1596,7 @@
   let presenceTimer = null;
 
   function askPresence(nick) {
-    if (!nick || nick.startsWith('__lan__:')) return;
+    if (isRoom(nick)) return;
     if (!dmWsAuthOk || dmWs?.readyState !== 1) return;
     dmWs.send(JSON.stringify({ type: 'presence', nicks: [nick] }));
   }
@@ -1600,7 +1605,7 @@
   function watchPresence(nick) {
     clearInterval(presenceTimer);
     presenceTimer = null;
-    if (!nick || nick.startsWith('__lan__:')) { showPresence(null); return; }
+    if (isRoom(nick)) { showPresence(null); return; }
     askPresence(nick);
     presenceTimer = setInterval(() => {
       if (currentChat === nick && !document.hidden) askPresence(nick);
@@ -1853,7 +1858,7 @@
   // Сообщаем собеседнику, что его письма прочитаны. Отправляем только то,
   // о чём ещё не сообщали, иначе на каждой перерисовке шёл бы поток запросов.
   function reportRead(nick) {
-    if (!nick || nick.startsWith('__lan__:')) return;
+    if (isRoom(nick)) return;
     if (!dmWsAuthOk || dmWs?.readyState !== 1) return;
     const chat = chats[nick];
     if (!chat) return;
@@ -1897,6 +1902,9 @@
     // Срок жизни едет вместе с сообщением: договорённость о нём не хранится
     // на сервере, и заново её выяснять не у кого
     const { sec, body: text } = stripTtl(raw);
+
+    // Групповое письмо ложится не в переписку с отправителем, а в группу
+    if (text.startsWith('__GRP__') && await handleGroupMessage(key, text, msg)) return;
 
     // Собеседник переключил исчезающие сообщения — это не письмо, а уведомление
     if (text.startsWith('__TTLSET__')) {
@@ -1944,6 +1952,10 @@
     if (chats[key].messages.some(m => m.mid && m.mid === msg.mid)) return;   // уже есть
     const { sec, body: text } = stripTtl(await e2eDecrypt(key, msg.text));
     if (text.startsWith('__TTLSET__')) return;      // служебное, письмом не считается
+
+    // Групповое письмо мы разослали каждому участнику, и отголосок придёт
+    // столько же раз. Кладём его в группу один раз и от своего имени.
+    if (text.startsWith('__GRP__')) { await handleOwnGroupEcho(text, msg); return; }
     const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const enc = await encryptText(text);
     const echoFile = parseFileMeta(stripFwd(text).body);
@@ -2337,7 +2349,7 @@
 
   // Подтягиваем аватары собеседников пачкой — по одному было бы много запросов
   async function fetchAvatars(nicks) {
-    const list = [...new Set(nicks.filter(n => n && !n.startsWith('__lan__:')))].slice(0, 50);
+    const list = [...new Set(nicks.filter(n => n && !isRoom(n)))].slice(0, 50);
     if (!list.length) return;
     try {
       const r = await fetch(API + '/api/avatars', {
@@ -2356,13 +2368,13 @@
 
   function refreshChatHeaderAvatar() {
     const av = document.getElementById('cv-avatar');
-    if (!av || !currentChat || currentChat.startsWith('__lan__:')) return;
+    if (!av || isRoom(currentChat)) return;
     av.innerHTML = avatarInner(currentChat);
   }
 
   // Аватар мог быть загружен с другого устройства — забираем его с сервера
   async function syncAvatars() {
-    const nicks = Object.keys(chats).filter(n => !n.startsWith('__lan__:'));
+    const nicks = Object.keys(chats).filter(n => !isRoom(n));
     if (myName) nicks.push(myName);
     await fetchAvatars(nicks);
     const mine = avatarCache[myName];
@@ -2443,7 +2455,7 @@
 
   // ===== МИ НИ-ПРОФИЛЬ =====
   function showAvatarProfile() {
-    if (!currentChat || currentChat.startsWith('__lan__:')) return;
+    if (isRoom(currentChat)) return;
     const chat = chats[currentChat];
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -2507,8 +2519,9 @@
   function toggleChatMenu() {
     const menu = document.getElementById('chat-menu');
     menu.classList.toggle('open');
-    const isLan = currentChat?.startsWith('__lan__:');
+    const isLan = isLanChat(currentChat);
     document.getElementById('lan-invite-item').style.display = isLan ? 'flex' : 'none';
+    document.getElementById('group-info-item').style.display = isGroup(currentChat) ? 'flex' : 'none';
     document.getElementById('delete-chat-item').style.display = isLan ? 'none' : 'flex';
     document.getElementById('secure-btn').style.display = isLan ? 'none' : 'flex';
     renderBlockBtn();
@@ -2620,7 +2633,7 @@
     // раньше меню читало msg.text, которого у сообщений нет
     const full = await decryptText(msg.enc || { plain: msg.text || '' });
     const { body } = stripFwd(full);
-    const isLan = !!currentChat && currentChat.startsWith('__lan__:');
+    const isLan = isRoom(currentChat);        // в комнате правка идёт не через сервер
     const isSticker = body.startsWith('__STICKER__');
     const fileMeta = parseFileMeta(body);
     const isLocked = msg.unlockAt && msg.unlockAt > Date.now();
@@ -2631,7 +2644,8 @@
     // «Удалить у всех» идёт через сервер — значит только в личных чатах
     const canUnsend = msg.own && !isLan && !!msg.mid;
     const canCopy   = !isSticker && !fileMeta && !isLocked;
-    const canFwd    = !isLan && !isLocked;
+    // Из группы переслать можно — адресат просто увидит, кто это написал
+    const canFwd    = !isLanChat(currentChat) && !isLocked;
 
     const menu = document.createElement('div');
     menu.className = 'msg-menu modal-overlay';
@@ -2751,9 +2765,10 @@
       const chat = chats[nick];
       const last = chat.messages[chat.messages.length-1] || null;
       const unread = chat.unread || 0;
-      const isLan = nick.startsWith('__lan__:');
-      const displayName = isLan ? esc(chat.name || 'LAN') : '@' + esc(nick);
-      const avatarContent = isLan ? '📡' : avatarInner(nick);
+      const isLan = isLanChat(nick);
+      const grp = groupOf(nick);
+      const displayName = grp ? esc(grp.name) : isLan ? esc(chat.name || 'LAN') : '@' + esc(nick);
+      const avatarContent = grp ? '👥' : isLan ? '📡' : avatarInner(nick);
       const lastText = last
         ? (last.system
             ? `<i>${esc(last.text)}</i>`
@@ -2778,7 +2793,30 @@
   }
 
   function openChat(nick) {
-    if (nick.startsWith('__lan__:')) {
+    if (isGroup(nick)) {
+      const g = groupOf(nick);
+      sweepExpired();
+      currentChat = nick;
+      if (chats[nick].unread) { chats[nick].unread = 0; saveState(); }
+      closeChatSearch();
+      closeSidebar();
+      document.getElementById('chats-screen').classList.add('hidden');
+      document.getElementById('chat-view').classList.add('active');
+      document.getElementById('fab').classList.remove('visible');
+      const gav = document.getElementById('cv-avatar');
+      gav.textContent = '👥'; gav.style.fontSize = '20px'; gav.style.background = chats[nick].color || '#888';
+      document.getElementById('cv-name').textContent = g ? g.name : 'Группа';
+      document.getElementById('cv-sub').textContent = g ? 'участников: ' + g.members.length : '';
+      document.getElementById('cv-sub').style.color = 'var(--text3)';
+      document.getElementById('voice-btn').style.display = 'none';
+      clearInterval(presenceTimer); presenceTimer = null;
+      applyBg(chats[nick].bg || '');
+      renderMessages();
+      renderChatList();
+      setTimeout(() => document.getElementById('msg-input').focus(), 50);
+      return;
+    }
+    if (isLanChat(nick)) {
       currentChat = nick;
       if (chats[nick]?.unread) { chats[nick].unread = 0; saveState(); }
       closeChatSearch();
@@ -2941,7 +2979,7 @@
     const div = document.createElement('div');
     div.className='date-divider'; div.innerHTML='<span>СЕГОДНЯ</span>';
     container.appendChild(div);
-    const isLanRoom = chatKey.startsWith('__lan__:');
+    const isLanRoom = isRoom(chatKey);   // комната: у сообщений есть автор
     msgs.forEach((msg, idx) => {
       if (msg.system) {
         const sys = document.createElement('div');
@@ -3071,7 +3109,7 @@
   // раньше вся отправка была намертво привязана к currentChat.
   // opts.silent — служебное сообщение: у себя его не сохраняем, оно не письмо
   async function sendTo(peer, text, opts = {}) {
-    if (!peer || peer.startsWith('__lan__:')) return false;
+    if (isRoom(peer)) return false;
     if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return false; }
     if (!myRawPass || !dmWsAuthOk || dmWs?.readyState !== 1) {
       showToast('Нет связи с сервером — сообщение не отправлено');
@@ -3103,6 +3141,15 @@
     const text = input.value.trim();
     if (!text||!currentChat) return;
     if (editingMid) { await applyEdit(text); return; }   // правим, а не отправляем новое
+    if (isGroup(currentChat)) {
+      const sent = await sendToGroup(currentChat, text);
+      if (!sent) return;
+      input.value = '';
+      playSound();
+      renderMessages();
+      renderChatList();
+      return;
+    }
     const outMid = newMid();
     if (currentChat.startsWith('__lan__:')) {
       if (!lanRoom) { showToast('Нет соединения'); return; }
@@ -3156,6 +3203,8 @@
 
   function deleteCurrentChat() {
     if (!currentChat) return;
+    // Из группы выходят, а не удаляют её: остальным надо об этом сказать
+    if (isGroup(currentChat)) { leaveGroup(); return; }
     if (!confirm('Удалить чат с @'+currentChat+'?')) return;
     delete chats[currentChat];
     saveState();
@@ -3163,8 +3212,12 @@
   }
 
   function filterChats(q) {
+    q = q.toLowerCase();
     document.querySelectorAll('.chat-item').forEach(item => {
-      item.style.display=(item.dataset.nick||'').toLowerCase().includes(q.toLowerCase())?'':'none';
+      const key = (item.dataset.nick || '');
+      // У группы служебный ключ ни о чём не говорит — ищем по названию
+      const hay = (groupOf(key)?.name || key).toLowerCase();
+      item.style.display = hay.includes(q) ? '' : 'none';
     });
   }
 
@@ -3260,7 +3313,7 @@
     if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
 
     // Сначала отправляем: если не выйдет, локально ничего не портим
-    if (msg.mid && !currentChat.startsWith('__lan__:')) {
+    if (msg.mid && !isRoom(currentChat)) {
       if (!(dmWsAuthOk && dmWs?.readyState === 1)) {
         showToast('Нет связи с сервером — изменение не сохранено');
         dmWakeCheck();
@@ -4147,7 +4200,7 @@
   function renderBlockBtn() {
     const btn = document.getElementById('block-item');
     if (!btn) return;
-    const isLan = !currentChat || currentChat.startsWith('__lan__:');
+    const isLan = isRoom(currentChat);
     btn.style.display = isLan ? 'none' : 'flex';
     if (isLan) return;
     const on = isBlockedPeer(currentChat);
@@ -4434,7 +4487,7 @@
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!file || !currentChat) return;
-    if (currentChat.startsWith('__lan__:')) { showToast('В LAN-чате вложения пока не работают'); return; }
+    if (isRoom(currentChat)) { showToast(isGroup(currentChat) ? 'В группе вложения пока не работают' : 'В LAN-чате вложения пока не работают'); return; }
     if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
     if (!(myRawPass && dmWsAuthOk && dmWs?.readyState === 1)) {
       showToast('Нет связи с сервером — файл не отправлен');
@@ -4555,6 +4608,340 @@
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
 
+  // ===== ГРУППОВЫЕ ЧАТЫ =====
+  // Сервер про группы ничего не знает: сообщение шифруется отдельно для
+  // каждого участника его же ключом и уходит как обычные личные письма.
+  // Так сквозное шифрование сохраняется без единого общего ключа, который
+  // пришлось бы кому-то раздавать.
+  const GROUP_MAX = 20;
+
+  const isGroup = k => typeof k === 'string' && k.startsWith('__grp__:');
+  const isLanChat = k => typeof k === 'string' && k.startsWith('__lan__:');
+  // «Не один человек, а комната»: сюда не шлют отметки о прочтении,
+  // не показывают статус и не блокируют
+  const isRoom = k => !k || isLanChat(k) || isGroup(k);
+
+  function groupKey(gid) { return '__grp__:' + gid; }
+  function groupOf(k) { return chats[k]?.group || null; }
+  function newGroupId() {
+    return [...crypto.getRandomValues(new Uint8Array(8))].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // Состав едет в каждом сообщении: тогда новый участник узнаёт о группе
+  // из первого же письма, и спрашивать его состав не у кого
+  function groupWire(g, body, gmid) {
+    return '__GRP__' + JSON.stringify({ g: g.id, n: g.name, m: g.members, i: gmid }) + '\n' + body;
+  }
+
+  function parseGroupWire(text) {
+    if (typeof text !== 'string' || !text.startsWith('__GRP__')) return null;
+    const nl = text.indexOf('\n');
+    if (nl < 0) return null;
+    try {
+      const h = JSON.parse(text.slice(7, nl));
+      if (!h || typeof h.g !== 'string' || !Array.isArray(h.m)) return null;
+      return {
+        id: h.g,
+        name: typeof h.n === 'string' ? h.n.slice(0, 40) : 'Группа',
+        members: h.m.filter(x => typeof x === 'string').slice(0, GROUP_MAX),
+        gmid: typeof h.i === 'string' ? h.i : '',
+        body: text.slice(nl + 1)
+      };
+    } catch (e) { return null; }
+  }
+
+  function groupColor(gid) {
+    let sum = 0;
+    for (const ch of gid) sum += ch.charCodeAt(0);
+    return colors[sum % colors.length];
+  }
+
+  // Рассылка: каждому участнику своё письмо, зашифрованное его ключом
+  async function sendToGroup(key, body, opts = {}) {
+    const g = groupOf(key);
+    if (!g) return false;
+    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return false; }
+    if (!(myRawPass && dmWsAuthOk && dmWs?.readyState === 1)) {
+      showToast('Нет связи с сервером — сообщение не отправлено');
+      dmWakeCheck();
+      return false;
+    }
+    // Один опознаватель на всю рассылку: письмо одно, копий много
+    const gmid = newMid();
+    const wire = groupWire(g, body, gmid);
+    const others = g.members.filter(n => n && n !== myName);
+    let delivered = 0, noKey = [];
+    for (const member of others) {
+      const payload = await e2eEncrypt(member, wire);
+      if (!payload) { noKey.push(member); continue; }
+      dmWs.send(JSON.stringify({ type: 'dm', to: member, text: payload, mid: newMid() }));
+      delivered++;
+    }
+    if (!delivered && others.length) {
+      showToast(noKey.length === others.length
+        ? 'Никто из участников ещё ни разу не заходил'
+        : 'Не удалось отправить');
+      return false;
+    }
+    if (noKey.length) showToast('Не дошло до: ' + noKey.map(n => '@' + n).join(', '));
+    if (opts.silent) return true;
+
+    const enc = await encryptText(body);
+    chats[key].messages.push({
+      enc, own: true, time: now(), timestamp: Date.now(), mid: newMid(), gmid,
+      sender: myName, isSticker: body.startsWith('__STICKER__')
+    });
+    saveState();
+    return true;
+  }
+
+  // Служебная строка группы: «создал(а)», «добавил(а)», «вышел(ла)»
+  function groupSysLine(key, text, gmid) {
+    if (!chats[key]) return;
+    if (gmid && chats[key].messages.some(m => m.gmid === gmid)) return;
+    chats[key].messages.push({ system: true, text, timestamp: Date.now(), gmid });
+    saveState();
+    if (currentChat === key) renderMessages();
+    renderChatList();
+  }
+
+  async function createGroup(name, members) {
+    name = (name || '').trim().slice(0, 40);
+    if (!name) { showToast('Придумай название'); return null; }
+    const list = [...new Set(members.map(n => n.trim()).filter(Boolean))]
+      .filter(n => n.toLowerCase() !== String(myName).toLowerCase());
+    if (!list.length) { showToast('Добавь хотя бы одного участника'); return null; }
+    if (list.length + 1 > GROUP_MAX) { showToast('Больше ' + GROUP_MAX + ' участников не поддерживается'); return null; }
+
+    // Проверяем, что такие ники есть: иначе группа получится с призраками
+    const missing = [];
+    for (const n of list) {
+      const key = await peerPublicKey(n);
+      if (!key) missing.push(n);
+    }
+    if (missing.length === list.length) {
+      showToast('Никто из указанных ещё ни разу не заходил');
+      return null;
+    }
+
+    const gid = newGroupId();
+    const key = groupKey(gid);
+    const group = { id: gid, name, members: [myName, ...list] };
+    chats[key] = { group, messages: [], color: groupColor(gid), unread: 0 };
+    saveState();
+    groupSysLine(key, 'Вы создали группу «' + name + '»');
+    await sendToGroup(key, '__GRPSYS__создал(а) группу «' + name + '»', { silent: true });
+    if (missing.length) showToast('Пока не в курсе: ' + missing.map(n => '@' + n).join(', '));
+    renderChatList();
+    openChat(key);
+    return key;
+  }
+
+  // Пришло групповое письмо: группу заводим или обновляем прямо из заголовка
+  async function handleGroupMessage(from, wire, msg) {
+    const parsed = parseGroupWire(wire);
+    if (!parsed) return false;
+    const key = groupKey(parsed.id);
+    const iAmIn = parsed.members.some(n => String(n).toLowerCase() === String(myName).toLowerCase());
+    if (!iAmIn) return true;                 // нас исключили — молча не показываем
+
+    if (!chats[key]) {
+      chats[key] = { group: { id: parsed.id, name: parsed.name, members: parsed.members },
+                     color: groupColor(parsed.id), messages: [], unread: 0 };
+      groupSysLine(key, '@' + from + ' добавил(а) вас в группу «' + parsed.name + '»');
+    } else {
+      const g = chats[key].group;
+      if (g.name !== parsed.name) {
+        groupSysLine(key, '@' + from + ' переименовал(а) группу в «' + parsed.name + '»');
+        g.name = parsed.name;
+      }
+      // Состав берём из письма: у отправителя он свежее
+      const added = parsed.members.filter(n => !g.members.includes(n));
+      const gone  = g.members.filter(n => !parsed.members.includes(n));
+      g.members = parsed.members;
+      for (const n of added) if (n !== from) groupSysLine(key, '@' + from + ' добавил(а) @' + n);
+      for (const n of gone) groupSysLine(key, '@' + n + ' больше не в группе');
+    }
+
+    // Одно и то же письмо может прийти повторно — например, отголоском
+    // на второе наше устройство. Опознаватель у копий общий.
+    if (parsed.gmid && chats[key].messages.some(m => m.gmid === parsed.gmid)) return true;
+
+    if (parsed.body.startsWith('__GRPSYS__')) {
+      groupSysLine(key, '@' + from + ' ' + parsed.body.slice(10), parsed.gmid);
+      return true;
+    }
+
+    const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    chats[key].messages.push({
+      enc: await encryptText(parsed.body), own: false, sender: from,
+      time: timeStr, timestamp: msg.timestamp, mid: msg.mid, gmid: parsed.gmid
+    });
+    if (currentChat !== key) chats[key].unread = (chats[key].unread || 0) + 1;
+    saveState();
+    if (currentChat === key) renderMessages();
+    renderChatList();
+    sendNotification(chats[key].group.name + ' · ' + from,
+      parsed.body.startsWith('__STICKER__') ? '🎭 Стикер' : parsed.body);
+    return true;
+  }
+
+  // То же письмо, но пришедшее с нашего второго устройства
+  async function handleOwnGroupEcho(wire, msg) {
+    const parsed = parseGroupWire(wire);
+    if (!parsed) return;
+    const key = groupKey(parsed.id);
+    if (!chats[key]) {
+      chats[key] = { group: { id: parsed.id, name: parsed.name, members: parsed.members },
+                     color: groupColor(parsed.id), messages: [], unread: 0 };
+    } else {
+      chats[key].group.name = parsed.name;
+      chats[key].group.members = parsed.members;
+    }
+    if (parsed.gmid && chats[key].messages.some(m => m.gmid === parsed.gmid)) return;
+    if (parsed.body.startsWith('__GRPSYS__')) {
+      groupSysLine(key, 'Вы ' + parsed.body.slice(10), parsed.gmid);
+      return;
+    }
+    const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    chats[key].messages.push({
+      enc: await encryptText(parsed.body), own: true, sender: myName,
+      time: timeStr, timestamp: msg.timestamp, mid: msg.mid, gmid: parsed.gmid,
+      isSticker: parsed.body.startsWith('__STICKER__')
+    });
+    chats[key].messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+    saveState();
+    if (currentChat === key) renderMessages();
+    renderChatList();
+  }
+
+  function showNewGroupModal() {
+    closeChatsMenu();
+    const known = Object.keys(chats).filter(n => !isRoom(n));
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'group-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:360px;">
+        <div class="modal-title">НОВАЯ ГРУППА</div>
+        <input class="modal-input" id="grp-name" placeholder="Название группы" autocomplete="off" maxlength="40">
+        <div class="reg-label">Участники</div>
+        <input class="adm-search" id="grp-nick" placeholder="Ник и Enter" autocomplete="off"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();addGroupMember(this.value);this.value='';}">
+        <div id="grp-chosen" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+        ${known.length ? '<div class="reg-label">Из ваших чатов</div><div class="acc-list" style="max-height:160px;">' +
+          known.map(n => '<div class="acc-row" onclick="addGroupMember(this.dataset.nick)" data-nick="' + esc(n) + '">' +
+            '<div class="acc-avatar" style="background:' + esc(chats[n].color || '#888') + '">' + esc(n[0].toUpperCase()) + '</div>' +
+            '<div class="acc-info"><div class="acc-nick">@' + esc(n) + '</div></div></div>').join('') + '</div>' : ''}
+        <div id="grp-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+          <button class="btn-primary" id="grp-create" onclick="doCreateGroup()">Создать</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    groupDraft = [];
+    renderGroupDraft();
+    setTimeout(() => document.getElementById('grp-name')?.focus(), 100);
+  }
+
+  let groupDraft = [];
+
+  function addGroupMember(nick) {
+    nick = (nick || '').trim();
+    if (!nick) return;
+    if (nick.toLowerCase() === String(myName).toLowerCase()) { showToast('Вы и так будете в группе'); return; }
+    if (groupDraft.some(n => n.toLowerCase() === nick.toLowerCase())) return;
+    if (groupDraft.length + 1 >= GROUP_MAX) { showToast('Больше ' + GROUP_MAX + ' участников не поддерживается'); return; }
+    groupDraft.push(nick);
+    renderGroupDraft();
+  }
+
+  function removeGroupMember(i) { groupDraft.splice(i, 1); renderGroupDraft(); }
+
+  function renderGroupDraft() {
+    const box = document.getElementById('grp-chosen');
+    if (!box) return;
+    box.innerHTML = groupDraft.map((n, i) =>
+      '<span class="grp-chip">@' + esc(n) + '<button onclick="removeGroupMember(' + i + ')">✕</button></span>').join('');
+  }
+
+  async function doCreateGroup() {
+    const err = document.getElementById('grp-err');
+    const btn = document.getElementById('grp-create');
+    const name = document.getElementById('grp-name')?.value || '';
+    if (!name.trim()) { err.textContent = 'Придумай название'; err.style.display = 'block'; return; }
+    if (!groupDraft.length) { err.textContent = 'Добавь хотя бы одного участника'; err.style.display = 'block'; return; }
+    err.style.display = 'none';
+    btn.disabled = true; btn.textContent = 'Создаю...';
+    const key = await createGroup(name, groupDraft.slice());
+    if (!key) { btn.disabled = false; btn.textContent = 'Создать'; return; }
+    document.getElementById('group-overlay')?.remove();
+  }
+
+  // Состав группы: посмотреть, добавить, выйти
+  function showGroupInfo() {
+    const key = currentChat;
+    const g = groupOf(key);
+    if (!g) return;
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'grpinfo-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">${esc(g.name.toUpperCase())}</div>
+        <div style="font-size:12px;color:var(--text3);">Участников: ${g.members.length}</div>
+        <div class="acc-list">${g.members.map(n =>
+          '<div class="acc-row" style="cursor:default;">' +
+            '<div class="acc-avatar" style="background:' + esc(chats[n]?.color || '#888') + '">' + esc(n[0].toUpperCase()) + '</div>' +
+            '<div class="acc-info"><div class="acc-nick">@' + esc(n) + (n === myName ? ' · вы' : '') + '</div></div>' +
+          '</div>').join('')}</div>
+        <input class="adm-search" id="grpinfo-add" placeholder="Добавить участника" autocomplete="off"
+               onkeydown="if(event.key==='Enter'){event.preventDefault();inviteToGroup(this.value);this.value='';}">
+        <div style="font-size:11px;color:var(--text3);line-height:1.5;">
+          Новый участник увидит переписку с момента, когда его добавили:
+          прежние сообщения зашифрованы не для него.
+        </div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
+          <button class="btn-primary" style="background:#ef4444;" onclick="leaveGroup()">Выйти</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  }
+
+  async function inviteToGroup(nick) {
+    nick = (nick || '').trim();
+    const key = currentChat;
+    const g = groupOf(key);
+    if (!g || !nick) return;
+    if (g.members.some(n => n.toLowerCase() === nick.toLowerCase())) { showToast('Уже в группе'); return; }
+    if (g.members.length >= GROUP_MAX) { showToast('Больше ' + GROUP_MAX + ' участников не поддерживается'); return; }
+    if (!(await peerPublicKey(nick))) { showToast('@' + nick + ' ещё ни разу не заходил'); return; }
+    g.members.push(nick);
+    saveState();
+    groupSysLine(key, 'Вы добавили @' + nick);
+    await sendToGroup(key, '__GRPSYS__добавил(а) @' + nick, { silent: true });
+    document.getElementById('grpinfo-overlay')?.remove();
+    showGroupInfo();
+  }
+
+  async function leaveGroup() {
+    const key = currentChat;
+    const g = groupOf(key);
+    if (!g) return;
+    if (!confirm('Выйти из группы «' + g.name + '»?\n\nПереписка на этом устройстве будет удалена.')) return;
+    g.members = g.members.filter(n => n !== myName);
+    await sendToGroup(key, '__GRPSYS__вышел(ла) из группы', { silent: true });
+    document.getElementById('grpinfo-overlay')?.remove();
+    delete chats[key];
+    saveState();
+    backToChats();
+    showToast('Вы вышли из группы');
+  }
+
   // ===== ГОЛОСОВЫЕ СООБЩЕНИЯ =====
   // Запись идёт на устройстве, наружу уходит уже зашифрованный звук —
   // тем же путём, что и остальные вложения.
@@ -4587,7 +4974,7 @@
 
   async function toggleVoice() {
     if (voiceRec) { finishVoice(true); return; }
-    if (!currentChat || currentChat.startsWith('__lan__:')) { showToast('В LAN-чате голосовые пока не работают'); return; }
+    if (isRoom(currentChat)) { showToast(isGroup(currentChat) ? 'В группе голосовые пока не работают' : 'В LAN-чате голосовые пока не работают'); return; }
     const mime = voiceMime();
     if (mime === null) { showToast('Запись звука не поддерживается'); return; }
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { showToast('Микрофон недоступен'); return; }
@@ -4729,7 +5116,7 @@
   function renderSafetyBtn() {
     const btn = document.getElementById('safety-item');
     if (!btn) return;
-    const isLan = !currentChat || currentChat.startsWith('__lan__:');
+    const isLan = isRoom(currentChat);
     btn.style.display = isLan ? 'none' : 'flex';
     if (isLan) return;
     btn.textContent = chats[currentChat]?.verified ? '🔐 Ключи сверены ✓' : '🔐 Сверить ключи';
@@ -4737,7 +5124,7 @@
 
   async function showSafetyModal() {
     const peer = currentChat;
-    if (!peer || peer.startsWith('__lan__:')) return;
+    if (isRoom(peer)) return;
     const ov = document.createElement('div');
     ov.className = 'modal-overlay';
     ov.id = 'safety-overlay';
@@ -4839,7 +5226,7 @@
   function renderTtlBtn() {
     const btn = document.getElementById('ttl-item');
     if (!btn) return;
-    const isLan = !currentChat || currentChat.startsWith('__lan__:');
+    const isLan = isRoom(currentChat);
     btn.style.display = isLan ? 'none' : 'flex';
     if (isLan) return;
     const sec = ttlFor(currentChat);
@@ -4874,7 +5261,7 @@
   async function pickTtl(sec) {
     document.getElementById('ttl-overlay')?.remove();
     const peer = currentChat;
-    if (!peer || peer.startsWith('__lan__:')) return;
+    if (isRoom(peer)) return;
     if (ttlFor(peer) === sec) return;
     // Договорённость должна быть общей, иначе у одной стороны переписка
     // исчезнет, а у другой останется
@@ -4927,7 +5314,7 @@
     const from = currentChat;
     // Пересылать можно только в личные чаты: в LAN-комнате нет ни ключей,
     // ни серверной доставки
-    const targets = Object.keys(chats).filter(n => !n.startsWith('__lan__:') && n !== from);
+    const targets = Object.keys(chats).filter(n => !isRoom(n) && n !== from);
     const ov = document.createElement('div');
     ov.className = 'modal-overlay';
     ov.id = 'fwd-overlay';
@@ -4958,7 +5345,7 @@
   async function doForward(idx, to) {
     to = (to || '').trim();
     if (!to) { showToast('Укажи получателя'); return; }
-    if (to.startsWith('__lan__:')) { showToast('В комнату переслать нельзя'); return; }
+    if (isRoom(to)) { showToast('В комнату переслать нельзя'); return; }
     if (to === myName) { showToast('Себе переслать нельзя'); return; }
     const src = chats[currentChat]?.messages[idx];
     if (!src) return;
@@ -4967,7 +5354,7 @@
     const { from: already, body } = stripFwd(full);
     // Автор — тот, чьи это слова изначально. Цепочку пересылок не наращиваем:
     // важен первый автор, а не тот, через кого сообщение прошло.
-    const origin = already || (src.own ? myName : currentChat);
+    const origin = already || (src.own ? myName : (src.sender || currentChat));
     document.getElementById('fwd-overlay')?.remove();
 
     const target = currentChat;
@@ -5134,7 +5521,7 @@
 
   async function sendSticker(val, type) {
     document.getElementById('sticker-panel').style.display = 'none';
-    if (!currentChat || currentChat.startsWith('__lan__:')) return;
+    if (!currentChat || isLanChat(currentChat)) return;
     if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
     const stickerData = (type === 'emoji' || type === 'void') ? val : customStickers[parseInt(val)];
     if (!stickerData) { showToast('Стикер не найден'); return; }
