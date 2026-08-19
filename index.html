@@ -384,6 +384,10 @@
   .file-sub { font-size:11px; color:var(--text3); }
   .file-holder { min-width:190px; }
   .file-loading { padding:14px; text-align:center; font-size:13px; color:var(--text3); }
+  .msg-voice { width:230px; max-width:100%; height:36px; }
+  #voice-btn.recording { background:rgba(239,68,68,0.18); color:#ef4444; font-family:'Space Mono',monospace; font-size:12px; min-width:58px; }
+  @keyframes recPulse { 0%,100% { opacity:1; } 50% { opacity:0.45; } }
+  #voice-btn.recording { animation:recPulse 1.1s ease-in-out infinite; }
   .msg-image { max-width:100%; width:230px; border-radius:13px; display:block; cursor:pointer; }
   .msg-sticker-void svg { width:100%; height:100%; display:block; }
   .sticker-item svg { width:78%; height:78%; display:block; }
@@ -472,6 +476,7 @@
   @keyframes popIn { from{opacity:0;transform:scale(0.7)} to{opacity:1;transform:scale(1)} }
   .reaction-emoji { font-size:26px; cursor:pointer; padding:4px; border-radius:50%; transition:transform 0.15s; line-height:1; border:none; background:none; }
   .reaction-emoji:hover { transform:scale(1.3); }
+  .msg-ttl { font-size:10px; opacity:0.8; }
   .msg-menu-reactions { display:flex; justify-content:space-between; gap:2px; background:var(--bg3); border:1px solid var(--border); border-radius:14px; padding:6px; }
   .msg-menu-reactions .reaction-emoji { font-size:21px; padding:2px; }
   .fwd-head { font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; margin-bottom:4px; border-left:2px solid var(--accent); padding-left:6px; }
@@ -819,6 +824,8 @@
               <button class="chat-menu-item" onclick="showBgModal();closeChatMenu()">🖼️ Фон чата</button>
               <button class="chat-menu-item" id="secure-btn" onclick="toggleSecure();closeChatMenu()">🛡️ Защита</button>
               <button class="chat-menu-item" id="lan-invite-item" onclick="lanInvite()" style="display:none">📋 Код комнаты</button>
+              <button class="chat-menu-item" id="safety-item" onclick="showSafetyModal();closeChatMenu()">🔐 Сверить ключи</button>
+              <button class="chat-menu-item" id="ttl-item" onclick="showTtlModal();closeChatMenu()">🔥 Исчезающие сообщения</button>
               <button class="chat-menu-item" id="block-item" onclick="toggleBlockCurrent();closeChatMenu()">🚫 Заблокировать</button>
               <button class="chat-menu-item danger" id="delete-chat-item" onclick="deleteCurrentChat();closeChatMenu()">🗑️ Удалить чат</button>
             </div>
@@ -860,6 +867,8 @@
       <div class="input-area">
         <button class="icon-btn" onclick="toggleStickerPanel()" title="Стикеры" style="flex-shrink:0;">😊</button>
         <button class="attach-btn" onclick="pickFile()" title="Прикрепить файл">📎</button>
+        <button class="attach-btn" id="voice-btn" onclick="toggleVoice()" title="Голосовое сообщение">🎤</button>
+        <button class="attach-btn" id="voice-cancel" onclick="cancelVoice()" title="Отменить запись" style="display:none;">✕</button>
         <div class="input-wrap">
           <input type="text" class="msg-input" id="msg-input" placeholder="Написать сообщение..." onkeydown="handleKey(event)">
         </div>
@@ -1336,6 +1345,7 @@
       app.style.display = 'flex';
       app.classList.add('visible');
       document.getElementById('fab').classList.add('visible');
+      sweepExpired();          // пока приложение было закрыто, сроки шли
       renderChatList();
 
       // Приложение открыли нажатием на уведомление
@@ -1524,7 +1534,8 @@
       // Сервер отвечает каноническим ником — он может отличаться регистром
       const jwk = keys[nick] !== undefined ? keys[nick] : (Object.values(keys)[0] || null);
       const key = jwk ? await impPub(jwk) : null;
-      peerKeyCache[nick] = { key, at: Date.now() };
+      peerKeyCache[nick] = { key, jwk, at: Date.now() };
+      if (jwk) await notePeerKey(nick, jwk);      // не подменили ли ключ
       return key;
     } catch(e) {
       peerKeyCache[nick] = { key: null, at: Date.now() };
@@ -1880,13 +1891,36 @@
       presence[key].lastSeen = msg.timestamp || Date.now();
       if (currentChat === key) showPresence(key);
     }
-    const text = await e2eDecrypt(key, msg.text);
+    const raw = await e2eDecrypt(key, msg.text);
     if (!chats[key]) chats[key] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
+
+    // Срок жизни едет вместе с сообщением: договорённость о нём не хранится
+    // на сервере, и заново её выяснять не у кого
+    const { sec, body: text } = stripTtl(raw);
+
+    // Собеседник переключил исчезающие сообщения — это не письмо, а уведомление
+    if (text.startsWith('__TTLSET__')) {
+      applyTtlSetting(key, parseInt(text.slice(10), 10) || 0, false);
+      return;
+    }
+
+    // Письмо пролежало на сервере дольше своего срока — показывать его
+    // на мгновение, чтобы тут же убрать, незачем
+    if (sec > 0 && (msg.timestamp || Date.now()) + sec * 1000 <= Date.now()) return;
+
     const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     // Раньше входящие ложились в localStorage открытым текстом, в отличие от
     // отправленных. Теперь шифруются так же.
     const enc = await encryptText(text);
-    chats[key].messages.push({ enc, own: false, time: timeStr, timestamp: msg.timestamp, mid: msg.mid });
+    const incoming = { enc, own: false, time: timeStr, timestamp: msg.timestamp, mid: msg.mid };
+    // Пометки о вложении нужны списку чатов: без них он показывал бы
+    // «🔒 Сообщение» вместо «📎 Вложение» и «🎤 Голосовое»
+    {
+      const fm = parseFileMeta(stripFwd(text).body);
+      if (fm) { incoming.isFile = true; incoming.isVoice = !!fm.voice; }
+    }
+    if (sec > 0) incoming.expiresAt = (msg.timestamp || Date.now()) + sec * 1000;
+    chats[key].messages.push(incoming);
     if (currentChat !== key) { chats[key].unread = (chats[key].unread || 0) + 1; }
     saveState();
     if (currentChat === key) {
@@ -1896,7 +1930,11 @@
     }
     renderChatList();
     const shown = stripFwd(text).body;
-    sendNotification(key, shown.startsWith('__STICKER__') ? '🎭 Стикер' : shown);
+    const fm = parseFileMeta(shown);
+    sendNotification(key,
+      shown.startsWith('__STICKER__') ? '🎭 Стикер'
+        : fm ? (fm.voice ? '🎤 Голосовое сообщение' : '📎 ' + (fm.name || 'Вложение'))
+        : shown);
   }
 
   // Сообщение, отправленное с другого устройства этого же аккаунта
@@ -1904,11 +1942,16 @@
     const key = msg.to;
     if (!chats[key]) chats[key] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
     if (chats[key].messages.some(m => m.mid && m.mid === msg.mid)) return;   // уже есть
-    const text = await e2eDecrypt(key, msg.text);
+    const { sec, body: text } = stripTtl(await e2eDecrypt(key, msg.text));
+    if (text.startsWith('__TTLSET__')) return;      // служебное, письмом не считается
     const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const enc = await encryptText(text);
-    chats[key].messages.push({ enc, own: true, time: timeStr, timestamp: msg.timestamp, mid: msg.mid,
-                               isSticker: stripFwd(text).body.startsWith('__STICKER__') });
+    const echoFile = parseFileMeta(stripFwd(text).body);
+    const echoed = { enc, own: true, time: timeStr, timestamp: msg.timestamp, mid: msg.mid,
+                     isSticker: stripFwd(text).body.startsWith('__STICKER__'),
+                     isFile: !!echoFile, isVoice: !!(echoFile && echoFile.voice) };
+    if (sec > 0) echoed.expiresAt = (msg.timestamp || Date.now()) + sec * 1000;
+    chats[key].messages.push(echoed);
     chats[key].messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     saveState();
     if (currentChat === key) renderMessages();
@@ -1932,7 +1975,7 @@
     if (!chat) return;
     const target = chat.messages.find(m => m.mid && m.mid === msg.mid);
     if (!target) return;
-    const text = await e2eDecrypt(msg.from, msg.text);
+    const text = stripTtl(await e2eDecrypt(msg.from, msg.text)).body;
     target.enc = await encryptText(text);
     target.edited = true;
     saveState();
@@ -2469,6 +2512,8 @@
     document.getElementById('delete-chat-item').style.display = isLan ? 'none' : 'flex';
     document.getElementById('secure-btn').style.display = isLan ? 'none' : 'flex';
     renderBlockBtn();
+    renderTtlBtn();
+    renderSafetyBtn();
     updateSecureBtn();
     if (menu.classList.contains('open')) {
       setTimeout(() => document.addEventListener('click', closeChatMenuOutside, { once:true }), 0);
@@ -2712,7 +2757,7 @@
       const lastText = last
         ? (last.system
             ? `<i>${esc(last.text)}</i>`
-            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.isFile ? '📎 Вложение' : last.enc?.ct ? '🔒 Сообщение' : esc(last.enc?.plain || last.text || '')))
+            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.isVoice ? '🎤 Голосовое' : last.isFile ? '📎 Вложение' : last.enc?.ct ? '🔒 Сообщение' : esc(last.enc?.plain || last.text || '')))
         : 'Нет сообщений';
       const item = document.createElement('div');
       item.className = 'chat-item' + (currentChat===nick?' active':'');
@@ -2744,11 +2789,13 @@
       const av = document.getElementById('cv-avatar');
       av.textContent = '📡'; av.style.fontSize = '22px'; av.style.background = '#FF6B4A';
       document.getElementById('cv-name').textContent = chats[nick]?.name || '📡 LAN';
+      document.getElementById('voice-btn').style.display = 'none';
       applyBg(chats[nick]?.bg || '');
       renderMessages();
       renderChatList();
       return;
     }
+    sweepExpired();               // за время отсутствия что-то могло истечь
     currentChat = nick;
     if (chats[nick].unread) { chats[nick].unread = 0; saveState(); }
     closeChatSearch();
@@ -2762,7 +2809,11 @@
     av.style.fontSize = '';
     document.getElementById('cv-name').textContent = '@' + nick;
     document.getElementById('cv-sub').textContent = '';
+    document.getElementById('voice-btn').style.display = '';
     updateE2EBadge(nick);
+    // Перепроверяем ключ собеседника при каждом открытии чата: о подмене
+    // лучше узнать до того, как что-то напишешь, а не после
+    peerPublicKey(nick).catch(() => {});
     reportRead(nick);
     applyBg(chats[nick].bg || '');
     renderMessages();
@@ -2910,7 +2961,16 @@
 
       let bubbleContent, isSticker = false;
       const fileMeta = parseFileMeta(text);
-      if (fileMeta) {
+      if (fileMeta && (fileMeta.voice || /^audio\//.test(fileMeta.mime || ''))) {
+        // Голосовое: сразу видно, сколько слушать, а звук грузится по нажатию
+        bubbleContent = `<div class="file-holder" data-voice-idx="${idx}">
+             <button class="file-card" onclick="playVoice(${idx})">
+               <span class="file-ico">🎤</span>
+               <span class="file-info"><span class="file-name">Голосовое сообщение</span>
+               <span class="file-sub">${esc(voiceLen(fileMeta.dur))} · нажми, чтобы послушать</span></span>
+             </button>
+           </div>`;
+      } else if (fileMeta) {
         const isImg = /^image\//.test(fileMeta.mime || '');
         bubbleContent = isImg
           // Картинку не тянем сразу: сначала показываем заглушку, грузим по нажатию
@@ -2947,7 +3007,8 @@
       const replyQuote = msg.reply ? `<div class="reply-quote">↩ ${esc(msg.reply.text.slice(0,60))}</div>` : '';
       const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">↩</button>`;
       const editedMark = msg.edited ? '<span class="msg-edited">изменено</span> ' : '';
-      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${editedMark}${msg.time}${msg.own?' <span class="check'+(msg.read?' read':'')+'">'+(msg.read?CHECK2_ICON:CHECK_ICON)+'</span>':''}</span>`;
+      const ttlMark = msg.expiresAt ? `<span class="msg-ttl" title="Исчезнет через ${ttlLeft(msg.expiresAt)}">🔥</span> ` : '';
+      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${ttlMark}${editedMark}${msg.time}${msg.own?' <span class="check'+(msg.read?' read':'')+'">'+(msg.read?CHECK2_ICON:CHECK_ICON)+'</span>':''}</span>`;
       const reactionsHtml = (msg.reactions && msg.reactions.length)
         ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
@@ -3008,7 +3069,8 @@
 
   // Отправка не в открытый чат, а любому собеседнику. Нужна пересылке:
   // раньше вся отправка была намертво привязана к currentChat.
-  async function sendTo(peer, text) {
+  // opts.silent — служебное сообщение: у себя его не сохраняем, оно не письмо
+  async function sendTo(peer, text, opts = {}) {
     if (!peer || peer.startsWith('__lan__:')) return false;
     if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return false; }
     if (!myRawPass || !dmWsAuthOk || dmWs?.readyState !== 1) {
@@ -3016,16 +3078,22 @@
       dmWakeCheck();
       return false;
     }
-    const payload = await e2eEncrypt(peer, text);
+    const wire = opts.silent ? text : withTtl(peer, text);
+    const payload = await e2eEncrypt(peer, wire);
     if (!payload) { showToast('Собеседник ещё ни разу не заходил — написать ему пока нельзя'); return false; }
     const mid = newMid();
     dmWs.send(JSON.stringify({ type: 'dm', to: peer, text: payload, mid }));
+    if (opts.silent) return true;
     if (!chats[peer]) chats[peer] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
     const enc = await encryptText(text);
     const shown = stripFwd(text).body;
-    chats[peer].messages.push({ enc, own: true, time: now(), timestamp: Date.now(), mid,
-                                isSticker: shown.startsWith('__STICKER__'),
-                                isFile: !!parseFileMeta(shown) });
+    const sec = ttlFor(peer);
+    const fwdFile = parseFileMeta(shown);
+    const out = { enc, own: true, time: now(), timestamp: Date.now(), mid,
+                  isSticker: shown.startsWith('__STICKER__'),
+                  isFile: !!fwdFile, isVoice: !!(fwdFile && fwdFile.voice) };
+    if (sec > 0) out.expiresAt = Date.now() + sec * 1000;
+    chats[peer].messages.push(out);
     saveState();
     return true;
   }
@@ -3057,7 +3125,7 @@
     // Отправка через сервер если авторизованы
     if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
       // Шифруем ключом пары: на сервер уходит только шифротекст
-      const payload = await e2eEncrypt(currentChat, text);
+      const payload = await e2eEncrypt(currentChat, withTtl(currentChat, text));
       if (!payload) {
         showToast('Собеседник ещё ни разу не заходил — написать ему пока нельзя');
         return;
@@ -3074,6 +3142,8 @@
     }
     const enc = await encryptText(text);
     const msg = {enc, own:true, time:now(), timestamp:Date.now(), mid:outMid};
+    const ttlSec = ttlFor(currentChat);
+    if (ttlSec > 0) msg.expiresAt = Date.now() + ttlSec * 1000;
     if (pendingCapsuleTime) { msg.unlockAt = pendingCapsuleTime; cancelCapsule(); }
     if (replyTo) { msg.reply = { text: replyTo.text, own: replyTo.own }; clearReply(); }
     chats[currentChat].messages.push(msg);
@@ -4360,7 +4430,7 @@
 
   function pickFile() { document.getElementById('file-input')?.click(); }
 
-  async function sendFile(e) {
+  async function sendFile(e, extra) {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!file || !currentChat) return;
@@ -4416,21 +4486,22 @@
       blobId = d.id;
     } catch (err) { showToast('Нет связи с сервером'); return; }
 
-    const meta = { id: blobId, iv: enc.iv, name: name.slice(0, 80), mime, size: bytes.length };
+    const meta = { id: blobId, iv: enc.iv, name: name.slice(0, 80), mime, size: bytes.length, ...(extra || {}) };
     const payloadText = '__FILE__' + JSON.stringify(meta);
     const mid = newMid();
 
-    const cipher = await e2eEncrypt(currentChat, payloadText);
+    const cipher = await e2eEncrypt(currentChat, withTtl(currentChat, payloadText));
     if (!cipher) { showToast('Не удалось зашифровать'); return; }
     dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: cipher, mid }));
 
     // Своё вложение уже расшифровано — кладём в память, чтобы не качать назад
     blobCache[blobId] = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
 
-    chats[currentChat].messages.push({
-      enc: await encryptText(payloadText), own: true, time: now(),
-      timestamp: Date.now(), mid, isFile: true
-    });
+    const fileMsg = { enc: await encryptText(payloadText), own: true, time: now(),
+                      timestamp: Date.now(), mid, isFile: true, isVoice: !!(extra && extra.voice) };
+    const fileTtl = ttlFor(currentChat);
+    if (fileTtl > 0) fileMsg.expiresAt = Date.now() + fileTtl * 1000;
+    chats[currentChat].messages.push(fileMsg);
     playSound();
     renderMessages();
     renderChatList();
@@ -4483,6 +4554,361 @@
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
+
+  // ===== ГОЛОСОВЫЕ СООБЩЕНИЯ =====
+  // Запись идёт на устройстве, наружу уходит уже зашифрованный звук —
+  // тем же путём, что и остальные вложения.
+  const VOICE_MAX_SEC = 120;
+  let voiceRec = null, voiceChunks = [], voiceStart = 0, voiceTimer = null, voiceStream = null;
+
+  function isRecording() { return !!voiceRec; }
+
+  function voiceMime() {
+    // Браузеры расходятся в том, что умеют писать
+    const want = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'];
+    if (typeof MediaRecorder === 'undefined') return null;
+    return want.find(m => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) || '';
+  }
+
+  function renderVoiceBtn() {
+    const btn = document.getElementById('voice-btn');
+    if (!btn) return;
+    if (voiceRec) {
+      const sec = Math.floor((Date.now() - voiceStart) / 1000);
+      btn.textContent = '⏹ ' + String(Math.floor(sec / 60)) + ':' + String(sec % 60).padStart(2, '0');
+      btn.classList.add('recording');
+    } else {
+      btn.textContent = '🎤';
+      btn.classList.remove('recording');
+    }
+    const cancel = document.getElementById('voice-cancel');
+    if (cancel) cancel.style.display = voiceRec ? 'inline-flex' : 'none';
+  }
+
+  async function toggleVoice() {
+    if (voiceRec) { finishVoice(true); return; }
+    if (!currentChat || currentChat.startsWith('__lan__:')) { showToast('В LAN-чате голосовые пока не работают'); return; }
+    const mime = voiceMime();
+    if (mime === null) { showToast('Запись звука не поддерживается'); return; }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { showToast('Микрофон недоступен'); return; }
+    try {
+      voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) { showToast('Нет доступа к микрофону'); return; }
+
+    try {
+      voiceRec = new MediaRecorder(voiceStream, mime ? { mimeType: mime } : undefined);
+    } catch (e) {
+      stopStream();
+      showToast('Не удалось начать запись');
+      return;
+    }
+    voiceChunks = [];
+    voiceStart = Date.now();
+    voiceRec.ondataavailable = ev => { if (ev.data && ev.data.size) voiceChunks.push(ev.data); };
+    voiceRec.start();
+    renderVoiceBtn();
+    // Показываем, сколько уже записано, и сами останавливаемся на пределе
+    voiceTimer = setInterval(() => {
+      renderVoiceBtn();
+      if (Date.now() - voiceStart >= VOICE_MAX_SEC * 1000) finishVoice(true);
+    }, 500);
+  }
+
+  function stopStream() {
+    if (voiceStream) { voiceStream.getTracks().forEach(t => t.stop()); voiceStream = null; }
+  }
+
+  // send=false — запись выбрасывается, ничего не уходит
+  function finishVoice(send) {
+    const rec = voiceRec;
+    if (!rec) return;
+    const peer = currentChat;
+    const sec = Math.max(1, Math.round((Date.now() - voiceStart) / 1000));
+    clearInterval(voiceTimer); voiceTimer = null;
+    voiceRec = null;
+
+    rec.onstop = async () => {
+      stopStream();
+      renderVoiceBtn();
+      const chunks = voiceChunks; voiceChunks = [];
+      if (!send || !chunks.length) { if (!send) showToast('Запись отменена'); return; }
+      const type = rec.mimeType || 'audio/webm';
+      const blob = new Blob(chunks, { type });
+      const ext = /ogg/.test(type) ? 'ogg' : /mp4/.test(type) ? 'm4a' : 'webm';
+      const file = new File([blob], 'Голосовое.' + ext, { type });
+      if (currentChat !== peer) { showToast('Чат сменился — голосовое не отправлено'); return; }
+      await sendFile({ target: { files: [file], value: '' } }, { dur: sec, voice: 1 });
+    };
+    try { rec.stop(); } catch (e) { stopStream(); voiceRec = null; renderVoiceBtn(); }
+  }
+
+  function cancelVoice() { finishVoice(false); }
+
+  function voiceLen(sec) {
+    sec = Math.max(0, Math.round(sec || 0));
+    return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+  }
+
+  // Звук подгружается и расшифровывается только по нажатию — как и картинки
+  async function playVoice(idx) {
+    const peer = currentChat;
+    const msg = chats[peer]?.messages[idx];
+    if (!msg) return;
+    const meta = parseFileMeta(stripFwd(await decryptText(msg.enc)).body);
+    if (!meta) return;
+    const holder = document.querySelector('[data-voice-idx="' + idx + '"]');
+    if (holder) holder.innerHTML = '<div class="file-loading">Загружаю...</div>';
+    const buf = await loadBlob(peer, meta);
+    if (!buf) { if (holder) holder.innerHTML = '<div class="file-loading">Не удалось открыть</div>'; return; }
+    const url = URL.createObjectURL(new Blob([buf], { type: meta.mime || 'audio/webm' }));
+    if (!holder) return;
+    holder.innerHTML = '<audio class="msg-voice" controls autoplay src="' + url + '"></audio>';
+  }
+
+  // ===== СВЕРКА КЛЮЧЕЙ =====
+  // Шифрование защищает от подслушивания, но не докажет, что ключ собеседника
+  // не подменили по дороге. Единственный способ убедиться — сравнить число,
+  // выведенное из обоих ключей, по другому каналу: голосом или при встрече.
+  async function peerPublicJwk(nick) {
+    const hit = peerKeyCache[nick];
+    if (hit && hit.jwk) return hit.jwk;
+    await peerPublicKey(nick);                 // заодно наполнит кэш
+    return peerKeyCache[nick]?.jwk || null;
+  }
+
+  // Отпечаток одного ключа. Ник входит в него, иначе один и тот же ключ
+  // под разными именами давал бы одинаковый результат.
+  async function keyFingerprint(nick, jwkStr) {
+    let j;
+    try { j = JSON.parse(jwkStr); } catch (e) { return null; }
+    if (!j || !j.x || !j.y) return null;
+    const data = new TextEncoder().encode(String(nick).toLowerCase() + '|' + j.x + '|' + j.y);
+    const h = new Uint8Array(await crypto.subtle.digest('SHA-256', data));
+    return [...h].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  // 60 цифр, 12 групп по пять — так же, как это принято в других мессенджерах:
+  // читать вслух группами заметно легче, чем сплошную строку
+  async function safetyNumber(peer) {
+    if (!(await ensureKeyPair())) return null;
+    const theirJwk = await peerPublicJwk(peer);
+    if (!theirJwk || !myPubJwk) return null;
+    const a = await keyFingerprint(myName, myPubJwk);
+    const b = await keyFingerprint(peer, theirJwk);
+    if (!a || !b) return null;
+    // Порядок не должен зависеть от того, кто смотрит, — иначе числа разойдутся
+    const joined = [a, b].sort().join('');
+    const h = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(joined)));
+    let big = 0n;
+    for (const byte of h) big = (big << 8n) | BigInt(byte);
+    const digits = big.toString().padStart(60, '0').slice(-60);
+    return { digits, groups: digits.match(/.{5}/g), theirFp: b };
+  }
+
+  // Ключ собеседника мог смениться: он завёл новое устройство и потерял старое —
+  // или кто-то встал посередине. Молчать об этом нельзя.
+  async function notePeerKey(nick, jwk) {
+    const chat = chats[nick];
+    if (!chat) return;
+    const fp = await keyFingerprint(nick, jwk);
+    if (!fp) return;
+    if (chat.keyFp && chat.keyFp !== fp) {
+      chat.verified = false;
+      chat.messages.push({
+        system: true,
+        text: '⚠️ Ключ @' + nick + ' изменился. Если вы не меняли устройство — сверьте ключи заново.',
+        timestamp: Date.now()
+      });
+      if (currentChat === nick) renderMessages();
+      renderChatList();
+    }
+    chat.keyFp = fp;
+    saveState();
+  }
+
+  function renderSafetyBtn() {
+    const btn = document.getElementById('safety-item');
+    if (!btn) return;
+    const isLan = !currentChat || currentChat.startsWith('__lan__:');
+    btn.style.display = isLan ? 'none' : 'flex';
+    if (isLan) return;
+    btn.textContent = chats[currentChat]?.verified ? '🔐 Ключи сверены ✓' : '🔐 Сверить ключи';
+  }
+
+  async function showSafetyModal() {
+    const peer = currentChat;
+    if (!peer || peer.startsWith('__lan__:')) return;
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'safety-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">СВЕРКА КЛЮЧЕЙ</div>
+        <div id="safety-body" style="font-size:13px;color:var(--text2);">Считаю...</div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+
+    const sn = await safetyNumber(peer);
+    const body = document.getElementById('safety-body');
+    if (!body) return;
+    if (!sn) {
+      body.innerHTML = '<div class="adm-empty">Ключ собеседника пока неизвестен — он ещё ни разу не заходил</div>' +
+        '<div class="modal-btns"><button class="btn-primary" style="width:100%;" onclick="this.closest(\'.modal-overlay\').remove()">Закрыть</button></div>';
+      return;
+    }
+    const verified = !!chats[peer]?.verified;
+    body.innerHTML = `
+      <div style="line-height:1.6;">
+        Это число одинаково у вас и у <b style="color:var(--text);">@${esc(peer)}</b>.
+        Продиктуйте его друг другу голосом или сравните при встрече.
+        Совпало — переписку никто не подменяет.
+      </div>
+      <div id="safety-digits" style="font-family:'Space Mono',monospace;font-size:15px;letter-spacing:1px;
+           line-height:1.9;text-align:center;background:var(--bg3);border:1px solid var(--border);
+           border-radius:14px;padding:14px;margin:12px 0;user-select:all;">
+        ${sn.groups.slice(0, 6).map(esc).join(' ')}<br>${sn.groups.slice(6).map(esc).join(' ')}
+      </div>
+      <div id="safety-state" style="font-size:12px;color:${verified ? 'var(--online)' : 'var(--text3)'};text-align:center;">
+        ${verified ? '✓ Вы отметили, что ключи сверены' : 'Ключи ещё не сверены'}
+      </div>
+      <div class="modal-btns" style="margin-top:12px;">
+        <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
+        <button class="btn-primary" onclick="markVerified(${verified ? 'false' : 'true'})">
+          ${verified ? 'Снять отметку' : 'Совпало'}</button>
+      </div>`;
+  }
+
+  function markVerified(yes) {
+    const peer = currentChat;
+    if (!peer || !chats[peer]) return;
+    chats[peer].verified = !!yes;
+    saveState();
+    document.getElementById('safety-overlay')?.remove();
+    renderSafetyBtn();
+    showToast(yes ? 'Ключи отмечены как сверенные' : 'Отметка снята');
+  }
+
+  // ===== ИСЧЕЗАЮЩИЕ СООБЩЕНИЯ =====
+  // Срок жизни едет в самом сообщении, а не хранится на сервере: сервер
+  // шифротекст не читает и подсказать получателю ничего не может.
+  const TTL_CHOICES = [
+    { sec: 0,      label: 'Выключено' },
+    { sec: 3600,   label: '1 час' },
+    { sec: 86400,  label: '24 часа' },
+    { sec: 604800, label: '7 дней' }
+  ];
+
+  function ttlLabel(sec) {
+    return (TTL_CHOICES.find(c => c.sec === sec) || { label: sec + ' с' }).label;
+  }
+
+  function stripTtl(text) {
+    if (typeof text !== 'string' || !text.startsWith('__TTL__')) return { sec: 0, body: text || '' };
+    const rest = text.slice(7);
+    const c = rest.indexOf(':');
+    if (c < 1) return { sec: 0, body: rest };
+    return { sec: parseInt(rest.slice(0, c), 10) || 0, body: rest.slice(c + 1) };
+  }
+
+  // Оборачиваем исходящее, если для этого чата включён таймер
+  function withTtl(peer, text) {
+    const sec = chats[peer]?.ttl || 0;
+    return sec > 0 ? '__TTL__' + sec + ':' + text : text;
+  }
+
+  function ttlFor(peer) { return chats[peer]?.ttl || 0; }
+
+  // mine=true — переключили мы сами, значит надо сказать собеседнику
+  function applyTtlSetting(peer, sec, mine) {
+    if (!chats[peer]) return;
+    chats[peer].ttl = sec > 0 ? sec : 0;
+    chats[peer].messages.push({
+      system: true,
+      text: (mine ? 'Вы включили' : '@' + peer + ' включил(а)') +
+            (sec > 0 ? ' исчезающие сообщения: ' + ttlLabel(sec).toLowerCase()
+                     : ' обычные сообщения — они больше не исчезают'),
+      timestamp: Date.now()
+    });
+    saveState();
+    if (currentChat === peer) renderMessages();
+    renderChatList();
+    renderTtlBtn();
+  }
+
+  function renderTtlBtn() {
+    const btn = document.getElementById('ttl-item');
+    if (!btn) return;
+    const isLan = !currentChat || currentChat.startsWith('__lan__:');
+    btn.style.display = isLan ? 'none' : 'flex';
+    if (isLan) return;
+    const sec = ttlFor(currentChat);
+    btn.textContent = sec ? '🔥 Исчезают: ' + ttlLabel(sec).toLowerCase() : '🔥 Исчезающие сообщения';
+  }
+
+  function showTtlModal() {
+    if (!currentChat || currentChat.startsWith('__lan__:')) return;
+    const cur = ttlFor(currentChat);
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'ttl-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:320px;">
+        <div class="modal-title">ИСЧЕЗАЮЩИЕ СООБЩЕНИЯ</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.6;">
+          Новые сообщения в этом чате будут пропадать у обеих сторон через
+          выбранное время. Уже написанное останется на месте.
+        </div>
+        <div class="acc-list">${TTL_CHOICES.map(c =>
+          '<div class="acc-row' + (c.sec === cur ? ' active' : '') + '" onclick="pickTtl(' + c.sec + ')">' +
+            '<div class="acc-avatar">' + (c.sec ? '🔥' : '∞') + '</div>' +
+            '<div class="acc-info"><div class="acc-nick">' + c.label + '</div></div>' +
+            (c.sec === cur ? '<div class="settings-item-arrow" style="color:var(--online);">✓</div>' : '') +
+          '</div>').join('')}</div>
+        <div class="modal-btns"><button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Отмена</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  }
+
+  async function pickTtl(sec) {
+    document.getElementById('ttl-overlay')?.remove();
+    const peer = currentChat;
+    if (!peer || peer.startsWith('__lan__:')) return;
+    if (ttlFor(peer) === sec) return;
+    // Договорённость должна быть общей, иначе у одной стороны переписка
+    // исчезнет, а у другой останется
+    const sent = await sendTo(peer, '__TTLSET__' + sec, { silent: true });
+    if (!sent) return;
+    applyTtlSetting(peer, sec, true);
+  }
+
+  // Удаляем то, чему вышел срок. Работает и после долгого отсутствия:
+  // проверка идёт по времени, а не по таймеру на каждое сообщение.
+  function sweepExpired() {
+    const now = Date.now();
+    let changed = false, inCurrent = false;
+    for (const [peer, chat] of Object.entries(chats)) {
+      if (!chat || !Array.isArray(chat.messages)) continue;
+      const before = chat.messages.length;
+      chat.messages = chat.messages.filter(m => !(m.expiresAt && m.expiresAt <= now));
+      if (chat.messages.length !== before) { changed = true; if (peer === currentChat) inCurrent = true; }
+    }
+    if (!changed) return;
+    saveState();
+    if (inCurrent) renderMessages();
+    renderChatList();
+  }
+
+  function ttlLeft(ms) {
+    const left = Math.max(0, ms - Date.now());
+    if (left >= 86400000) return Math.ceil(left / 86400000) + ' д';
+    if (left >= 3600000)  return Math.ceil(left / 3600000) + ' ч';
+    if (left >= 60000)    return Math.ceil(left / 60000) + ' мин';
+    return Math.ceil(left / 1000) + ' с';
+  }
+
+  setInterval(sweepExpired, 30000);
 
   // ===== ПЕРЕСЫЛКА =====
   // Пересланное отличается от обычного пометкой в начале текста: сервер по-
