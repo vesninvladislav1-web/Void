@@ -53,6 +53,20 @@ db.exec(`
     timestamp INTEGER NOT NULL,
     delivered INTEGER DEFAULT 0
   );
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
+  CREATE TABLE IF NOT EXISTS push_subs (
+    nick TEXT NOT NULL,
+    device_id TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (nick, device_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_nick ON push_subs(nick);
   CREATE TABLE IF NOT EXISTS devices (
     nick TEXT NOT NULL,
     device_id TEXT NOT NULL,
@@ -132,6 +146,15 @@ const qReadSync    = db.prepare(`
 `);
 // IP-адреса намеренно не сохраняем: в политике конфиденциальности написано,
 // что они в базу не попадают. Хватает названия устройства и времени.
+const qGetSetting  = db.prepare('SELECT value FROM settings WHERE key = ?');
+const qSetSetting  = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+const qAddPush     = db.prepare(`
+  INSERT INTO push_subs (nick, device_id, endpoint, p256dh, auth, created_at) VALUES (?, ?, ?, ?, ?, ?)
+  ON CONFLICT(nick, device_id) DO UPDATE SET endpoint = excluded.endpoint, p256dh = excluded.p256dh, auth = excluded.auth
+`);
+const qPushOf      = db.prepare('SELECT device_id, endpoint, p256dh, auth FROM push_subs WHERE nick = ?');
+const qDropPush    = db.prepare('DELETE FROM push_subs WHERE nick = ? AND device_id = ?');
+const qDropPushAll = db.prepare('DELETE FROM push_subs WHERE nick = ?');
 const qUpsertDevice = db.prepare(`
   INSERT INTO devices (nick, device_id, name, created_at, last_seen) VALUES (?, ?, ?, ?, ?)
   ON CONFLICT(nick, device_id) DO UPDATE SET last_seen = excluded.last_seen, name = excluded.name
@@ -241,6 +264,174 @@ async function verifyUser(nick, password) {
   }
 
   return (await scryptVerify(password, row.password_hash)) ? info : null;
+}
+
+// ===== УВЕДОМЛЕНИЯ ПРИ ЗАКРЫТОМ ПРИЛОЖЕНИИ (Web Push) =====
+// Написано вручную, без сторонних библиотек: приложение про приватность,
+// и тянуть ради этого чужой код с его зависимостями не хочется.
+// Правильность сверена с эталонной реализацией в тестах.
+const b64url = buf => Buffer.from(buf).toString('base64')
+  .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const unb64url = str => Buffer.from(String(str).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+
+function hmac(key, data) { return crypto.createHmac('sha256', key).update(data).digest(); }
+
+// Ключи VAPID — по ним служба доставки понимает, что запрос от нашего сервера
+function generateVapid() {
+  const kp = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const pub = kp.publicKey.export({ type: 'spki', format: 'der' }).subarray(-65);
+  const jwk = kp.privateKey.export({ format: 'jwk' });
+  return { publicKey: b64url(pub), privateKey: jwk.d };
+}
+
+function vapidPrivateKey(d) {
+  return crypto.createPrivateKey({
+    key: { kty: 'EC', crv: 'P-256', d, x: '', y: '' },
+    format: 'jwk'
+  });
+}
+
+// Подпись доступа: ES256 в компактном формате, как требует стандарт
+function vapidToken(audience, privJwkD, pubKey, subject) {
+  const header = b64url(JSON.stringify({ typ: 'JWT', alg: 'ES256' }));
+  const payload = b64url(JSON.stringify({
+    aud: audience,
+    exp: Math.floor(Date.now() / 1000) + 12 * 3600,
+    sub: subject
+  }));
+  const input = header + '.' + payload;
+
+  // Восстанавливаем ключ из приватной части: публичную часть выводим сами
+  const priv = crypto.createPrivateKey({
+    key: { kty: 'EC', crv: 'P-256', d: privJwkD, x: b64url(pubKey.subarray(1, 33)), y: b64url(pubKey.subarray(33, 65)) },
+    format: 'jwk'
+  });
+  // Подпись приходит в формате DER, а нужен «сырой» r||s
+  const der = crypto.sign('sha256', Buffer.from(input), priv);
+  const sig = derToRaw(der);
+  return input + '.' + b64url(sig);
+}
+
+function derToRaw(der) {
+  let off = 2;
+  if (der[1] & 0x80) off = 2 + (der[1] & 0x7f);
+  const readInt = () => {
+    const len = der[off + 1];
+    let val = der.subarray(off + 2, off + 2 + len);
+    off += 2 + len;
+    while (val.length > 32 && val[0] === 0) val = val.subarray(1);
+    return Buffer.concat([Buffer.alloc(32 - val.length), val]);
+  };
+  const r = readInt(), sVal = readInt();
+  return Buffer.concat([r, sVal]);
+}
+
+// Шифрование содержимого (RFC 8291 + RFC 8188, aes128gcm).
+// Служба доставки видит только шифротекст — прочитать сообщение она не может.
+function encryptPush(plaintext, p256dhB64, authB64) {
+  const uaPublic = unb64url(p256dhB64);
+  const authSecret = unb64url(authB64);
+  const salt = crypto.randomBytes(16);
+
+  const eph = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const asPublic = eph.publicKey.export({ type: 'spki', format: 'der' }).subarray(-65);
+
+  const uaKey = crypto.createPublicKey({
+    key: Buffer.concat([
+      Buffer.from('3059301306072a8648ce3d020106082a8648ce3d030107034200', 'hex'),
+      uaPublic
+    ]),
+    format: 'der', type: 'spki'
+  });
+  const shared = crypto.diffieHellman({ privateKey: eph.privateKey, publicKey: uaKey });
+
+  const prkKey = hmac(authSecret, shared);
+  const keyInfo = Buffer.concat([
+    Buffer.from('WebPush: info\0'), uaPublic, asPublic, Buffer.from([1])
+  ]);
+  const ikm = hmac(prkKey, keyInfo);
+  const prk = hmac(salt, ikm);
+
+  const cek = hmac(prk, Buffer.concat([Buffer.from('Content-Encoding: aes128gcm\0'), Buffer.from([1])])).subarray(0, 16);
+  const nonce = hmac(prk, Buffer.concat([Buffer.from('Content-Encoding: nonce\0'), Buffer.from([1])])).subarray(0, 12);
+
+  const cipher = crypto.createCipheriv('aes-128-gcm', cek, nonce);
+  const body = Buffer.concat([Buffer.from(plaintext, 'utf8'), Buffer.from([2])]);
+  const ct = Buffer.concat([cipher.update(body), cipher.final(), cipher.getAuthTag()]);
+
+  const rs = Buffer.alloc(4);
+  rs.writeUInt32BE(4096, 0);
+  return Buffer.concat([salt, rs, Buffer.from([asPublic.length]), asPublic, ct]);
+}
+
+// Ключи создаются один раз при первом запуске и хранятся в базе. Иначе при
+// каждом перезапуске все подписки пришлось бы оформлять заново.
+const PUSH_SUBJECT = process.env.VOID_PUSH_SUBJECT || 'mailto:admin@voidm.site';
+let vapidKeys = null;
+
+function initPush() {
+  try {
+    const pub = qGetSetting.get('vapid_public');
+    const priv = qGetSetting.get('vapid_private');
+    if (pub && priv) {
+      vapidKeys = { publicKey: pub.value, privateKey: priv.value };
+      console.log('[push] Ключи взяты из базы');
+      return;
+    }
+    vapidKeys = generateVapid();
+    qSetSetting.run('vapid_public', vapidKeys.publicKey);
+    qSetSetting.run('vapid_private', vapidKeys.privateKey);
+    console.log('[push] Созданы новые ключи');
+  } catch (e) {
+    console.error('[push] Не удалось подготовить ключи:', e.message);
+  }
+}
+
+// Отправка одного уведомления. Возвращает false, если подписка больше не жива.
+async function sendPush(sub, payload) {
+  if (!vapidKeys) return true;
+  let origin;
+  try { origin = new URL(sub.endpoint).origin; }
+  catch (e) { return false; }
+
+  try {
+    const body = encryptPush(JSON.stringify(payload), sub.p256dh, sub.auth);
+    const token = vapidToken(origin, vapidKeys.privateKey, unb64url(vapidKeys.publicKey), PUSH_SUBJECT);
+    const res = await fetch(sub.endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'vapid t=' + token + ', k=' + vapidKeys.publicKey,
+        'Content-Encoding': 'aes128gcm',
+        'Content-Type': 'application/octet-stream',
+        'TTL': '86400',
+        'Urgency': 'high'
+      },
+      body
+    });
+    // Служба сообщает, что подписка мертва — убираем её, чтобы не долбиться
+    if (res.status === 404 || res.status === 410) return false;
+    if (!res.ok) console.warn('[push] Служба доставки ответила', res.status);
+    return true;
+  } catch (e) {
+    console.warn('[push] Ошибка отправки:', e.message);
+    return true;   // сеть могла моргнуть, подписку не выбрасываем
+  }
+}
+
+// Уведомляем все устройства человека. Вызывается, только когда его нет
+// на связи: если приложение открыто, оно покажет уведомление само.
+async function notifyOffline(nick, payload) {
+  if (!vapidKeys || isOnline(nick)) return;
+  let subs = [];
+  try { subs = qPushOf.all(nick); } catch (e) { return; }
+  if (!subs.length) return;
+  for (const sub of subs) {
+    const alive = await sendPush(sub, payload);
+    if (!alive) {
+      try { qDropPush.run(nick, sub.device_id); } catch (e) {}
+      console.log('[push] Подписка устарела, удалена:', nick);
+    }
+  }
 }
 
 // ===== ОДНОРАЗОВЫЕ КОДЫ (TOTP, RFC 6238) =====
@@ -615,6 +806,49 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ===== УВЕДОМЛЕНИЯ =====
+  // Открытый ключ нужен браузеру, чтобы оформить подписку. Он публичный.
+  if (req.method === 'GET' && url.pathname === '/api/push/key') {
+    return json(200, { ok: true, key: vapidKeys ? vapidKeys.publicKey : null });
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/push/subscribe') {
+    if (!rateLimit('push:' + clientIp(req), 30, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+
+      const sub = body.subscription || {};
+      const dev = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : '';
+      const endpoint = typeof sub.endpoint === 'string' ? sub.endpoint : '';
+      const keys = sub.keys || {};
+      if (!dev || !endpoint || typeof keys.p256dh !== 'string' || typeof keys.auth !== 'string') {
+        return json(400, { error: 'Неполные данные подписки' });
+      }
+      if (endpoint.length > 700 || !/^https:\/\//.test(endpoint)) {
+        return json(400, { error: 'Неверный адрес подписки' });
+      }
+      qAddPush.run(u.nick, dev, endpoint, keys.p256dh, keys.auth, Date.now());
+      console.log('[push] Подписка оформлена:', u.nick);
+      json(200, { ok: true });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/push/unsubscribe') {
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      const dev = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : '';
+      const removed = dev ? qDropPush.run(u.nick, dev).changes : qDropPushAll.run(u.nick).changes;
+      json(200, { ok: true, removed });
+    });
+    return;
+  }
+
   // ===== УДАЛЕНИЕ СОБСТВЕННОГО АККАУНТА =====
   // Требование Google Play: пользователь должен уметь удалить аккаунт сам,
   // без обращения к разработчику. Нужен только пароль владельца.
@@ -631,6 +865,7 @@ const server = http.createServer((req, res) => {
 
       const msgs = qDeleteMsgs.run(u.nick, u.nick).changes;
       qDropDevices.run(u.nick);
+      qDropPushAll.run(u.nick);
       qDeleteUser.run(u.nick);
       kickUser(u.nick, 'deleted');
       console.log('[account] Удалён самим владельцем:', u.nick, '| сообщений удалено:', msgs);
@@ -711,6 +946,7 @@ const server = http.createServer((req, res) => {
       if (!id) return json(400, { error: 'Не указано устройство' });
 
       const removed = qDropDevice.run(u.nick, id).changes;
+      try { qDropPush.run(u.nick, id); } catch (e) {}   // и уведомления на него
       const kicked = kickDevice(u.nick, id, 'device-revoked');
       console.log('[device] Отключено', id.slice(0, 8), 'у', u.nick, kicked ? '(было на связи)' : '');
       json(200, { ok: true, removed: removed > 0, kicked });
@@ -937,6 +1173,7 @@ const server = http.createServer((req, res) => {
         // хранить негде — аккаунта не остаётся, поэтому пишем в лог сервера.
         const msgs = qDeleteMsgs.run(target.nick, target.nick).changes;
         qDropDevices.run(target.nick);
+        qDropPushAll.run(target.nick);
         qDeleteUser.run(target.nick);
         const kicked = kickUser(target.nick, 'deleted', reason);
         console.log('[admin] DELETE', target.nick, reason ? '(' + reason + ')' : '', '| сообщений удалено:', msgs);
@@ -1153,6 +1390,9 @@ wss.on('connection', (ws, req) => {
 
         qInsertMsg.run(nick, toNick, text, timestamp, live ? 1 : 0, mid);
         console.log(live ? '[dm] Delivered' : '[dm] Stored (offline)', nick, '->', toNick);
+        // Приложение закрыто — доводим до сведения уведомлением.
+        // Текст зашифрован и серверу неизвестен, поэтому шлём только имя.
+        if (!live) notifyOffline(toNick, { from: nick, at: timestamp });
         send({ type: 'dm-ack', to: toNick, timestamp, delivered: live ? 1 : 0 });
         return;
       }
@@ -1326,6 +1566,7 @@ process.on('SIGINT',  () => shutdown('SIGINT'));
 
 // Слушаем только после того, как админ-аккаунт готов: иначе первые запросы
 // попадали в окно, когда его ещё нет
+initPush();
 ensureAdmin().finally(() => {
   server.listen(PORT, () => console.log('VOID server running on :' + PORT));
 });
