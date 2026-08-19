@@ -366,6 +366,17 @@
   .msg-sticker { width:96px; height:96px; border-radius:16px; object-fit:cover; }
   .msg-sticker-emoji { font-size:72px; line-height:1; }
   .msg-sticker-void { width:104px; height:104px; }
+  .attach-btn { width:38px; height:38px; border-radius:50%; background:var(--bg3); border:1px solid var(--border); color:var(--text2); font-size:17px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; padding:0; transition:background 0.15s; }
+  .attach-btn:hover { background:var(--glass); }
+  .file-card { display:flex; align-items:center; gap:11px; width:100%; min-width:190px; padding:10px 12px; background:var(--bg3); border:1px solid var(--border); border-radius:13px; cursor:pointer; text-align:left; font-family:'Inter',sans-serif; transition:background 0.15s; }
+  .file-card:hover { background:var(--glass); }
+  .file-ico { font-size:24px; flex-shrink:0; }
+  .file-info { display:flex; flex-direction:column; min-width:0; gap:2px; }
+  .file-name { font-size:14px; color:var(--text); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .file-sub { font-size:11px; color:var(--text3); }
+  .file-holder { min-width:190px; }
+  .file-loading { padding:14px; text-align:center; font-size:13px; color:var(--text3); }
+  .msg-image { max-width:100%; width:230px; border-radius:13px; display:block; cursor:pointer; }
   .msg-sticker-void svg { width:100%; height:100%; display:block; }
   .sticker-item svg { width:78%; height:78%; display:block; }
 
@@ -796,6 +807,7 @@
         </div>
       </div>
 
+      <input type="file" id="file-input" style="display:none;" onchange="sendFile(event)">
       <div class="reply-bar" id="reply-bar" style="display:none;">
         <div class="reply-bar-quote" id="reply-bar-quote"></div>
         <button class="reply-bar-cancel" onclick="clearReply()">✕</button>
@@ -807,6 +819,7 @@
       </div>
       <div class="input-area">
         <button class="icon-btn" onclick="toggleStickerPanel()" title="Стикеры" style="flex-shrink:0;">😊</button>
+        <button class="attach-btn" onclick="pickFile()" title="Прикрепить файл">📎</button>
         <div class="input-wrap">
           <input type="text" class="msg-input" id="msg-input" placeholder="Написать сообщение..." onkeydown="handleKey(event)">
         </div>
@@ -2562,7 +2575,7 @@
       const lastText = last
         ? (last.system
             ? `<i>${esc(last.text)}</i>`
-            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.enc?.ct ? '🔒 Сообщение' : esc(last.enc?.plain || last.text || '')))
+            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.isFile ? '📎 Вложение' : last.enc?.ct ? '🔒 Сообщение' : esc(last.enc?.plain || last.text || '')))
         : 'Нет сообщений';
       const item = document.createElement('div');
       item.className = 'chat-item' + (currentChat===nick?' active':'');
@@ -2649,7 +2662,24 @@
       const unlockDate = msg.unlockAt ? new Date(msg.unlockAt).toLocaleString('ru',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}) : '';
 
       let bubbleContent, isSticker = false;
-      if (text.startsWith('__STICKER__')) {
+      const fileMeta = parseFileMeta(text);
+      if (fileMeta) {
+        const isImg = /^image\//.test(fileMeta.mime || '');
+        bubbleContent = isImg
+          // Картинку не тянем сразу: сначала показываем заглушку, грузим по нажатию
+          ? `<div class="file-holder" data-file-idx="${idx}">
+               <button class="file-card" onclick="revealImage(${idx})">
+                 <span class="file-ico">🖼</span>
+                 <span class="file-info"><span class="file-name">${esc(fileMeta.name || 'Изображение')}</span>
+                 <span class="file-sub">${humanSize(fileMeta.size || 0)} · нажми, чтобы показать</span></span>
+               </button>
+             </div>`
+          : `<button class="file-card" onclick="saveFile(${idx})">
+               <span class="file-ico">${fileIcon(fileMeta.mime || '')}</span>
+               <span class="file-info"><span class="file-name">${esc(fileMeta.name || 'Файл')}</span>
+               <span class="file-sub">${humanSize(fileMeta.size || 0)} · нажми, чтобы сохранить</span></span>
+             </button>`;
+      } else if (text.startsWith('__STICKER__')) {
         isSticker = true;
         const rest = text.slice(11);
         const colonIdx = rest.indexOf(':');
@@ -3862,6 +3892,182 @@
   }
 
   // ===== СТИКЕРЫ =====
+  // ===== ВЛОЖЕНИЯ =====
+  // Файл шифруется тем же ключом, что и переписка, и уходит в хранилище.
+  // В сообщение попадает только опознаватель — сервер не знает ни имени
+  // файла, ни его содержимого.
+  const FILE_MAX = 3 * 1024 * 1024;
+  const IMAGE_SIDE = 1600;          // фото не сжимаем в мыло, но и не тащим оригинал
+  const IMAGE_BYTES = 900 * 1024;
+  const blobCache = {};             // опознаватель -> расшифрованный объект
+
+  function humanSize(n) {
+    if (n < 1024) return n + ' Б';
+    if (n < 1024 * 1024) return Math.round(n / 1024) + ' КБ';
+    return (n / 1024 / 1024).toFixed(1) + ' МБ';
+  }
+
+  async function encryptBytes(peer, bytes) {
+    const key = await pairKey(peer);
+    if (!key) return null;
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes);
+    return { iv: b64(iv), data: b64(ct) };
+  }
+
+  async function decryptBytes(peer, ivB64, cipher) {
+    const key = await pairKey(peer);
+    if (!key) return null;
+    try {
+      return await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(ivB64) }, key, cipher);
+    } catch (e) { return null; }
+  }
+
+  function pickFile() { document.getElementById('file-input')?.click(); }
+
+  async function sendFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file || !currentChat) return;
+    if (currentChat.startsWith('__lan__:')) { showToast('В LAN-чате вложения пока не работают'); return; }
+    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
+    if (!(myRawPass && dmWsAuthOk && dmWs?.readyState === 1)) {
+      showToast('Нет связи с сервером — файл не отправлен');
+      dmWakeCheck();
+      return;
+    }
+
+    // Размер проверяем сразу: незачем показывать «готовлю», если файл всё
+    // равно не пройдёт. Для картинок предел мягче — их ещё сожмут.
+    let mime = file.type || 'application/octet-stream';
+    const isImage = mime.startsWith('image/');
+    if (!isImage && file.size > FILE_MAX) {
+      showToast('Файл больше ' + humanSize(FILE_MAX));
+      return;
+    }
+    if (isImage && file.size > 25 * 1024 * 1024) {
+      showToast('Картинка больше 25 МБ');
+      return;
+    }
+
+    showToast('Готовлю файл...');
+    let bytes, name = file.name || 'файл';
+
+    try {
+      if (isImage) {
+        // Фото с камеры весит мегабайты — ужимаем, но оставляем читаемым
+        const dataUrl = await compressImage(file, IMAGE_SIDE, IMAGE_BYTES);
+        mime = (dataUrl.match(/^data:([^;]+)/) || [, 'image/jpeg'])[1];
+        bytes = unb64(dataUrl.split(',')[1]);
+        name = name.replace(/\.[^.]+$/, '') + '.' + mime.split('/')[1];
+      } else {
+        bytes = new Uint8Array(await file.arrayBuffer());
+      }
+    } catch (err) { showToast(err.message || 'Не удалось прочитать файл'); return; }
+
+    if (bytes.length > FILE_MAX) { showToast('Файл больше ' + humanSize(FILE_MAX)); return; }
+
+    const enc = await encryptBytes(currentChat, bytes);
+    if (!enc) { showToast('Собеседник ещё ни разу не заходил — отправить нельзя'); return; }
+
+    let blobId;
+    try {
+      const r = await fetch(API + '/api/blob/put', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass, data: enc.data })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { showToast(d.error || 'Не удалось загрузить файл'); return; }
+      blobId = d.id;
+    } catch (err) { showToast('Нет связи с сервером'); return; }
+
+    const meta = { id: blobId, iv: enc.iv, name: name.slice(0, 80), mime, size: bytes.length };
+    const payloadText = '__FILE__' + JSON.stringify(meta);
+    const mid = newMid();
+
+    const cipher = await e2eEncrypt(currentChat, payloadText);
+    if (!cipher) { showToast('Не удалось зашифровать'); return; }
+    dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: cipher, mid }));
+
+    // Своё вложение уже расшифровано — кладём в память, чтобы не качать назад
+    blobCache[blobId] = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+
+    chats[currentChat].messages.push({
+      enc: await encryptText(payloadText), own: true, time: now(),
+      timestamp: Date.now(), mid, isFile: true
+    });
+    playSound();
+    renderMessages();
+    renderChatList();
+    saveState();
+  }
+
+  // Подгружаем и расшифровываем вложение по требованию
+  async function loadBlob(peer, meta) {
+    if (blobCache[meta.id]) return blobCache[meta.id];
+    try {
+      const r = await fetch(API + '/api/blob/get', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass, id: meta.id })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return null;
+      const plain = await decryptBytes(peer, meta.iv, unb64(d.data));
+      if (!plain) return null;
+      blobCache[meta.id] = plain;
+      return plain;
+    } catch (e) { return null; }
+  }
+
+  // Показ картинки внутри переписки
+  async function revealImage(idx) {
+    const msg = chats[currentChat]?.messages[idx];
+    if (!msg) return;
+    const meta = parseFileMeta(await decryptText(msg.enc));
+    if (!meta) return;
+    const holder = document.querySelector('[data-file-idx="' + idx + '"]');
+    if (holder) holder.innerHTML = '<div class="file-loading">Загружаю...</div>';
+    const buf = await loadBlob(currentChat, meta);
+    if (!buf) { if (holder) holder.innerHTML = '<div class="file-loading">Не удалось открыть</div>'; return; }
+    const url = URL.createObjectURL(new Blob([buf], { type: meta.mime }));
+    if (holder) holder.innerHTML = '<img class="msg-image" src="' + url + '" alt="">';
+  }
+
+  // Сохранение файла на устройство
+  async function saveFile(idx) {
+    const msg = chats[currentChat]?.messages[idx];
+    if (!msg) return;
+    const meta = parseFileMeta(await decryptText(msg.enc));
+    if (!meta) return;
+    showToast('Загружаю...');
+    const buf = await loadBlob(currentChat, meta);
+    if (!buf) { showToast('Не удалось загрузить'); return; }
+    const url = URL.createObjectURL(new Blob([buf], { type: meta.mime }));
+    const a = document.createElement('a');
+    a.href = url; a.download = meta.name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  function parseFileMeta(text) {
+    if (typeof text !== 'string' || !text.startsWith('__FILE__')) return null;
+    try {
+      const m = JSON.parse(text.slice(8));
+      return (m && typeof m.id === 'string') ? m : null;
+    } catch (e) { return null; }
+  }
+
+  function fileIcon(mime) {
+    if (/^image\//.test(mime)) return '🖼';
+    if (/^video\//.test(mime)) return '🎬';
+    if (/^audio\//.test(mime)) return '🎵';
+    if (/pdf/.test(mime)) return '📕';
+    if (/zip|rar|7z|tar|gz/.test(mime)) return '🗜';
+    if (/word|document|text/.test(mime)) return '📄';
+    if (/sheet|excel|csv/.test(mime)) return '📊';
+    return '📎';
+  }
+
   // ===== СВОИ СТИКЕРЫ =====
   // Рисуем сами, а не берём системные эмодзи: на разных телефонах они
   // выглядят по-разному, а эти везде одинаковые. В сообщении передаётся

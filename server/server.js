@@ -21,6 +21,10 @@ const MAX_AVATAR    = 96 * 1024;        // аватар тоже data:URI
 const MAX_EVIDENCE      = 3;            // сколько скриншотов можно приложить к бану
 const MAX_EVIDENCE_SIZE = 200 * 1024;   // на каждый
 const MAX_BAN_BODY      = 1024 * 1024;  // тело запроса на блокировку
+// Вложения: файл шифруется на устройстве, сервер хранит непрозрачные байты
+const MAX_BLOB      = 3 * 1024 * 1024;
+const MAX_BLOB_BODY = 5 * 1024 * 1024;
+const TTL_BLOB      = 30 * 86400000;
 const MAX_AVATAR_BODY = 128 * 1024;     // тело запроса с аватаром
 const MAX_PAYLOAD   = 512 * 1024;       // максимум размера WS-кадра (шифротекст крупнее)
 const MAX_PEERS     = 16;               // максимум участников LAN-комнаты
@@ -57,6 +61,15 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT
   );
+  CREATE TABLE IF NOT EXISTS blobs (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    data BLOB NOT NULL,
+    size INTEGER NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_blobs_owner ON blobs(owner);
+  CREATE INDEX IF NOT EXISTS idx_blobs_ts ON blobs(created_at);
   CREATE TABLE IF NOT EXISTS push_subs (
     nick TEXT NOT NULL,
     device_id TEXT NOT NULL,
@@ -146,6 +159,10 @@ const qReadSync    = db.prepare(`
 `);
 // IP-адреса намеренно не сохраняем: в политике конфиденциальности написано,
 // что они в базу не попадают. Хватает названия устройства и времени.
+const qPutBlob     = db.prepare('INSERT INTO blobs (id, owner, data, size, created_at) VALUES (?, ?, ?, ?, ?)');
+const qGetBlob     = db.prepare('SELECT data, size FROM blobs WHERE id = ?');
+const qDropBlobsOf = db.prepare('DELETE FROM blobs WHERE owner = ?');
+const qBlobUsage   = db.prepare('SELECT COALESCE(SUM(size), 0) AS total FROM blobs WHERE owner = ?');
 const qGetSetting  = db.prepare('SELECT value FROM settings WHERE key = ?');
 const qSetSetting  = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
 const qAddPush     = db.prepare(`
@@ -806,6 +823,61 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ===== ВЛОЖЕНИЯ =====
+  // Файл приходит уже зашифрованным ключом переписки. Сервер хранит набор
+  // байтов и не знает ни имени файла, ни его содержимого — всё это лежит
+  // внутри зашифрованного сообщения.
+  if (req.method === 'POST' && url.pathname === '/api/blob/put') {
+    if (!rateLimit('blobput:' + clientIp(req), 60, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+
+      const b64 = typeof body.data === 'string' ? body.data : '';
+      if (!b64) return json(400, { error: 'Пустое вложение' });
+      let buf;
+      try { buf = Buffer.from(b64, 'base64'); } catch (e) { return json(400, { error: 'Испорченное вложение' }); }
+      if (!buf.length || buf.length > MAX_BLOB) {
+        return json(413, { error: 'Файл слишком большой' });
+      }
+      // Ограничиваем общий объём на аккаунт, иначе диск можно забить
+      const used = qBlobUsage.get(u.nick).total;
+      if (used + buf.length > 200 * 1024 * 1024) {
+        return json(413, { error: 'Превышен объём вложений' });
+      }
+
+      const id = crypto.randomBytes(24).toString('hex');
+      qPutBlob.run(id, u.nick, buf, buf.length, Date.now());
+      console.log('[blob] Принято', Math.round(buf.length / 1024), 'КБ от', u.nick);
+      json(200, { ok: true, id, size: buf.length });
+    }, MAX_BLOB_BODY);
+    return;
+  }
+
+  // Опознаватель вложения — случайные 24 байта, угадать его нельзя.
+  // Вход по аккаунту всё равно требуем, чтобы вложения нельзя было выкачивать
+  // без учётной записи.
+  if (req.method === 'POST' && url.pathname === '/api/blob/get') {
+    if (!rateLimit('blobget:' + clientIp(req), 300, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+
+      const id = typeof body.id === 'string' ? body.id : '';
+      if (!/^[0-9a-f]{48}$/.test(id)) return json(400, { error: 'Неверный опознаватель' });
+      const row = qGetBlob.get(id);
+      if (!row) return json(404, { error: 'Вложение не найдено' });
+      json(200, { ok: true, data: Buffer.from(row.data).toString('base64'), size: row.size });
+    });
+    return;
+  }
+
   // ===== УВЕДОМЛЕНИЯ =====
   // Открытый ключ нужен браузеру, чтобы оформить подписку. Он публичный.
   if (req.method === 'GET' && url.pathname === '/api/push/key') {
@@ -866,6 +938,7 @@ const server = http.createServer((req, res) => {
       const msgs = qDeleteMsgs.run(u.nick, u.nick).changes;
       qDropDevices.run(u.nick);
       qDropPushAll.run(u.nick);
+      qDropBlobsOf.run(u.nick);
       qDeleteUser.run(u.nick);
       kickUser(u.nick, 'deleted');
       console.log('[account] Удалён самим владельцем:', u.nick, '| сообщений удалено:', msgs);
@@ -1126,6 +1199,8 @@ const server = http.createServer((req, res) => {
       // остаются — сервер их не контролирует.
       if (action === 'purge-messages') {
         const removed = qPurgeMsgs.run().changes;
+        const blobs = db.prepare('DELETE FROM blobs').run().changes;
+        if (blobs) console.log('[admin] PURGE: удалено вложений:', blobs);
         console.log('[admin] PURGE: удалено сообщений с сервера:', removed);
         return withSession(200, { ok: true, removed, users: listUsers() });
       }
@@ -1174,6 +1249,7 @@ const server = http.createServer((req, res) => {
         const msgs = qDeleteMsgs.run(target.nick, target.nick).changes;
         qDropDevices.run(target.nick);
         qDropPushAll.run(target.nick);
+        qDropBlobsOf.run(target.nick);
         qDeleteUser.run(target.nick);
         const kicked = kickUser(target.nick, 'deleted', reason);
         console.log('[admin] DELETE', target.nick, reason ? '(' + reason + ')' : '', '| сообщений удалено:', msgs);
@@ -1528,7 +1604,9 @@ const cleanup = setInterval(() => {
     const now = Date.now();
     const a = db.prepare('DELETE FROM messages WHERE delivered = 1 AND timestamp < ?').run(now - TTL_DELIVERED);
     const b = db.prepare('DELETE FROM messages WHERE delivered = 0 AND timestamp < ?').run(now - TTL_PENDING);
+    const c = db.prepare('DELETE FROM blobs WHERE created_at < ?').run(now - TTL_BLOB);
     if (a.changes || b.changes) console.log('[cleanup] Удалено сообщений:', a.changes + b.changes);
+    if (c.changes) console.log('[cleanup] Удалено вложений:', c.changes);
   } catch (e) {
     console.error('[cleanup]', e.message);
   }
