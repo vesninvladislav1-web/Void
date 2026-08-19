@@ -240,9 +240,11 @@
   .msg-time { font-size:10px; color:var(--text3); font-family:'Space Mono',monospace; margin-top:3px; padding:0 4px; display:flex; align-items:center; gap:3px; }
   .msg-time.own { justify-content:flex-end; }
   .msg-time.other { padding-left:36px; }
-  .check { color:var(--accent); display:inline-flex; align-items:center; }
+  .check { color:var(--text3); display:inline-flex; align-items:center; }
+  .check.read { color:var(--accent); }
   .msg-edited { font-size:10px; color:var(--text3); font-style:italic; }
   .check-ico { width:11px; height:11px; }
+  .check-ico.check2 { width:15px; }
 
   /* Typing indicator */
   .typing-bubble { display:flex; gap:4px; align-items:center; padding:12px 16px; }
@@ -1583,7 +1585,11 @@
     connectDmWs();
   }
 
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) dmWakeCheck(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    dmWakeCheck();
+    if (currentChat) reportRead(currentChat);
+  });
   window.addEventListener('online', dmWakeCheck);
   window.addEventListener('focus', dmWakeCheck);
 
@@ -1665,6 +1671,36 @@
     return (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now().toString(36)).slice(0, 36);
   }
 
+  // Сообщаем собеседнику, что его письма прочитаны. Отправляем только то,
+  // о чём ещё не сообщали, иначе на каждой перерисовке шёл бы поток запросов.
+  function reportRead(nick) {
+    if (!nick || nick.startsWith('__lan__:')) return;
+    if (!dmWsAuthOk || dmWs?.readyState !== 1) return;
+    const chat = chats[nick];
+    if (!chat) return;
+    const mids = [];
+    for (const m of chat.messages) {
+      if (m.own || !m.mid || m.readSent) continue;
+      m.readSent = true;
+      mids.push(m.mid);
+    }
+    if (!mids.length) return;
+    dmWs.send(JSON.stringify({ type: 'dm-read', to: nick, mids: mids.slice(0, 200) }));
+    saveState();
+  }
+
+  // Пришла отметка: помечаем свои письма прочитанными
+  function applyRead(peer, mids) {
+    const chat = chats[peer];
+    if (!chat) return false;
+    const set = new Set(mids);
+    let changed = false;
+    for (const m of chat.messages) {
+      if (m.own && m.mid && set.has(m.mid) && !m.read) { m.read = true; changed = true; }
+    }
+    return changed;
+  }
+
   async function handleIncomingDm(msg) {
     const key = msg.from;
     const text = await e2eDecrypt(key, msg.text);
@@ -1676,7 +1712,11 @@
     chats[key].messages.push({ enc, own: false, time: timeStr, timestamp: msg.timestamp, mid: msg.mid });
     if (currentChat !== key) { chats[key].unread = (chats[key].unread || 0) + 1; }
     saveState();
-    if (currentChat === key) renderMessages();
+    if (currentChat === key) {
+      renderMessages();
+      // Чат открыт прямо сейчас — значит письмо сразу прочитано
+      if (!document.hidden) reportRead(key);
+    }
     renderChatList();
     sendNotification(key, text.startsWith('__STICKER__') ? '🎭 Стикер' : text);
   }
@@ -1854,6 +1894,24 @@
         // Написано с другого моего устройства — кладём к себе как своё
         if (msg.type === 'dm-echo') {
           handleOwnEcho(msg);
+          return;
+        }
+
+        if (msg.type === 'dm-read') {
+          if (applyRead(msg.from, msg.mids || [])) {
+            saveState();
+            if (currentChat === msg.from) renderMessages();
+          }
+          return;
+        }
+
+        // При входе сервер досылает, что прочли, пока нас не было
+        if (msg.type === 'dm-read-sync') {
+          let changed = false;
+          for (const it of msg.items || []) {
+            if (applyRead(it.peer, [it.mid])) changed = true;
+          }
+          if (changed) { saveState(); if (currentChat) renderMessages(); }
           return;
         }
 
@@ -2478,6 +2536,7 @@
     document.getElementById('cv-name').textContent = '@' + nick;
     document.getElementById('cv-sub').textContent = '';
     updateE2EBadge(nick);
+    reportRead(nick);
     applyBg(chats[nick].bg || '');
     renderMessages();
     renderChatList();
@@ -2536,7 +2595,7 @@
       const replyQuote = msg.reply ? `<div class="reply-quote">↩ ${esc(msg.reply.text.slice(0,60))}</div>` : '';
       const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">↩</button>`;
       const editedMark = msg.edited ? '<span class="msg-edited">изменено</span> ' : '';
-      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${editedMark}${msg.time}${msg.own?' <span class="check">'+CHECK_ICON+'</span>':''}</span>`;
+      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${editedMark}${msg.time}${msg.own?' <span class="check'+(msg.read?' read':'')+'">'+(msg.read?CHECK2_ICON:CHECK_ICON)+'</span>':''}</span>`;
       const reactionsHtml = (msg.reactions && msg.reactions.length)
         ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
@@ -3754,6 +3813,8 @@
 
   // Галочка «доставлено» — тоже своя, а не системный символ
   const CHECK_ICON = '<svg class="check-ico" viewBox="0 0 16 16"><path d="M2 8.6l4 4L14 3.4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  // Две галочки — прочитано
+  const CHECK2_ICON = '<svg class="check-ico check2" viewBox="0 0 22 16"><path d="M1 8.6l4 4L13 3.4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M8 12.6l1 1L21 3.4" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   let customStickers = [];
 

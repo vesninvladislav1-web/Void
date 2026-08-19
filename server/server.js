@@ -74,6 +74,9 @@ db.exec(`
   // Опознаватель сообщения: нужен, чтобы удалять и править его у обеих сторон.
   // Значение случайное и о содержимом ничего не говорит.
   if (!mcols.includes('mid')) db.exec('ALTER TABLE messages ADD COLUMN mid TEXT');
+  // Отметка о прочтении. Нужна, чтобы отправитель видел вторую галочку даже
+  // если его не было в сети в момент прочтения.
+  if (!mcols.includes('read')) db.exec('ALTER TABLE messages ADD COLUMN read INTEGER DEFAULT 0');
   db.exec('CREATE INDEX IF NOT EXISTS idx_messages_mid ON messages(mid)');
 
   const cols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
@@ -120,6 +123,13 @@ const qInsertMsg   = db.prepare('INSERT INTO messages (from_nick, to_nick, text,
 const qDropByMid   = db.prepare('DELETE FROM messages WHERE mid = ? AND from_nick = ? AND to_nick = ?');
 const qEditByMid   = db.prepare('UPDATE messages SET text = ? WHERE mid = ? AND from_nick = ? AND to_nick = ?');
 const qMidExists   = db.prepare('SELECT 1 FROM messages WHERE mid = ? LIMIT 1');
+const qMarkRead    = db.prepare('UPDATE messages SET read = 1 WHERE mid = ? AND to_nick = ? AND from_nick = ?');
+// При входе отдаём отправителю, что из написанного им уже прочли
+const qReadSync    = db.prepare(`
+  SELECT mid, to_nick FROM messages
+  WHERE from_nick = ? AND read = 1 AND mid IS NOT NULL
+  ORDER BY timestamp DESC LIMIT 500
+`);
 // IP-адреса намеренно не сохраняем: в политике конфиденциальности написано,
 // что они в базу не попадают. Хватает названия устройства и времени.
 const qUpsertDevice = db.prepare(`
@@ -1064,6 +1074,12 @@ wss.on('connection', (ws, req) => {
         send({ type: 'auth-ok', nick, admin: u.is_admin, device: ws.deviceId });
         console.log('[auth] OK for', nick, '|', devName || 'устройство', '| всего онлайн:', Object.keys(online).length);
 
+        // Что из написанного этим человеком уже прочитали, пока его не было
+        const readRows = qReadSync.all(nick);
+        if (readRows.length) {
+          send({ type: 'dm-read-sync', items: readRows.map(r => ({ mid: r.mid, peer: r.to_nick })) });
+        }
+
         // Доставить накопленные сообщения (помечаем каждое по id, а не пачкой:
         // иначе пришедшее в этот момент новое сообщение было бы потеряно)
         const pending = qPending.all(nick);
@@ -1138,6 +1154,29 @@ wss.on('connection', (ws, req) => {
         qInsertMsg.run(nick, toNick, text, timestamp, live ? 1 : 0, mid);
         console.log(live ? '[dm] Delivered' : '[dm] Stored (offline)', nick, '->', toNick);
         send({ type: 'dm-ack', to: toNick, timestamp, delivered: live ? 1 : 0 });
+        return;
+      }
+
+      // --- Прочитано ---
+      if (msg.type === 'dm-read') {
+        if (!nick) return;
+        if (!rateLimit('dmread:' + nick, 120, 10000)) return;
+        const to = typeof msg.to === 'string' ? msg.to.trim() : '';
+        const mids = Array.isArray(msg.mids)
+          ? msg.mids.filter(m => typeof m === 'string' && m.length <= 40).slice(0, 200)
+          : [];
+        if (!to || !mids.length) return;
+        const target = qNickExists.get(to);
+        if (!target) return;
+
+        // Помечаем только письма, написанные этим автором именно читателю
+        for (const m of mids) { try { qMarkRead.run(m, nick, target.nick); } catch (e) {} }
+
+        // Сообщаем автору на все его устройства
+        const note = JSON.stringify({ type: 'dm-read', from: nick, mids });
+        for (const w of socketsOf(target.nick)) {
+          if (w.readyState === 1) { try { w.send(note); } catch (e) {} }
+        }
         return;
       }
 
