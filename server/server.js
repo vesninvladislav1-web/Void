@@ -89,6 +89,17 @@ db.exec(`
     PRIMARY KEY (nick, device_id)
   );
   CREATE INDEX IF NOT EXISTS idx_devices_nick ON devices(nick);
+  -- Чёрный список. owner решил не получать ничего от target.
+  -- Хранится на сервере, а не на устройстве, потому что отсекать сообщения
+  -- надо до доставки — иначе они всё равно приходили бы и будили телефон.
+  CREATE TABLE IF NOT EXISTS blocks (
+    owner TEXT NOT NULL,
+    target TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (owner, target)
+  );
+  CREATE INDEX IF NOT EXISTS idx_blocks_owner  ON blocks(owner);
+  CREATE INDEX IF NOT EXISTS idx_blocks_target ON blocks(target);
   CREATE INDEX IF NOT EXISTS idx_users_nick_nocase ON users(nick COLLATE NOCASE);
   CREATE INDEX IF NOT EXISTS idx_messages_inbox    ON messages(to_nick, delivered);
   CREATE INDEX IF NOT EXISTS idx_messages_from     ON messages(from_nick);
@@ -127,6 +138,10 @@ db.exec(`
   if (!cols.includes('totp_secret'))  db.exec('ALTER TABLE users ADD COLUMN totp_secret TEXT');
   if (!cols.includes('totp_pending')) db.exec('ALTER TABLE users ADD COLUMN totp_pending TEXT');
   if (!cols.includes('totp_last'))    db.exec('ALTER TABLE users ADD COLUMN totp_last INTEGER');
+  // Когда человек был на связи в последний раз. Показывать это или нет —
+  // выбирает он сам, поэтому рядом лежит его решение.
+  if (!cols.includes('last_seen'))     db.exec('ALTER TABLE users ADD COLUMN last_seen INTEGER');
+  if (!cols.includes('hide_presence')) db.exec('ALTER TABLE users ADD COLUMN hide_presence INTEGER DEFAULT 0');
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_seed ON users(seed_lookup) WHERE seed_lookup IS NOT NULL');
 }
 
@@ -180,6 +195,16 @@ const qListDevices = db.prepare('SELECT device_id, name, created_at, last_seen F
 const qDropDevice  = db.prepare('DELETE FROM devices WHERE nick = ? AND device_id = ?');
 const qDropDevices = db.prepare('DELETE FROM devices WHERE nick = ?');
 const qSetPassword = db.prepare('UPDATE users SET password_hash = ?, enc_private_key = ? WHERE nick = ?');
+const qTouchSeen   = db.prepare('UPDATE users SET last_seen = ? WHERE nick = ?');
+const qPresence    = db.prepare('SELECT nick, last_seen, hide_presence FROM users WHERE nick = ? COLLATE NOCASE');
+const qSetHide     = db.prepare('UPDATE users SET hide_presence = ? WHERE nick = ?');
+const qGetHide     = db.prepare('SELECT hide_presence FROM users WHERE nick = ?');
+const qBlockAdd    = db.prepare('INSERT OR IGNORE INTO blocks (owner, target, created_at) VALUES (?, ?, ?)');
+const qBlockDrop   = db.prepare('DELETE FROM blocks WHERE owner = ? AND target = ?');
+const qBlockList   = db.prepare('SELECT target, created_at FROM blocks WHERE owner = ? ORDER BY created_at DESC');
+const qBlockCheck  = db.prepare('SELECT 1 FROM blocks WHERE owner = ? AND target = ? LIMIT 1');
+const qBlockCount  = db.prepare('SELECT COUNT(*) AS n FROM blocks WHERE owner = ?');
+const qBlockWipe   = db.prepare('DELETE FROM blocks WHERE owner = ? OR target = ?');
 const qGetTotp     = db.prepare('SELECT totp_secret, totp_pending, totp_last FROM users WHERE nick = ?');
 const qSetPending  = db.prepare('UPDATE users SET totp_pending = ? WHERE nick = ?');
 const qEnableTotp  = db.prepare('UPDATE users SET totp_secret = ?, totp_pending = NULL, totp_last = ? WHERE nick = ?');
@@ -221,6 +246,13 @@ function removeOnline(nick, ws) {
 function socketsOf(nick) { return online[nick] ? [...online[nick]] : []; }
 function isOnline(nick) { return !!(online[nick] && online[nick].size); }
 function deviceCount(nick) { return online[nick] ? online[nick].size : 0; }
+
+// Заблокировал ли `owner` человека по имени `target`.
+// Ники сравниваем в том виде, в каком они лежат в таблице аккаунтов,
+// поэтому вызывающий обязан подставлять канонические.
+function isBlocked(owner, target) {
+  try { return !!qBlockCheck.get(owner, target); } catch (e) { return false; }
+}
 
 // ===== ПАРОЛИ =====
 // Новый формат: s2$<salt>$<key> (scrypt). Старый: голый sha256-hex — принимаем
@@ -589,6 +621,7 @@ function ensureAdmin() {
     // Ник занят обычным пользователем — вот теперь действительно сносим
     if (existing) {
       qDeleteMsgs.run(existing.nick, existing.nick);
+      qBlockWipe.run(existing.nick, existing.nick);
       qDeleteUser.run(existing.nick);
       kickUser(existing.nick, 'admin-reset');
       console.log('[admin] Ник', existing.nick, 'был занят обычным аккаунтом — освобождён');
@@ -878,6 +911,64 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Показывать ли, когда я был в сети
+  if (req.method === 'POST' && url.pathname === '/api/account/privacy') {
+    if (!rateLimit('priv:' + clientIp(req), 30, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (typeof body.hidePresence === 'boolean') {
+        qSetHide.run(body.hidePresence ? 1 : 0, u.nick);
+        console.log('[privacy]', u.nick, body.hidePresence ? 'скрыл статус' : 'показывает статус');
+      }
+      const row = qGetHide.get(u.nick) || {};
+      json(200, { ok: true, hidePresence: !!row.hide_presence });
+    });
+    return;
+  }
+
+  // ===== ЧЁРНЫЙ СПИСОК =====
+  // Один вход на все три действия: показать список, добавить, убрать.
+  // Список отдаём только владельцу — узнать, кто тебя заблокировал, нельзя.
+  if (req.method === 'POST' && url.pathname === '/api/account/blocks') {
+    if (!rateLimit('blocks:' + clientIp(req), 120, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+
+      const action = typeof body.action === 'string' ? body.action : 'list';
+      const rawTarget = typeof body.target === 'string' ? body.target.trim() : '';
+
+      if (action === 'add' || action === 'remove') {
+        if (!rawTarget) return json(400, { error: 'Не указан ник' });
+        // Приводим к каноническому виду: иначе «vasya» и «Vasya» дали бы
+        // две разные записи, и блокировка обходилась бы сменой регистра
+        const t = qNickExists.get(rawTarget);
+        if (!t) return json(404, { error: 'Такого ника нет' });
+        if (t.nick === u.nick) return json(400, { error: 'Себя блокировать незачем' });
+
+        if (action === 'add') {
+          if (qBlockCount.get(u.nick).n >= 500) return json(400, { error: 'Список переполнен' });
+          qBlockAdd.run(u.nick, t.nick, Date.now());
+          console.log('[blocks]', u.nick, 'заблокировал', t.nick);
+        } else {
+          qBlockDrop.run(u.nick, t.nick);
+          console.log('[blocks]', u.nick, 'разблокировал', t.nick);
+        }
+      } else if (action !== 'list') {
+        return json(400, { error: 'Неизвестное действие' });
+      }
+
+      json(200, { ok: true, blocked: qBlockList.all(u.nick).map(r => ({ nick: r.target, at: r.created_at })) });
+    });
+    return;
+  }
+
   // ===== УВЕДОМЛЕНИЯ =====
   // Открытый ключ нужен браузеру, чтобы оформить подписку. Он публичный.
   if (req.method === 'GET' && url.pathname === '/api/push/key') {
@@ -939,6 +1030,7 @@ const server = http.createServer((req, res) => {
       qDropDevices.run(u.nick);
       qDropPushAll.run(u.nick);
       qDropBlobsOf.run(u.nick);
+      qBlockWipe.run(u.nick, u.nick);
       qDeleteUser.run(u.nick);
       kickUser(u.nick, 'deleted');
       console.log('[account] Удалён самим владельцем:', u.nick, '| сообщений удалено:', msgs);
@@ -1250,6 +1342,7 @@ const server = http.createServer((req, res) => {
         qDropDevices.run(target.nick);
         qDropPushAll.run(target.nick);
         qDropBlobsOf.run(target.nick);
+        qBlockWipe.run(target.nick, target.nick);
         qDeleteUser.run(target.nick);
         const kicked = kickUser(target.nick, 'deleted', reason);
         console.log('[admin] DELETE', target.nick, reason ? '(' + reason + ')' : '', '| сообщений удалено:', msgs);
@@ -1332,6 +1425,8 @@ wss.on('connection', (ws, req) => {
 
   const goOffline = () => {
     if (nick) {
+      // Запоминаем момент ухода, чтобы собеседник видел «был недавно»
+      try { qTouchSeen.run(Date.now(), nick); } catch (e) {}
       removeOnline(nick, ws);
       console.log('[close]', nick, '| всего онлайн:', Object.keys(online).length);
     }
@@ -1384,6 +1479,7 @@ wss.on('connection', (ws, req) => {
         catch (e) { console.error('[device]', e.message); }
 
         addOnline(nick, ws);
+        try { qTouchSeen.run(nowTs, nick); } catch (e) {}
         send({ type: 'auth-ok', nick, admin: u.is_admin, device: ws.deviceId });
         console.log('[auth] OK for', nick, '|', devName || 'устройство', '| всего онлайн:', Object.keys(online).length);
 
@@ -1441,6 +1537,26 @@ wss.on('connection', (ws, req) => {
         if (target.banned) { send({ type: 'dm-error', to, error: 'user-banned' }); return; }
 
         const toNick = target.nick;
+
+        // Получатель внёс отправителя в чёрный список. Письмо не доставляется и
+        // не сохраняется — оно не долежит до разблокировки. Отправителю об этом
+        // не сообщаем: иначе блокировка сама себя выдавала бы, и человек просто
+        // завёл бы второй ник. Для него всё выглядит как «ушло, но не прочли».
+        if (isBlocked(toNick, nick)) {
+          const ts = Date.now();
+          // На другие свои устройства отголосок всё же шлём: это его
+          // собственный текст, и на втором телефоне переписка должна совпадать
+          const selfEcho = JSON.stringify({ type: 'dm-echo', to: toNick, text, timestamp: ts,
+            mid: typeof msg.mid === 'string' ? msg.mid : crypto.randomUUID() });
+          for (const ows of socketsOf(nick)) {
+            if (ows === ws || ows.readyState !== 1) continue;
+            try { ows.send(selfEcho); } catch (e) {}
+          }
+          console.log('[dm] Dropped (blocked)', nick, '->', toNick);
+          send({ type: 'dm-ack', to: toNick, timestamp: ts, delivered: 0 });
+          return;
+        }
+
         const timestamp = Date.now();
         // Повторный опознаватель сломал бы правку и удаление: они задели бы
         // сразу два сообщения, поэтому при совпадении выдаём свой
@@ -1470,6 +1586,29 @@ wss.on('connection', (ws, req) => {
         // Текст зашифрован и серверу неизвестен, поэтому шлём только имя.
         if (!live) notifyOffline(toNick, { from: nick, at: timestamp });
         send({ type: 'dm-ack', to: toNick, timestamp, delivered: live ? 1 : 0 });
+        return;
+      }
+
+      // --- Кто из собеседников на связи ---
+      if (msg.type === 'presence') {
+        if (!nick) return;
+        if (!rateLimit('presence:' + nick, 120, 60000)) return;
+        const nicks = Array.isArray(msg.nicks)
+          ? msg.nicks.filter(n => typeof n === 'string' && n.trim()).slice(0, 50)
+          : [];
+        const items = [];
+        for (const n of nicks) {
+          const row = qPresence.get(n.trim());
+          if (!row) continue;
+          // Человек мог закрыть свой статус или занести спрашивающего
+          // в чёрный список — в обоих случаях не говорим ничего
+          if (row.hide_presence || isBlocked(row.nick, nick)) {
+            items.push({ nick: row.nick, hidden: true });
+            continue;
+          }
+          items.push({ nick: row.nick, online: isOnline(row.nick), lastSeen: row.last_seen || null });
+        }
+        send({ type: 'presence', items });
         return;
       }
 

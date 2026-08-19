@@ -171,6 +171,14 @@
   .chats-search-icon { position:absolute; left:28px; top:50%; transform:translateY(-50%); color:var(--text3); font-size:13px; pointer-events:none; }
   .chats-search { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:12px; padding:9px 14px 9px 36px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; transition:border 0.2s; }
   .chats-search:focus { border-color:var(--accent); }
+  /* Поиск внутри переписки */
+  .chat-search { display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid var(--border); background:var(--bg2); flex-shrink:0; }
+  .chat-search input { flex:1; min-width:0; background:var(--bg3); border:1px solid var(--border); border-radius:10px; padding:8px 12px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; }
+  .chat-search input:focus { border-color:var(--accent); }
+  .chat-search-count { font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; white-space:nowrap; }
+  .chat-search .icon-btn { width:30px; height:30px; font-size:13px; flex-shrink:0; }
+  mark.hl { background:rgba(245,158,11,0.45); color:inherit; border-radius:3px; padding:0 1px; }
+  .msg-wrap.search-current .bubble { outline:2px solid var(--accent); outline-offset:2px; }
 
   .chats-list { flex:1; overflow-y:auto; }
   .chats-list::-webkit-scrollbar { width:3px; }
@@ -464,6 +472,9 @@
   @keyframes popIn { from{opacity:0;transform:scale(0.7)} to{opacity:1;transform:scale(1)} }
   .reaction-emoji { font-size:26px; cursor:pointer; padding:4px; border-radius:50%; transition:transform 0.15s; line-height:1; border:none; background:none; }
   .reaction-emoji:hover { transform:scale(1.3); }
+  .msg-menu-reactions { display:flex; justify-content:space-between; gap:2px; background:var(--bg3); border:1px solid var(--border); border-radius:14px; padding:6px; }
+  .msg-menu-reactions .reaction-emoji { font-size:21px; padding:2px; }
+  .fwd-head { font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; margin-bottom:4px; border-left:2px solid var(--accent); padding-left:6px; }
   .msg-reactions { display:flex; flex-wrap:wrap; gap:4px; margin-top:4px; }
   .msg-reaction { background:var(--glass); border:1px solid var(--glass-border); border-radius:20px; padding:2px 8px; font-size:13px; cursor:pointer; transition:background 0.15s; display:flex; align-items:center; gap:3px; }
   .msg-reaction.mine { border-color:var(--accent); background:rgba(255,107,74,0.15); }
@@ -668,6 +679,24 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
+      <div class="settings-item" id="blocked-item" onclick="showBlockedModal()">
+        <div class="settings-item-icon">🚫</div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Чёрный список</div>
+          <div class="settings-item-sub" id="blocked-sub">Никого нет</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
+      <div class="settings-item" id="presence-item" onclick="togglePresencePrivacy()">
+        <div class="settings-item-icon">👁️</div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Показывать, когда я в сети</div>
+          <div class="settings-item-sub" id="presence-sub">Собеседники видят это</div>
+        </div>
+        <div class="settings-item-arrow" id="presence-mark">✓</div>
+      </div>
+
       <div class="settings-item" id="change-pass-item" onclick="showChangePassModal()">
         <div class="settings-item-icon">🔑</div>
         <div class="settings-item-info">
@@ -786,13 +815,24 @@
           <div class="chat-menu-wrap">
             <button class="icon-btn" onclick="toggleChatMenu()" id="chat-menu-btn">⋮</button>
             <div class="chat-menu" id="chat-menu">
+              <button class="chat-menu-item" id="search-item" onclick="openChatSearch();closeChatMenu()">🔍 Поиск в переписке</button>
               <button class="chat-menu-item" onclick="showBgModal();closeChatMenu()">🖼️ Фон чата</button>
               <button class="chat-menu-item" id="secure-btn" onclick="toggleSecure();closeChatMenu()">🛡️ Защита</button>
               <button class="chat-menu-item" id="lan-invite-item" onclick="lanInvite()" style="display:none">📋 Код комнаты</button>
+              <button class="chat-menu-item" id="block-item" onclick="toggleBlockCurrent();closeChatMenu()">🚫 Заблокировать</button>
               <button class="chat-menu-item danger" id="delete-chat-item" onclick="deleteCurrentChat();closeChatMenu()">🗑️ Удалить чат</button>
             </div>
           </div>
         </div>
+      </div>
+
+      <div class="chat-search" id="chat-search" style="display:none;">
+        <input type="text" id="chat-search-input" placeholder="Искать в переписке..."
+               oninput="runChatSearch(this.value)" onkeydown="chatSearchKey(event)" autocomplete="off">
+        <span class="chat-search-count" id="chat-search-count"></span>
+        <button class="icon-btn" onclick="chatSearchStep(-1)" title="Раньше">↑</button>
+        <button class="icon-btn" onclick="chatSearchStep(1)" title="Позже">↓</button>
+        <button class="icon-btn" onclick="closeChatSearch()" title="Закрыть">✕</button>
       </div>
 
       <div class="messages" id="messages">
@@ -1535,10 +1575,51 @@
     } catch(e) { return '[не удалось открыть]'; }
   }
 
-  // Пометка в шапке чата: видно, что переписка защищена
-  function updateE2EBadge(nick) {
+  // ===== СТАТУС СОБЕСЕДНИКА =====
+  const presence = {};        // ник -> { online, lastSeen, hidden }
+  let presenceTimer = null;
+
+  function askPresence(nick) {
+    if (!nick || nick.startsWith('__lan__:')) return;
+    if (!dmWsAuthOk || dmWs?.readyState !== 1) return;
+    dmWs.send(JSON.stringify({ type: 'presence', nicks: [nick] }));
+  }
+
+  // Пока чат открыт, освежаем статус — человек мог уйти или вернуться
+  function watchPresence(nick) {
+    clearInterval(presenceTimer);
+    presenceTimer = null;
+    if (!nick || nick.startsWith('__lan__:')) { showPresence(null); return; }
+    askPresence(nick);
+    presenceTimer = setInterval(() => {
+      if (currentChat === nick && !document.hidden) askPresence(nick);
+    }, 30000);
+  }
+
+  function seenAgo(ts) {
+    if (!ts) return 'давно не заходил(а)';
+    const diff = Date.now() - ts;
+    if (diff < 60000) return 'был(а) только что';
+    if (diff < 3600000) return 'был(а) ' + Math.floor(diff / 60000) + ' мин назад';
+    if (diff < 86400000) return 'был(а) ' + Math.floor(diff / 3600000) + ' ч назад';
+    if (diff < 7 * 86400000) return 'был(а) ' + Math.floor(diff / 86400000) + ' дн назад';
+    return 'был(а) ' + new Date(ts).toLocaleDateString('ru', { day: 'numeric', month: 'long' });
+  }
+
+  function showPresence(nick) {
     const el = document.getElementById('cv-sub');
-    if (el) el.textContent = '';
+    if (!el) return;
+    // Своя блокировка важнее статуса: полезнее видеть, почему тихо
+    if (isBlockedPeer(nick)) { el.textContent = '🚫 заблокирован'; el.style.color = 'var(--text3)'; return; }
+    const p = nick ? presence[nick] : null;
+    if (!p || p.hidden) { el.textContent = ''; return; }
+    if (p.online) { el.textContent = '● в сети'; el.style.color = 'var(--online)'; }
+    else { el.textContent = seenAgo(p.lastSeen); el.style.color = 'var(--text3)'; }
+  }
+
+  // Раньше здесь была пометка о шифровании — теперь показываем статус
+  function updateE2EBadge(nick) {
+    watchPresence(nick);
   }
 
   // ===== РЕГИСТРАЦИЯ =====
@@ -1790,6 +1871,15 @@
 
   async function handleIncomingDm(msg) {
     const key = msg.from;
+    // Отсекает сервер, но если письмо всё же дошло — например, блокировка
+    // случилась в ту же секунду — молча выбрасываем его здесь
+    if (isBlockedPeer(key)) return;
+    // Раз написал — значит был на связи в этот момент
+    if (presence[key] && !presence[key].hidden) {
+      presence[key].online = true;
+      presence[key].lastSeen = msg.timestamp || Date.now();
+      if (currentChat === key) showPresence(key);
+    }
     const text = await e2eDecrypt(key, msg.text);
     if (!chats[key]) chats[key] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
     const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -1805,7 +1895,8 @@
       if (!document.hidden) reportRead(key);
     }
     renderChatList();
-    sendNotification(key, text.startsWith('__STICKER__') ? '🎭 Стикер' : text);
+    const shown = stripFwd(text).body;
+    sendNotification(key, shown.startsWith('__STICKER__') ? '🎭 Стикер' : shown);
   }
 
   // Сообщение, отправленное с другого устройства этого же аккаунта
@@ -1817,7 +1908,7 @@
     const timeStr = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const enc = await encryptText(text);
     chats[key].messages.push({ enc, own: true, time: timeStr, timestamp: msg.timestamp, mid: msg.mid,
-                               isSticker: text.startsWith('__STICKER__') });
+                               isSticker: stripFwd(text).body.startsWith('__STICKER__') });
     chats[key].messages.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
     saveState();
     if (currentChat === key) renderMessages();
@@ -1900,6 +1991,8 @@
           saveState();
           ensureKeyPair();           // без ключей отправлять будет нечем
           setupPush();               // чтобы достучались и при закрытом приложении
+          loadPresenceSetting();
+          loadBlocked();             // чтобы чёрный список работал сразу
           clearTimeout(dmWsWatchdog); dmWsWatchdog = null;
           updateDmStatus('ok');
           console.log('[DM] Auth OK');
@@ -1982,6 +2075,14 @@
         // Написано с другого моего устройства — кладём к себе как своё
         if (msg.type === 'dm-echo') {
           handleOwnEcho(msg);
+          return;
+        }
+
+        if (msg.type === 'presence') {
+          for (const it of msg.items || []) {
+            if (it && it.nick) presence[it.nick] = it;
+          }
+          if (currentChat) showPresence(currentChat);
           return;
         }
 
@@ -2287,21 +2388,6 @@
   // ===== РЕАКЦИИ =====
   const REACTION_EMOJIS = ['❤️','😂','🔥','👍','😮','😢','🤝','🫡'];
 
-  function showReactionPicker(idx, wrapEl) {
-    document.querySelectorAll('.reaction-picker').forEach(e=>e.remove());
-    const picker = document.createElement('div');
-    picker.className = 'reaction-picker';
-    picker.innerHTML = REACTION_EMOJIS.map(e =>
-      `<button class="reaction-emoji" onclick="toggleReaction(${idx},'${e}');this.closest('.reaction-picker').remove()">${e}</button>`
-    ).join('');
-    // Позиционируем над сообщением
-    const rect = wrapEl.getBoundingClientRect();
-    picker.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 320)) + 'px';
-    picker.style.top = Math.max(8, rect.top - 64) + 'px';
-    document.body.appendChild(picker);
-    setTimeout(() => document.addEventListener('click', () => picker.remove(), { once:true }), 100);
-  }
-
   function toggleReaction(idx, emoji) {
     const msg = chats[currentChat].messages[idx];
     if (!msg.reactions) msg.reactions = [];
@@ -2382,6 +2468,7 @@
     document.getElementById('lan-invite-item').style.display = isLan ? 'flex' : 'none';
     document.getElementById('delete-chat-item').style.display = isLan ? 'none' : 'flex';
     document.getElementById('secure-btn').style.display = isLan ? 'none' : 'flex';
+    renderBlockBtn();
     updateSecureBtn();
     if (menu.classList.contains('open')) {
       setTimeout(() => document.addEventListener('click', closeChatMenuOutside, { once:true }), 0);
@@ -2397,6 +2484,8 @@
 
   // ===== НАВИГАЦИЯ =====
   function backToChats() {
+    clearInterval(presenceTimer); presenceTimer = null;
+    closeChatSearch();            // поиск относится к конкретной переписке
     hideSecureOverlay();          // защиту не выключаем: она включается осознанно
     cancelEdit();
     document.getElementById('chat-view').classList.remove('active');
@@ -2472,36 +2561,84 @@
     openChat(nick);
   }
 
-  function showMsgMenu(idx, msg) {
-    const existing = document.querySelector('.msg-menu');
-    if (existing) existing.remove();
-    const isLan = currentChat && currentChat.startsWith('__lan__:');
-    const isSticker = (msg.text || '').startsWith('__STICKER__');
-    // Изменить можно только свой текст: у стикера менять нечего, а чужое
-    // сообщение подделывать нельзя
-    const canEdit = msg.own && !isSticker;
-    // «Удалить у всех» работает через сервер, значит только для личных чатов
-    // и только если у сообщения есть опознаватель
+  // Меню сообщения. Раньше эта функция существовала, но её никто не вызывал —
+  // изменить или удалить сообщение из интерфейса было нельзя. Теперь она
+  // открывается долгим нажатием и правой кнопкой, и в ней же живут реакции.
+  async function showMsgMenu(idx) {
+    const chat = chats[currentChat];
+    if (!chat) return;
+    const msg = chat.messages[idx];
+    if (!msg || msg.system) return;
+    document.querySelector('.msg-menu')?.remove();
+
+    // Текст лежит зашифрованным, поэтому сначала расшифровываем —
+    // раньше меню читало msg.text, которого у сообщений нет
+    const full = await decryptText(msg.enc || { plain: msg.text || '' });
+    const { body } = stripFwd(full);
+    const isLan = !!currentChat && currentChat.startsWith('__lan__:');
+    const isSticker = body.startsWith('__STICKER__');
+    const fileMeta = parseFileMeta(body);
+    const isLocked = msg.unlockAt && msg.unlockAt > Date.now();
+
+    // Менять можно только свой текст: у стикера и файла менять нечего,
+    // чужое сообщение подделывать нельзя
+    const canEdit   = msg.own && !isSticker && !fileMeta && !isLan && !isLocked;
+    // «Удалить у всех» идёт через сервер — значит только в личных чатах
     const canUnsend = msg.own && !isLan && !!msg.mid;
-    const B = (style) => 'width:100%;padding:11px;border-radius:12px;font-size:14px;cursor:pointer;text-align:left;' + style;
-    const plain = B('background:var(--bg3);border:1px solid var(--border);color:var(--text);');
-    const danger = B('background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444;');
-    menuHtml = `
-      <div class="modal" style="width:270px;gap:8px;">
-        <div class="modal-title" style="font-size:13px;">СООБЩЕНИЕ</div>
-        <button onclick="copyMsg('${esc(msg.text).replace(/'/g,"\\'")}');this.closest('.modal-overlay').remove();" style="${plain}">📋 Скопировать</button>
-        ${canEdit?`<button onclick="startEdit(${idx});this.closest('.modal-overlay').remove();" style="${plain}">✏️ Изменить</button>`:''}
-        <button onclick="deleteMsg(${idx},false);this.closest('.modal-overlay').remove();" style="${danger}">🗑️ Удалить у себя</button>
-        ${canUnsend?`<button onclick="deleteMsg(${idx},true);this.closest('.modal-overlay').remove();" style="${danger}">🗑️ Удалить у всех</button>`:''}
-        <button onclick="this.closest('.modal-overlay').remove();" style="${B('background:var(--bg3);border:1px solid var(--border);color:var(--text2);text-align:center;')}">Отмена</button>
-      </div>`;
+    const canCopy   = !isSticker && !fileMeta && !isLocked;
+    const canFwd    = !isLan && !isLocked;
+
     const menu = document.createElement('div');
     menu.className = 'msg-menu modal-overlay';
-    menu.innerHTML = menuHtml;
+    const box = document.createElement('div');
+    box.className = 'modal';
+    box.style.cssText = 'width:280px;gap:8px;';
+    menu.appendChild(box);
+
+    const title = document.createElement('div');
+    title.className = 'modal-title';
+    title.style.fontSize = '13px';
+    title.textContent = 'СООБЩЕНИЕ';
+    box.appendChild(title);
+
+    // Реакции — первой строкой, чтобы поставить их одним движением
+    if (!isLan) {
+      const row = document.createElement('div');
+      row.className = 'msg-menu-reactions';
+      REACTION_EMOJIS.forEach(e => {
+        const b = document.createElement('button');
+        b.className = 'reaction-emoji';
+        b.textContent = e;
+        b.onclick = () => { toggleReaction(idx, e); menu.remove(); };
+        row.appendChild(b);
+      });
+      box.appendChild(row);
+    }
+
+    const B = extra => 'width:100%;padding:11px;border-radius:12px;font-size:14px;cursor:pointer;text-align:left;' + extra;
+    const plain  = B('background:var(--bg3);border:1px solid var(--border);color:var(--text);');
+    const danger = B('background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);color:#ef4444;');
+    const add = (label, style, fn) => {
+      const b = document.createElement('button');
+      b.style.cssText = style;
+      b.textContent = label;
+      b.onclick = () => { menu.remove(); fn(); };
+      box.appendChild(b);
+      return b;
+    };
+
+    // Текст кладём обработчику напрямую, а не в разметку: подставлять
+    // содержимое сообщения в onclick — верный способ однажды сломать страницу
+    if (canCopy) add('📋 Скопировать', plain, () => copyMsg(body));
+    if (canFwd)  add('↪️ Переслать', plain, () => showForwardModal(idx));
+    if (canEdit) add('✏️ Изменить', plain, () => startEdit(idx));
+    add('🗑️ Удалить у себя', danger, () => deleteMsg(idx, false));
+    if (canUnsend) add('🗑️ Удалить у всех', danger, () => deleteMsg(idx, true));
+    add('Отмена', B('background:var(--bg3);border:1px solid var(--border);color:var(--text2);text-align:center;'), () => {});
+
     document.body.appendChild(menu);
-    menu.addEventListener('click', e => { if(e.target===menu) menu.remove(); });
+    menu.addEventListener('click', e => { if (e.target === menu) menu.remove(); });
   }
-  let menuHtml = '';
 
   function copyMsg(text) {
     navigator.clipboard.writeText(text).catch(()=>{});
@@ -2599,6 +2736,7 @@
     if (nick.startsWith('__lan__:')) {
       currentChat = nick;
       if (chats[nick]?.unread) { chats[nick].unread = 0; saveState(); }
+      closeChatSearch();
       closeSidebar();
       document.getElementById('chats-screen').classList.add('hidden');
       document.getElementById('chat-view').classList.add('active');
@@ -2613,6 +2751,7 @@
     }
     currentChat = nick;
     if (chats[nick].unread) { chats[nick].unread = 0; saveState(); }
+    closeChatSearch();
     closeSidebar();
     document.getElementById('chats-screen').classList.add('hidden');
     document.getElementById('chat-view').classList.add('active');
@@ -2631,20 +2770,127 @@
     setTimeout(() => document.getElementById('msg-input').focus(), 50);
   }
 
+  // ===== ПОИСК ПО ПЕРЕПИСКЕ =====
+  // История лежит зашифрованной, поэтому искать может только само устройство:
+  // сервер запроса не видит и помочь не может даже при желании.
+  let chatSearch = { q: '', hits: [], pos: -1 };
+
+  function openChatSearch() {
+    if (!currentChat) return;
+    const bar = document.getElementById('chat-search');
+    bar.style.display = 'flex';
+    const inp = document.getElementById('chat-search-input');
+    inp.value = chatSearch.q;
+    setTimeout(() => inp.focus(), 50);
+  }
+
+  function closeChatSearch() {
+    const bar = document.getElementById('chat-search');
+    if (bar) bar.style.display = 'none';
+    const inp = document.getElementById('chat-search-input');
+    if (inp) inp.value = '';
+    const had = !!chatSearch.q;
+    chatSearch = { q: '', hits: [], pos: -1 };
+    updateSearchCount();
+    if (had) renderMessages();          // снимаем подсветку
+  }
+
+  function updateSearchCount() {
+    const el = document.getElementById('chat-search-count');
+    if (!el) return;
+    if (!chatSearch.q) { el.textContent = ''; return; }
+    el.textContent = chatSearch.hits.length ? (chatSearch.pos + 1) + '/' + chatSearch.hits.length : 'ничего';
+  }
+
+  // Подсветка найденного. Всё, что попадает в разметку, экранируется —
+  // иначе текст сообщения мог бы дописать в страницу что угодно.
+  function hlText(text) {
+    const q = chatSearch.q;
+    if (!q) return esc(text);
+    const low = text.toLowerCase(), needle = q.toLowerCase();
+    let out = '', from = 0, i;
+    while ((i = low.indexOf(needle, from)) !== -1) {
+      out += esc(text.slice(from, i)) + '<mark class="hl">' + esc(text.slice(i, i + needle.length)) + '</mark>';
+      from = i + needle.length;
+    }
+    return out + esc(text.slice(from));
+  }
+
+  async function runChatSearch(raw) {
+    chatSearch.q = (raw || '').trim();
+    if (!currentChat) return;
+    if (!chatSearch.q) {
+      chatSearch.hits = []; chatSearch.pos = -1;
+      updateSearchCount(); await renderMessages(); return;
+    }
+    const msgs = chats[currentChat].messages || [];
+    const texts = await Promise.all(msgs.map(m => decryptText(m.enc || { plain: m.text || '' })));
+    const needle = chatSearch.q.toLowerCase();
+    chatSearch.hits = [];
+    texts.forEach((t, i) => {
+      // Стикеры и вложения ищутся не по тексту, а по названию файла —
+      // внутрь картинки заглядывать всё равно нечем
+      const shown = stripFwd(t).body;
+      if (msgs[i].system || shown.startsWith('__STICKER__')) return;
+      const meta = parseFileMeta(shown);
+      const hay = meta ? (meta.name || '') : shown;
+      if (hay.toLowerCase().includes(needle)) chatSearch.hits.push(i);
+    });
+    // Начинаем с самого свежего совпадения: обычно ищут недавнее
+    chatSearch.pos = chatSearch.hits.length ? chatSearch.hits.length - 1 : -1;
+    updateSearchCount();
+    await renderMessages();
+    jumpToHit();
+  }
+
+  function chatSearchStep(dir) {
+    if (!chatSearch.hits.length) return;
+    chatSearch.pos = (chatSearch.pos + dir + chatSearch.hits.length) % chatSearch.hits.length;
+    updateSearchCount();
+    markCurrentHit();
+    jumpToHit();
+  }
+
+  function chatSearchKey(e) {
+    if (e.key === 'Escape') { closeChatSearch(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); chatSearchStep(e.shiftKey ? -1 : 1); }
+  }
+
+  function markCurrentHit() {
+    const cur = chatSearch.hits[chatSearch.pos];
+    document.querySelectorAll('#messages .msg-wrap.search-current')
+      .forEach(el => el.classList.remove('search-current'));
+    if (cur === undefined) return;
+    document.querySelector('#messages .msg-wrap[data-idx="' + cur + '"]')?.classList.add('search-current');
+  }
+
+  function jumpToHit() {
+    const cur = chatSearch.hits[chatSearch.pos];
+    if (cur === undefined) return;
+    markCurrentHit();
+    document.querySelector('#messages .msg-wrap[data-idx="' + cur + '"]')
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
   async function renderMessages() {
+    // Расшифровка асинхронна, и за это время можно успеть выйти из чата или
+    // переключиться на другой. Дальше опираемся на снимок, а не на currentChat.
+    const chatKey = currentChat;
+    if (!chatKey || !chats[chatKey]) return;
     const container = document.getElementById('messages');
     const noMsg = document.getElementById('no-messages');
     Array.from(container.children).forEach(el => { if(el.id!=='no-messages') el.remove(); });
-    const msgs = chats[currentChat].messages;
+    const msgs = chats[chatKey].messages;
     if (msgs.length===0) { noMsg.style.display='block'; return; }
     noMsg.style.display='none';
 
     const texts = await Promise.all(msgs.map(msg => decryptText(msg.enc || { plain: msg.text || '' })));
+    if (currentChat !== chatKey) return;      // пока расшифровывали, чат сменился
 
     const div = document.createElement('div');
     div.className='date-divider'; div.innerHTML='<span>СЕГОДНЯ</span>';
     container.appendChild(div);
-    const isLanRoom = currentChat.startsWith('__lan__:');
+    const isLanRoom = chatKey.startsWith('__lan__:');
     msgs.forEach((msg, idx) => {
       if (msg.system) {
         const sys = document.createElement('div');
@@ -2653,7 +2899,8 @@
         container.appendChild(sys);
         return;
       }
-      const text = texts[idx];
+      // Пересланное несёт пометку в начале текста — снимаем её до разбора
+      const { from: fwdFrom, body: text } = stripFwd(texts[idx]);
       const wrap = document.createElement('div');
       wrap.className='msg-wrap'+(msg.own?' own':'');
       wrap.style.marginTop='2px';
@@ -2693,7 +2940,7 @@
       } else if (isLocked) {
         bubbleContent = `<div class="capsule-bubble">🔒<br><span style="font-size:11px;color:var(--text2);font-family:'Space Mono',monospace;">Откроется ${unlockDate}</span><br><span class="capsule-countdown" data-unlock="${msg.unlockAt}">${formatCountdown(msg.unlockAt)}</span></div>`;
       } else {
-        bubbleContent = msg.unlockAt ? `🎉 ${esc(text)}` : esc(text);
+        bubbleContent = msg.unlockAt ? `🎉 ${hlText(text)}` : hlText(text);
       }
 
       const bubbleStyle = isSticker ? 'style="background:transparent;border:none;padding:4px;"' : '';
@@ -2704,18 +2951,19 @@
       const reactionsHtml = (msg.reactions && msg.reactions.length)
         ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
-      const bubbleInner = isSticker ? bubbleContent : `${replyQuote}${bubbleContent}${timeHtml}`;
-      const avatarLetter = isLanRoom ? (msg.sender?.[0] || '?').toUpperCase() : avatarInner(currentChat);
+      const fwdHead = fwdFrom ? `<div class="fwd-head">↪ переслано от @${esc(fwdFrom)}</div>` : '';
+      const bubbleInner = isSticker ? `${fwdHead}${bubbleContent}` : `${fwdHead}${replyQuote}${bubbleContent}${timeHtml}`;
+      const avatarLetter = isLanRoom ? (msg.sender?.[0] || '?').toUpperCase() : avatarInner(chatKey);
       const senderDiv = (isLanRoom && !msg.own && msg.sender) ? `<div class="msg-sender">${esc(msg.sender)}</div>` : '';
       wrap.innerHTML = msg.own
         ? `${replyBtn}<div><div class="bubble" ${bubbleStyle}>${bubbleInner}</div>${reactionsHtml}</div>`
-        : `<div class="msg-avatar-sm" onclick="showAvatarProfile()" style="background:${chats[currentChat].color}">${avatarLetter}</div><div>${senderDiv}<div class="bubble" ${bubbleStyle}>${bubbleInner}</div>${reactionsHtml}</div>${replyBtn}`;
+        : `<div class="msg-avatar-sm" onclick="showAvatarProfile()" style="background:${chats[chatKey].color}">${avatarLetter}</div><div>${senderDiv}<div class="bubble" ${bubbleStyle}>${bubbleInner}</div>${reactionsHtml}</div>${replyBtn}`;
 
       // Долгое нажатие → реакции
       let pressTimer, pressX, pressY;
       wrap.addEventListener('touchstart', e => {
         pressX = e.touches[0].clientX; pressY = e.touches[0].clientY;
-        pressTimer = setTimeout(() => showReactionPicker(idx, wrap), 500);
+        pressTimer = setTimeout(() => showMsgMenu(idx), 500);
       }, { passive:true });
       wrap.addEventListener('touchmove', e => {
         const dx = Math.abs(e.touches[0].clientX - pressX);
@@ -2723,7 +2971,7 @@
         if (dx > 8 || dy > 8) clearTimeout(pressTimer);
       }, { passive:true });
       wrap.addEventListener('touchend', () => clearTimeout(pressTimer));
-      wrap.addEventListener('contextmenu', e => { e.preventDefault(); showReactionPicker(idx, wrap); });
+      wrap.addEventListener('contextmenu', e => { e.preventDefault(); showMsgMenu(idx); });
 
       // Свайп вправо → ответить
       let swipeStartX = 0;
@@ -2738,19 +2986,48 @@
         if (dx > 55) setReply(idx);
       });
 
+      if (chatSearch.q && chatSearch.hits.includes(idx)) {
+        wrap.classList.add('search-hit');
+        if (chatSearch.hits[chatSearch.pos] === idx) wrap.classList.add('search-current');
+      }
+
       container.appendChild(wrap);
     });
 
-    if (chats[currentChat].typing) {
+    if (chats[chatKey].typing) {
       const typing = document.createElement('div');
       typing.className='msg-wrap';
       typing.style.marginTop='8px';
       typing.id='typing-indicator';
-      typing.innerHTML=`<div class="msg-avatar-sm" style="background:${chats[currentChat].color}">${avatarInner(currentChat)}</div><div><div class="bubble typing-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>`;
+      typing.innerHTML=`<div class="msg-avatar-sm" style="background:${chats[chatKey].color}">${avatarInner(chatKey)}</div><div><div class="bubble typing-bubble"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div></div>`;
       container.appendChild(typing);
     }
 
     container.scrollTop = container.scrollHeight;
+  }
+
+  // Отправка не в открытый чат, а любому собеседнику. Нужна пересылке:
+  // раньше вся отправка была намертво привязана к currentChat.
+  async function sendTo(peer, text) {
+    if (!peer || peer.startsWith('__lan__:')) return false;
+    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return false; }
+    if (!myRawPass || !dmWsAuthOk || dmWs?.readyState !== 1) {
+      showToast('Нет связи с сервером — сообщение не отправлено');
+      dmWakeCheck();
+      return false;
+    }
+    const payload = await e2eEncrypt(peer, text);
+    if (!payload) { showToast('Собеседник ещё ни разу не заходил — написать ему пока нельзя'); return false; }
+    const mid = newMid();
+    dmWs.send(JSON.stringify({ type: 'dm', to: peer, text: payload, mid }));
+    if (!chats[peer]) chats[peer] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
+    const enc = await encryptText(text);
+    const shown = stripFwd(text).body;
+    chats[peer].messages.push({ enc, own: true, time: now(), timestamp: Date.now(), mid,
+                                isSticker: shown.startsWith('__STICKER__'),
+                                isFile: !!parseFileMeta(shown) });
+    saveState();
+    return true;
   }
 
   async function sendMessage() {
@@ -3500,6 +3777,7 @@
     myRawPass = null; cryptoKey = null;
     myKeyPair = null; myPubJwk = null;
     peerKeyCache = {}; pairKeyCache = {};
+    blocked = new Set();       // список чужой, на другом аккаунте он свой
     dmWsGen++;                 // обработчики старого сокета больше не в счёт
     clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
     dmWsAttempt = 0;
@@ -3722,6 +4000,161 @@
     } catch (e) { showToast('Нет связи с сервером'); }
   }
 
+  // ===== МОЙ СТАТУС: ПОКАЗЫВАТЬ ИЛИ НЕТ =====
+  let hidePresence = false;
+
+  function renderPresenceSetting() {
+    const sub = document.getElementById('presence-sub');
+    const mark = document.getElementById('presence-mark');
+    if (sub) sub.textContent = hidePresence ? 'Скрыто от собеседников' : 'Собеседники видят это';
+    if (mark) { mark.textContent = hidePresence ? '✕' : '✓'; mark.style.color = hidePresence ? 'var(--text3)' : 'var(--online)'; }
+    const item = document.getElementById('presence-item');
+    if (item) item.style.display = myName ? 'flex' : 'none';
+  }
+
+  async function loadPresenceSetting() {
+    if (!myName || !myRawPass) return;
+    try {
+      const r = await fetch(API + '/api/account/privacy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { hidePresence = !!d.hidePresence; renderPresenceSetting(); }
+    } catch (e) {}
+  }
+
+  async function togglePresencePrivacy() {
+    if (!myRawPass) return;
+    const next = !hidePresence;
+    try {
+      const r = await fetch(API + '/api/account/privacy', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass, hidePresence: next })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) { showToast(d.error || 'Не удалось изменить'); return; }
+      hidePresence = !!d.hidePresence;
+      renderPresenceSetting();
+      showToast(hidePresence ? 'Статус скрыт' : 'Статус виден собеседникам');
+    } catch (e) { showToast('Нет связи с сервером'); }
+  }
+
+  // ===== ЧЁРНЫЙ СПИСОК =====
+  // Держим ники в наборе, чтобы проверка при каждом входящем сообщении
+  // не стоила ничего. Настоящая защита всё равно на сервере — здесь только
+  // подстраховка на случай, если что-то проскочит.
+  let blocked = new Set();
+
+  function isBlockedPeer(nick) { return !!nick && blocked.has(nick); }
+
+  function renderBlockedSetting() {
+    const item = document.getElementById('blocked-item');
+    if (item) item.style.display = myName ? 'flex' : 'none';
+    const sub = document.getElementById('blocked-sub');
+    if (sub) sub.textContent = blocked.size ? 'В списке: ' + blocked.size : 'Никого нет';
+  }
+
+  // Общий вход для всех трёх действий: показать, добавить, убрать
+  async function blocksRequest(action, target) {
+    if (!myName || !myRawPass) return null;
+    try {
+      const r = await fetch(API + '/api/account/blocks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass, action, target })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) return { error: d.error || 'Не удалось' };
+      blocked = new Set((d.blocked || []).map(b => b.nick));
+      renderBlockedSetting();
+      return { list: d.blocked || [] };
+    } catch (e) { return { error: 'Нет связи с сервером' }; }
+  }
+
+  async function loadBlocked() { await blocksRequest('list'); }
+
+  // Пункт в меню чата подписан по состоянию: заблокирован — предлагаем вернуть
+  function renderBlockBtn() {
+    const btn = document.getElementById('block-item');
+    if (!btn) return;
+    const isLan = !currentChat || currentChat.startsWith('__lan__:');
+    btn.style.display = isLan ? 'none' : 'flex';
+    if (isLan) return;
+    const on = isBlockedPeer(currentChat);
+    btn.textContent = on ? '✅ Разблокировать' : '🚫 Заблокировать';
+    btn.classList.toggle('danger', !on);
+  }
+
+  async function toggleBlockCurrent() {
+    const peer = currentChat;
+    if (!peer || peer.startsWith('__lan__:')) return;
+    if (!myRawPass) { showToast('Нужно войти в аккаунт'); return; }
+
+    if (isBlockedPeer(peer)) {
+      const res = await blocksRequest('remove', peer);
+      if (res?.error) { showToast(res.error); return; }
+      showToast('@' + peer + ' разблокирован');
+      renderBlockBtn();
+      showPresence(peer);
+      return;
+    }
+
+    if (!confirm('Заблокировать @' + peer + '?\n\nЕго сообщения перестанут приходить. ' +
+                 'Он об этом не узнает. Переписка останется на месте.')) return;
+    const res = await blocksRequest('add', peer);
+    if (res?.error) { showToast(res.error); return; }
+    showToast('@' + peer + ' заблокирован');
+    renderBlockBtn();
+    showPresence(peer);
+  }
+
+  function showBlockedModal() {
+    closeSidebar();
+    if (!myRawPass) { showToast('Нужно войти в аккаунт'); return; }
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'blocked-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:360px;">
+        <div class="modal-title">ЧЁРНЫЙ СПИСОК</div>
+        <div class="acc-list" id="blk-list"><div class="adm-empty">Загрузка...</div></div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.5;">
+          Сообщения от этих людей не доходят до устройства и нигде не хранятся.
+          О блокировке им не сообщается.
+        </div>
+        <div class="modal-btns"><button class="btn-primary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    renderBlockedList();
+  }
+
+  async function renderBlockedList() {
+    const list = document.getElementById('blk-list');
+    if (!list) return;
+    const res = await blocksRequest('list');
+    if (!res || res.error) { list.innerHTML = '<div class="adm-empty">' + esc(res?.error || 'Ошибка') + '</div>'; return; }
+    if (!res.list.length) { list.innerHTML = '<div class="adm-empty">Список пуст</div>'; return; }
+    list.innerHTML = res.list.map(b =>
+      '<div class="acc-row" style="cursor:default;">' +
+        '<div class="acc-avatar">🚫</div>' +
+        '<div class="acc-info">' +
+          '<div class="acc-nick">@' + esc(b.nick) + '</div>' +
+          '<div class="acc-sub">с ' + esc(whenSeen(b.at)) + '</div>' +
+        '</div>' +
+        '<button class="adm-btn" style="flex:0 0 auto;min-width:0;padding:7px 11px;" ' +
+          'onclick="unblockFromList(this.dataset.nick)" data-nick="' + esc(b.nick) + '">Вернуть</button>' +
+      '</div>').join('');
+  }
+
+  async function unblockFromList(nick) {
+    const res = await blocksRequest('remove', nick);
+    if (res?.error) { showToast(res.error); return; }
+    showToast('@' + nick + ' разблокирован');
+    renderBlockedList();
+    if (currentChat === nick) { renderBlockBtn(); showPresence(nick); }
+  }
+
   // ===== УДАЛЕНИЕ СВОЕГО АККАУНТА =====
   function showDeleteAccountModal() {
     closeSidebar();
@@ -3804,6 +4237,8 @@
     if (cp) cp.style.display = (authMode === 'anon' || !myName) ? 'none' : 'flex';
     const dv = document.getElementById('devices-item');
     if (dv) dv.style.display = myName ? 'flex' : 'none';
+    renderPresenceSetting();
+    renderBlockedSetting();
   }
 
   function updateAccountsMenu() {
@@ -4047,6 +4482,98 @@
     a.href = url; a.download = meta.name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+
+  // ===== ПЕРЕСЫЛКА =====
+  // Пересланное отличается от обычного пометкой в начале текста: сервер по-
+  // прежнему видит только шифротекст, а получатель знает, чьи это слова.
+  function stripFwd(text) {
+    if (typeof text !== 'string' || !text.startsWith('__FWD__')) return { from: '', body: text || '' };
+    const rest = text.slice(7);
+    const c = rest.indexOf(':');
+    if (c < 1) return { from: '', body: rest };
+    return { from: rest.slice(0, c), body: rest.slice(c + 1) };
+  }
+
+  function showForwardModal(idx) {
+    const chat = chats[currentChat];
+    if (!chat || !chat.messages[idx]) return;
+    const from = currentChat;
+    // Пересылать можно только в личные чаты: в LAN-комнате нет ни ключей,
+    // ни серверной доставки
+    const targets = Object.keys(chats).filter(n => !n.startsWith('__lan__:') && n !== from);
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'fwd-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">ПЕРЕСЛАТЬ</div>
+        <input class="adm-search" id="fwd-nick" placeholder="Ник получателя" autocomplete="off">
+        <div class="acc-list" id="fwd-list">${
+          targets.length
+            ? targets.map(n =>
+                '<div class="acc-row" onclick="doForward(' + idx + ', this.dataset.nick)" data-nick="' + esc(n) + '">' +
+                  '<div class="acc-avatar" style="background:' + esc(chats[n].color || '#888') + '">' + esc(n[0].toUpperCase()) + '</div>' +
+                  '<div class="acc-info"><div class="acc-nick">@' + esc(n) + '</div>' +
+                  '<div class="acc-sub">' + (chats[n].messages?.length || 0) + ' сообщений</div></div>' +
+                '</div>').join('')
+            : '<div class="adm-empty">Других чатов пока нет</div>'
+        }</div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+          <button class="btn-primary" onclick="doForward(${idx}, document.getElementById('fwd-nick').value.trim())">Отправить</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    setTimeout(() => document.getElementById('fwd-nick')?.focus(), 150);
+  }
+
+  async function doForward(idx, to) {
+    to = (to || '').trim();
+    if (!to) { showToast('Укажи получателя'); return; }
+    if (to.startsWith('__lan__:')) { showToast('В комнату переслать нельзя'); return; }
+    if (to === myName) { showToast('Себе переслать нельзя'); return; }
+    const src = chats[currentChat]?.messages[idx];
+    if (!src) return;
+
+    const full = await decryptText(src.enc || { plain: src.text || '' });
+    const { from: already, body } = stripFwd(full);
+    // Автор — тот, чьи это слова изначально. Цепочку пересылок не наращиваем:
+    // важен первый автор, а не тот, через кого сообщение прошло.
+    const origin = already || (src.own ? myName : currentChat);
+    document.getElementById('fwd-overlay')?.remove();
+
+    const target = currentChat;
+    let outBody = body;
+
+    // Вложение зашифровано ключом этой пары — новый получатель им не владеет.
+    // Поэтому файл нужно достать, расшифровать и зашифровать заново для него.
+    const meta = parseFileMeta(body);
+    if (meta) {
+      showToast('Пересылаю вложение...');
+      const buf = await loadBlob(target, meta);
+      if (!buf) { showToast('Не удалось открыть вложение'); return; }
+      const enc = await encryptBytes(to, new Uint8Array(buf));
+      if (!enc) { showToast('Собеседник ещё ни разу не заходил — отправить нельзя'); return; }
+      try {
+        const r = await fetch(API + '/api/blob/put', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nick: myName, password: myRawPass, data: enc.data })
+        });
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok) { showToast(d.error || 'Не удалось переслать вложение'); return; }
+        blobCache[d.id] = buf;               // уже расшифровано, качать назад незачем
+        outBody = '__FILE__' + JSON.stringify({ ...meta, id: d.id, iv: enc.iv });
+      } catch (err) { showToast('Нет связи с сервером'); return; }
+    }
+
+    const ok = await sendTo(to, '__FWD__' + origin + ':' + outBody);
+    if (ok) {
+      showToast('Переслано @' + to);
+      if (currentChat === target) renderMessages();
+      renderChatList();
+    }
   }
 
   function parseFileMeta(text) {
