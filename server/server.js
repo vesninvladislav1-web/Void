@@ -9,6 +9,10 @@ const PORT          = Number(process.env.PORT) || 3000;
 const ADMIN_KEY     = process.env.VOID_ADMIN_KEY || '';
 const ADMIN_NICK    = 'Void';                        // единственный админ-аккаунт
 const ADMIN_PASS    = process.env.VOID_ADMIN_PASSWORD || '';
+// Смена пароля существующего админа — только по явной просьбе. Раньше пароль
+// переписывался при каждом запуске, и один неверный запуск молча отбирал
+// доступ к аккаунту: снаружи всё выглядело исправным, а войти было нельзя.
+const ADMIN_RESET   = /^(1|true|yes)$/i.test(process.env.VOID_ADMIN_RESET || '');
 const MAX_BODY      = 16 * 1024;        // максимум тела HTTP-запроса
 const MAX_TEXT      = 4000;             // максимум длины НЕшифрованного сообщения
 const MAX_STICKER   = 128 * 1024;       // картинка-стикер приходит как data:URI
@@ -608,13 +612,19 @@ function ensureAdmin() {
   return scryptHash(ADMIN_PASS).then(hash => {
     const existing = qUserByNick.get(ADMIN_NICK);
 
-    // Аккаунт уже наш — только освежаем пароль. Раньше здесь было безусловное
-    // удаление, и каждый перезапуск сервера стирал переписку админа, аватар
-    // и ключи шифрования: после рестарта ему никто не мог написать.
+    // Аккаунт уже наш. Пароль трогаем только если об этом попросили явно.
+    // Раньше здесь было безусловное удаление, и каждый перезапуск стирал
+    // переписку админа, аватар и ключи; потом — безусловная смена пароля,
+    // из-за которой запуск с неверной переменной отбирал доступ.
     if (existing && existing.is_admin) {
-      qUpdateHash.run(hash, existing.nick);
       if (existing.banned) qSetBan.run(0, null, null, null, existing.nick);
-      console.log('[admin] Админ-аккаунт', existing.nick, 'на месте, пароль обновлён');
+      if (!ADMIN_RESET) {
+        console.log('[admin] Админ-аккаунт', existing.nick, 'на месте, пароль не тронут');
+        console.log('[admin] Сменить пароль: VOID_ADMIN_RESET=1 VOID_ADMIN_PASSWORD=<новый> при запуске');
+        return;
+      }
+      qUpdateHash.run(hash, existing.nick);
+      console.log('[admin] Админ-аккаунт', existing.nick, '— пароль изменён по просьбе (VOID_ADMIN_RESET)');
       return;
     }
 
