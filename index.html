@@ -264,10 +264,10 @@
   /* Анимация нового чата */
   @keyframes slideIn { from{opacity:0;transform:translateX(-16px)} to{opacity:1;transform:none} }
 
-  .input-area { padding:12px 16px; border-top:1px solid var(--glass-border); background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); display:flex; align-items:center; gap:10px; flex-shrink:0; }
-  .input-wrap { flex:1; background:var(--glass); border:1px solid var(--glass-border); border-radius:28px; display:flex; align-items:center; padding:0 6px 0 16px; transition:border 0.2s,box-shadow 0.2s; }
+  .input-area { padding:12px 16px; border-top:1px solid var(--glass-border); background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); display:flex; align-items:center; gap:10px; flex-shrink:0; overflow:hidden; }
+  .input-wrap { flex:1 1 0; min-width:0; background:var(--glass); border:1px solid var(--glass-border); border-radius:28px; display:flex; align-items:center; padding:0 6px 0 16px; transition:border 0.2s,box-shadow 0.2s; }
   .input-wrap:focus-within { border-color:var(--accent); box-shadow:0 0 0 3px var(--shadow); }
-  .msg-input { flex:1; background:transparent; border:none; outline:none; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; padding:12px 0; }
+  .msg-input { flex:1 1 0; min-width:0; width:100%; background:transparent; border:none; outline:none; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; padding:12px 0; }
   .msg-input::placeholder { color:var(--text3); }
   .send-btn { width:40px; height:40px; border-radius:50%; background:var(--accent); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; color:white; font-size:16px; transition:all 0.2s; flex-shrink:0; }
   .send-btn:hover { background:#E55A3C; transform:scale(1.05); opacity:0.9; }
@@ -500,7 +500,17 @@
   .lan-peers-item.active { color:var(--online); }
   .msg-sender { font-size:11px; color:var(--accent); font-family:'Space Mono',monospace; letter-spacing:0.5px; margin-bottom:3px; padding-left:2px; }
   .msg-system { text-align:center; color:var(--text2); font-size:11px; font-family:'Space Mono',monospace; padding:6px 12px; opacity:0.55; letter-spacing:0.5px; }
-  .void-toast { position:fixed; bottom:90px; left:50%; transform:translateX(-50%) translateY(12px); background:rgba(30,30,44,0.92); backdrop-filter:blur(12px); color:#fff; padding:10px 18px; border-radius:20px; font-size:13px; font-family:'Inter',sans-serif; pointer-events:none; opacity:0; transition:opacity 0.2s,transform 0.2s; z-index:9999; white-space:nowrap; }
+  /* Телефон: кнопок в строке ввода шесть, поэтому на узком экране
+     они уменьшаются, иначе полю для текста не остаётся места */
+  @media (max-width: 480px) {
+    .input-area { padding:10px 10px; gap:6px; }
+    .input-area .icon-btn { width:34px; height:34px; font-size:14px; }
+    .input-area .attach-btn { width:34px; height:34px; font-size:15px; }
+    .input-area .send-btn { width:36px; height:36px; font-size:15px; }
+    .input-wrap { padding:0 4px 0 12px; }
+    .msg-input { padding:10px 0; }
+  }
+  .void-toast { position:fixed; bottom:90px; left:50%; transform:translateX(-50%) translateY(12px); background:rgba(30,30,44,0.92); backdrop-filter:blur(12px); color:#fff; padding:10px 18px; border-radius:20px; font-size:13px; font-family:'Inter',sans-serif; pointer-events:none; opacity:0; transition:opacity 0.2s,transform 0.2s; z-index:9999; max-width:calc(100vw - 32px); text-align:center; line-height:1.4; }
   .void-toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
 </style>
 </head>
