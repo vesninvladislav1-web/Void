@@ -3055,7 +3055,9 @@
         bubbleContent = msg.unlockAt ? `🎉 ${hlText(text)}` : hlText(text);
       }
 
-      const bubbleStyle = isSticker ? 'style="background:transparent;border:none;padding:4px;"' : '';
+      // У своих сообщений пузырь светится оранжевым. Для стикера фон и рамку
+      // убрали, а тень осталась и обводила его ореолом — гасим и её.
+      const bubbleStyle = isSticker ? 'style="background:transparent;border:none;padding:4px;box-shadow:none;"' : '';
       const replyQuote = msg.reply ? `<div class="reply-quote">↩ ${esc(msg.reply.text.slice(0,60))}</div>` : '';
       const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">↩</button>`;
       const editedMark = msg.edited ? '<span class="msg-edited">изменено</span> ' : '';
