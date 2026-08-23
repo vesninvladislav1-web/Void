@@ -5613,7 +5613,69 @@
         </g>
         <rect x="23" y="41" width="16" height="2" fill="#F2F2F7">
           ${glAnim('opacity', '1;0.3;1;0.15', '0.35s')}${glAnim('width', '16;11;16;14', '0.5s')}</rect>`
-    })
+    }),
+
+    // Любовь. Здесь не дрожь по кругу, а короткая история на пять секунд:
+    // существо пересобирается в пиксельное сердце, уже сердцем краснеет,
+    // дважды бьётся и складывается обратно. Помехи идут всё это время —
+    // без них превращение выглядело бы чужим для набора.
+    //
+    // Собрано отдельно от glitchSvg: там силуэт просто перебирает три
+    // состояния, а тут нужна последовательность из двадцати пяти кадров
+    // с переходами в обе стороны.
+    love: (() => {
+      // Сердце сложено из тех же прямоугольных ступеней, что и тело
+      const H1 = 'M16 18 H28 V22 H36 V18 H48 V22 H52 V30 H48 V34 H44 V38 H40 V42 H36 V46 H34 V50 H30 V46 H28 V42 H24 V38 H20 V34 H16 V30 H12 V22 H16 Z';
+      // Второе сердце на пиксель уже: даже застыв, оно продолжает подрагивать
+      const H2 = 'M17 19 H28 V23 H36 V19 H47 V22 H51 V30 H47 V34 H43 V38 H39 V42 H36 V46 H34 V49 H30 V46 H28 V42 H25 V38 H21 V34 H17 V30 H13 V22 H17 Z';
+      // Две промежуточные формы: тело уже поджалось, но сердцем ещё не стало
+      const M1 = 'M14 21 H24 V18 H30 V21 H40 V19 H46 V24 H49 V31 H46 V36 H42 V41 H37 V45 H33 V49 H29 V45 H24 V41 H19 V36 H15 V31 H11 V24 H14 Z';
+      const M2 = 'M15 19 H27 V22 H35 V19 H46 V23 H50 V30 H47 V35 H43 V39 H39 V43 H35 V47 H31 V50 H29 V46 H27 V42 H23 V38 H19 V34 H15 V29 H12 V22 H15 Z';
+      const B = GL_BODY;
+
+      // Двадцать пять кадров по 0.2 с. Первые шесть и последние пять —
+      // обычное существо, в середине сердце, между ними по два кадра сборки.
+      const seq = [
+        B[0], B[1], B[2], B[0], B[1], B[2],        // 0.0–1.2 обычный
+        M1, M2,                                    // 1.2–1.6 складывается
+        H1, H2, H1, H2, H1, H2, H1, H2, H1, H2,    // 1.6–3.6 сердце
+        M2, M1,                                    // 3.6–4.0 разбирается
+        B[0], B[1], B[2], B[0], B[1]               // 4.0–5.0 снова обычный
+      ].join(';');
+
+      const seqAnim = (attr, values, keyTimes) =>
+        `<animate attributeName="${attr}" values="${values}" keyTimes="${keyTimes}" dur="5s" calcMode="discrete" repeatCount="indefinite"/>`;
+
+      return `<svg viewBox="0 0 64 64">${GL_CLIP}` +
+        // Внешний перенос и обратный внутри — чтобы удары шли от центра,
+        // а не тянули фигуру в угол
+        `<g transform="translate(32,33)"><g>` +
+          `<animateTransform attributeName="transform" type="scale"
+             values="1;1;1.24;1;1.19;1;1" keyTimes="0;0.34;0.40;0.46;0.52;0.58;1"
+             dur="5s" repeatCount="indefinite"/>` +
+          `<g transform="translate(-32,-33)">` +
+            `<g>` +
+              `<animateTransform attributeName="transform" type="rotate"
+                 values="-4 32 46; -2 32 46; -5 32 46; -3 32 46" dur="1.5s"
+                 calcMode="discrete" repeatCount="indefinite"/>` +
+              `<path d="${B[0]}" fill="#2A2A38" stroke="#3E3E52" stroke-width="0.7">` +
+                `<animate attributeName="d" values="${seq}" dur="5s" calcMode="discrete" repeatCount="indefinite"/>` +
+                // Краснеет не в момент сборки, а когда уже стал сердцем
+                seqAnim('fill', '#2A2A38;#E23B4E;#2A2A38', '0;0.32;0.72') +
+                seqAnim('stroke', '#3E3E52;#FF6B7A;#3E3E52', '0;0.32;0.72') +
+              `</path>` +
+              GL_CHUNKS + GL_SPECKS + GL_SCAN +
+              // Лицо уходит вместе с телом и возвращается вместе с ним
+              `<g>${seqAnim('opacity', '1;0;1', '0;0.24;0.8')}` +
+                glEyes(7, 8, 28, 26.5) +
+                glMouth('M22 42 L25 38 L28 43 L31 38 L34 43 L37 39',
+                        'M22 41 L25 39 L28 42 L31 37 L34 42 L37 40',
+                        'M22 43 L25 38 L28 44 L31 39 L34 42 L37 38') +
+              `</g>` +
+            `</g>` +
+          `</g>` +
+        `</g></g></svg>`;
+    })()
   };
 
   const GLITCH_NAMES = Object.keys(GLITCH_STICKERS);
