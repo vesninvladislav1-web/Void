@@ -376,6 +376,9 @@
   .msg-sticker { width:96px; height:96px; border-radius:16px; object-fit:cover; }
   .msg-sticker-emoji { font-size:72px; line-height:1; }
   .msg-sticker-void { width:104px; height:104px; }
+  .msg-sticker-missing { width:104px; height:104px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
+    background:var(--bg3); border:1px dashed var(--border); border-radius:14px; font-size:20px; }
+  .msg-sticker-missing span { font-size:10px; line-height:1.3; color:var(--text3); text-align:center; font-family:'Inter',sans-serif; }
   .attach-btn { width:38px; height:38px; border-radius:50%; background:var(--bg3); border:1px solid var(--border); color:var(--text2); font-size:17px; cursor:pointer; flex-shrink:0; display:flex; align-items:center; justify-content:center; padding:0; transition:background 0.15s; }
   .attach-btn:hover { background:var(--glass); }
   .file-card { display:flex; align-items:center; gap:11px; width:100%; min-width:190px; padding:10px 12px; background:var(--bg3); border:1px solid var(--border); border-radius:13px; cursor:pointer; text-align:left; font-family:'Inter',sans-serif; transition:background 0.15s; }
@@ -3042,13 +3045,20 @@
         const colonIdx = rest.indexOf(':');
         const stype = rest.slice(0, colonIdx);
         const sval = rest.slice(colonIdx + 1);
-        bubbleContent = stype === 'glitch'
-          ? `<div class="msg-sticker-void">${GLITCH_STICKERS[sval] || ''}</div>`
-          : stype === 'void'
-          ? `<div class="msg-sticker-void">${VOID_STICKERS[sval] || ''}</div>`
+        // Свои картинки приходят как data:URI. Всё остальное — имя стикера
+        // из какого-то набора, и подставлять его в src нельзя: старая копия
+        // приложения, не знающая нового набора, показывала вместо стикера
+        // значок битой картинки.
+        const isPicture = /^(data:|https?:)/.test(sval);
+        const known = stype === 'glitch' ? GLITCH_STICKERS[sval]
+                    : stype === 'void'   ? VOID_STICKERS[sval] : null;
+        bubbleContent = known
+          ? `<div class="msg-sticker-void">${known}</div>`
           : stype === 'emoji'
-            ? `<div class="msg-sticker-emoji">${sval}</div>`
-            : `<img class="msg-sticker" src="${sval}">`;
+            ? `<div class="msg-sticker-emoji">${esc(sval)}</div>`
+            : isPicture
+              ? `<img class="msg-sticker" src="${esc(sval)}">`
+              : `<div class="msg-sticker-missing">🚫<span>стикер из набора,<br>которого здесь нет</span></div>`;
       } else if (isLocked) {
         bubbleContent = `<div class="capsule-bubble">🔒<br><span style="font-size:11px;color:var(--text2);font-family:'Space Mono',monospace;">Откроется ${unlockDate}</span><br><span class="capsule-countdown" data-unlock="${msg.unlockAt}">${formatCountdown(msg.unlockAt)}</span></div>`;
       } else {

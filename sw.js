@@ -1,4 +1,7 @@
-const CACHE = 'void-v8';
+// Имя кэша — это и есть версия. Пока оно не меняется, браузер не считает
+// service worker обновлённым, и в приложении может остаться старая страница:
+// именно так стикеры нового набора превращались в битые картинки.
+const CACHE = 'void-v9';
 const ASSETS = ['./', './index.html', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
