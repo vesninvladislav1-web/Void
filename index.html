@@ -375,6 +375,19 @@
   .sticker-upload-btn:hover { border-color:var(--accent); color:var(--accent); }
   .msg-sticker { width:96px; height:96px; border-radius:16px; object-fit:cover; }
   .msg-sticker-emoji { font-size:72px; line-height:1; }
+  .sos-bar { display:flex; align-items:center; gap:10px; padding:9px 14px; cursor:pointer; flex-shrink:0;
+    background:rgba(239,68,68,0.12); border-bottom:1px solid rgba(239,68,68,0.3); font-size:12px; color:var(--text2); }
+  .sos-bar.warn { background:rgba(245,158,11,0.13); border-bottom-color:rgba(245,158,11,0.35); }
+  .sos-bar .sos-dot { font-size:15px; }
+  .sos-bar b { color:var(--text); }
+  .sos-warn { color:#f59e0b; }
+  .sos-wait { color:var(--text3); font-size:11px; }
+  .sos-card { min-width:210px; display:flex; flex-direction:column; gap:6px; }
+  .sos-card-head { font-family:'Space Mono',monospace; font-size:13px; font-weight:700; color:#ef4444; }
+  .sos-card-coords { font-family:'Space Mono',monospace; font-size:14px; user-select:all; }
+  .sos-card-meta { font-size:11px; color:var(--text3); line-height:1.5; }
+  .sos-card-btn { display:block; text-align:center; padding:8px; border-radius:10px; background:var(--bg3);
+    border:1px solid var(--border); color:var(--text); font-size:12px; text-decoration:none; }
   .msg-sticker-void { width:104px; height:104px; }
   .msg-sticker-missing { width:104px; height:104px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
     background:var(--bg3); border:1px dashed var(--border); border-radius:14px; font-size:20px; }
@@ -711,6 +724,15 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
+      <div class="settings-item" id="sos-item" onclick="showSosSettings()">
+        <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);">🆘</div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Аварийный сигнал</div>
+          <div class="settings-item-sub" id="sos-sub">Выключен</div>
+        </div>
+        <div class="settings-item-arrow" id="sos-mark">›</div>
+      </div>
+
       <div class="settings-item" id="presence-item" onclick="togglePresencePrivacy()">
         <div class="settings-item-icon">👁️</div>
         <div class="settings-item-info">
@@ -801,6 +823,7 @@
 
     <!-- ГЛАВНОЕ МЕНЮ ЧАТОВ -->
     <div class="chats-screen" id="chats-screen">
+      <div class="sos-bar" id="sos-bar" style="display:none;" onclick="showSosSettings()"></div>
       <div class="chats-topbar">
         <button class="icon-btn burger-btn" onclick="toggleSidebar()">☰</button>
         <div class="chats-topbar-title">Сообщения</div>
@@ -1941,6 +1964,7 @@
     {
       const fm = parseFileMeta(stripFwd(text).body);
       if (fm) { incoming.isFile = true; incoming.isVoice = !!fm.voice; }
+      if (stripFwd(text).body.startsWith('__SOS__')) incoming.isSos = true;
     }
     if (sec > 0) incoming.expiresAt = (msg.timestamp || Date.now()) + sec * 1000;
     chats[key].messages.push(incoming);
@@ -1955,7 +1979,8 @@
     const shown = stripFwd(text).body;
     const fm = parseFileMeta(shown);
     sendNotification(key,
-      shown.startsWith('__STICKER__') ? '🎭 Стикер'
+      shown.startsWith('__SOS__') ? '🆘 Аварийный сигнал'
+        : shown.startsWith('__STICKER__') ? '🎭 Стикер'
         : fm ? (fm.voice ? '🎤 Голосовое сообщение' : '📎 ' + (fm.name || 'Вложение'))
         : shown);
   }
@@ -2063,6 +2088,7 @@
           setupPush();               // чтобы достучались и при закрытом приложении
           loadPresenceSetting();
           loadBlocked();             // чтобы чёрный список работал сразу
+          loadSos().then(sosFlush);  // связь появилась — накопленные точки уходят
           clearTimeout(dmWsWatchdog); dmWsWatchdog = null;
           updateDmStatus('ok');
           console.log('[DM] Auth OK');
@@ -2650,6 +2676,7 @@
     const { body } = stripFwd(full);
     const isLan = isRoom(currentChat);        // в комнате правка идёт не через сервер
     const isSticker = body.startsWith('__STICKER__');
+    const isSos = body.startsWith('__SOS__');
     const fileMeta = parseFileMeta(body);
     const isLocked = msg.unlockAt && msg.unlockAt > Date.now();
 
@@ -2658,9 +2685,9 @@
     const canEdit   = msg.own && !isSticker && !fileMeta && !isLan && !isLocked;
     // «Удалить у всех» идёт через сервер — значит только в личных чатах
     const canUnsend = msg.own && !isLan && !!msg.mid;
-    const canCopy   = !isSticker && !fileMeta && !isLocked;
+    const canCopy   = !isSticker && !fileMeta && !isLocked && !isSos;
     // Из группы переслать можно — адресат просто увидит, кто это написал
-    const canFwd    = !isLanChat(currentChat) && !isLocked;
+    const canFwd    = !isLanChat(currentChat) && !isLocked && !isSos;
 
     const menu = document.createElement('div');
     menu.className = 'msg-menu modal-overlay';
@@ -2787,7 +2814,7 @@
       const lastText = last
         ? (last.system
             ? `<i>${esc(last.text)}</i>`
-            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.isVoice ? '🎤 Голосовое' : last.isFile ? '📎 Вложение' : last.enc?.ct ? '🔒 Сообщение' : esc(last.enc?.plain || last.text || '')))
+            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.isSos ? '🆘 Аварийный сигнал' : last.isVoice ? '🎤 Голосовое' : last.isFile ? '📎 Вложение' : last.enc?.ct ? '🔒 Сообщение' : esc(last.enc?.plain || last.text || '')))
         : 'Нет сообщений';
       const item = document.createElement('div');
       item.className = 'chat-item' + (currentChat===nick?' active':'');
@@ -2935,7 +2962,7 @@
       // Стикеры и вложения ищутся не по тексту, а по названию файла —
       // внутрь картинки заглядывать всё равно нечем
       const shown = stripFwd(t).body;
-      if (msgs[i].system || shown.startsWith('__STICKER__')) return;
+      if (msgs[i].system || shown.startsWith('__STICKER__') || shown.startsWith('__SOS__')) return;
       const meta = parseFileMeta(shown);
       const hay = meta ? (meta.name || '') : shown;
       if (hay.toLowerCase().includes(needle)) chatSearch.hits.push(i);
@@ -3014,7 +3041,9 @@
 
       let bubbleContent, isSticker = false;
       const fileMeta = parseFileMeta(text);
-      if (fileMeta && (fileMeta.voice || /^audio\//.test(fileMeta.mime || ''))) {
+      if (text.startsWith('__SOS__')) {
+        bubbleContent = sosCard(text.slice(7), msg.own ? myName : (msg.sender || chatKey));
+      } else if (fileMeta && (fileMeta.voice || /^audio\//.test(fileMeta.mime || ''))) {
         // Голосовое: сразу видно, сколько слушать, а звук грузится по нажатию
         bubbleContent = `<div class="file-holder" data-voice-idx="${idx}">
              <button class="file-card" onclick="playVoice(${idx})">
@@ -3155,7 +3184,8 @@
     const fwdFile = parseFileMeta(shown);
     const out = { enc, own: true, time: now(), timestamp: Date.now(), mid,
                   isSticker: shown.startsWith('__STICKER__'),
-                  isFile: !!fwdFile, isVoice: !!(fwdFile && fwdFile.voice) };
+                  isFile: !!fwdFile, isVoice: !!(fwdFile && fwdFile.voice),
+                  isSos: shown.startsWith('__SOS__') };
     if (sec > 0) out.expiresAt = Date.now() + sec * 1000;
     chats[peer].messages.push(out);
     saveState();
@@ -3927,6 +3957,9 @@
     myKeyPair = null; myPubJwk = null;
     peerKeyCache = {}; pairKeyCache = {};
     blocked = new Set();       // список чужой, на другом аккаунте он свой
+    stopSosWatch();
+    sosCfg = { on: false, to: [], sms: false, phone: '', tpl: '' };
+    sosPoints = []; sosSent = 0;
     dmWsGen++;                 // обработчики старого сокета больше не в счёт
     clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
     dmWsAttempt = 0;
@@ -4302,6 +4335,501 @@
     showToast('@' + nick + ' разблокирован');
     renderBlockedList();
     if (currentChat === nick) { renderBlockBtn(); showPresence(nick); }
+  }
+
+  // ===== АВАРИЙНЫЙ СИГНАЛ =====
+  // Записывает координаты на устройство, пока приложение открыто, и передаёт
+  // их выбранным людям, как только появится связь. Всё хранится зашифрованным
+  // тем же ключом, что и переписка: пока связи нет, точек не видит никто.
+  //
+  // Отдельная оговорка про «связь появилась»: при веерных отключениях
+  // мобильного интернета телефон считает, что сеть есть — работает белый
+  // список оператора. Поэтому проверяем не сеть вообще, а достижимость
+  // нашего сервера, иначе сигнал ждал бы связи, которая формально уже есть.
+
+  const SOS_MAX_POINTS   = 300;      // потолок трека
+  const SOS_MIN_MOVE     = 100;      // метров: ближе — не записываем
+  const SOS_STILL_MS     = 180000;   // в покое пишем раз в три минуты
+  const SOS_MOVE_MS      = 60000;    // в движении раз в минуту
+  const SOS_PROBE_MS     = 2500;     // столько ждём ответа сервера
+
+  let sosCfg = { on: false, to: [], sms: false, phone: '', tpl: '' };
+  let sosPoints = [];        // { lat, lon, acc, t }
+  let sosSent = 0;           // сколько точек уже ушло
+  let sosWatch = null, sosTick = null, sosLastRaw = null;
+
+  const sosKey = () => 'void_sos:' + acctId(myName);
+
+  function sosDefaultTpl() {
+    return 'SOS. Координаты: {coords}\nВремя: {time}\n{link}';
+  }
+
+  // Расстояние между точками. Формула Гаверсинуса — на наших масштабах
+  // проще и точнее, чем считать по разнице градусов.
+  function sosDist(a, b) {
+    if (!a || !b) return Infinity;
+    const R = 6371000, rad = Math.PI / 180;
+    const dLat = (b.lat - a.lat) * rad, dLon = (b.lon - a.lon) * rad;
+    const s = Math.sin(dLat / 2) ** 2 +
+              Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(s));
+  }
+
+  async function loadSos() {
+    sosCfg = { on: false, to: [], sms: false, phone: '', tpl: '' };
+    sosPoints = []; sosSent = 0;
+    if (!myName || !cryptoKey) return;
+    try {
+      const raw = localStorage.getItem(sosKey());
+      if (!raw) return;
+      const box = JSON.parse(raw);
+      const plain = JSON.parse(await decryptText(box));
+      sosCfg = Object.assign(sosCfg, plain.cfg || {});
+      sosPoints = Array.isArray(plain.points) ? plain.points : [];
+      sosSent = plain.sent || 0;
+    } catch (e) { console.warn('[sos] не читается сохранённое:', e.message); }
+    renderSosUi();
+    if (sosCfg.on) startSosWatch();
+  }
+
+  async function saveSos() {
+    if (!myName || !cryptoKey) return;
+    // Номер друга и трек — самое чувствительное, что есть в приложении:
+    // храним так же, как переписку, а не открытым текстом
+    try {
+      const box = await encryptText(JSON.stringify({ cfg: sosCfg, points: sosPoints, sent: sosSent }));
+      localStorage.setItem(sosKey(), JSON.stringify(box));
+    } catch (e) { console.warn('[sos] не сохранилось:', e.message); }
+  }
+
+  // --- Сбор координат ---
+
+  function startSosWatch() {
+    if (sosWatch !== null) return;
+    if (!navigator.geolocation) { showToast('Телефон не сообщает координаты'); return; }
+    sosWatch = navigator.geolocation.watchPosition(onSosPosition, onSosError, {
+      enableHighAccuracy: false,     // высокая точность круглосуточно съедает батарею,
+      maximumAge: 30000,             // а в аварии батарея и есть главный запас
+      timeout: 30000
+    });
+    clearInterval(sosTick);
+    sosTick = setInterval(sosFlush, 30000);
+    sosFlush();
+  }
+
+  function stopSosWatch() {
+    if (sosWatch !== null) { navigator.geolocation.clearWatch(sosWatch); sosWatch = null; }
+    clearInterval(sosTick); sosTick = null;
+  }
+
+  function onSosError(err) {
+    if (err && err.code === 1) {          // отказано в доступе
+      sosCfg.on = false; saveSos(); stopSosWatch(); renderSosUi();
+      showToast('Нет доступа к координатам — сигнал выключен');
+    }
+  }
+
+  function onSosPosition(pos) {
+    const p = { lat: +pos.coords.latitude.toFixed(6), lon: +pos.coords.longitude.toFixed(6),
+                acc: Math.round(pos.coords.accuracy || 0), t: Date.now() };
+    const last = sosPoints[sosPoints.length - 1];
+    const moved = sosDist(sosLastRaw, p);
+    sosLastRaw = p;
+    // В движении пишем чаще, в покое реже: иначе стоящий на месте телефон
+    // за ночь набьёт тысячу одинаковых точек и посадит батарею
+    const need = !last ? true
+      : sosDist(last, p) >= SOS_MIN_MOVE ? true
+      : (p.t - last.t) >= (moved > 30 ? SOS_MOVE_MS : SOS_STILL_MS);
+    if (!need) return;
+    sosPoints.push(p);
+    if (sosPoints.length > SOS_MAX_POINTS) {
+      const cut = sosPoints.length - SOS_MAX_POINTS;
+      sosPoints.splice(0, cut);
+      sosSent = Math.max(0, sosSent - cut);
+    }
+    saveSos();
+    renderSosUi();
+    sosFlush();
+  }
+
+  // --- Отправка ---
+
+  // Телефон может считать, что интернет есть, а до нас не достучаться:
+  // именно так выглядит отключение с белым списком оператора
+  async function serverReachable() {
+    try {
+      const ctl = new AbortController();
+      const t = setTimeout(() => ctl.abort(), SOS_PROBE_MS);
+      const r = await fetch(API + '/api/status', { cache: 'no-store', signal: ctl.signal });
+      clearTimeout(t);
+      return r.ok;
+    } catch (e) { return false; }
+  }
+
+  function sosPayload() {
+    const fresh = sosPoints.slice(sosSent);
+    const last = sosPoints[sosPoints.length - 1] || null;
+    return JSON.stringify({
+      v: 1,
+      last,                                          // последняя точка идёт первой строкой
+      track: fresh.map(p => [p.lat, p.lon, p.t]),    // следом путь, коротким видом
+      from: sosPoints[0] ? sosPoints[0].t : null
+    });
+  }
+
+  let sosFlushing = false;
+  async function sosFlush() {
+    if (sosFlushing || !sosCfg.on || !sosCfg.to.length) return;
+    if (sosSent >= sosPoints.length) return;
+    if (!(myRawPass && dmWsAuthOk && dmWs?.readyState === 1)) return;
+    sosFlushing = true;
+    try {
+      if (!(await serverReachable())) { askSosWake(); return; }
+      const text = '__SOS__' + sosPayload();
+      let ok = false;
+      for (const peer of sosCfg.to) {
+        if (await sendTo(peer, text)) ok = true;
+      }
+      if (ok) {
+        sosSent = sosPoints.length;
+        await saveSos();
+        renderSosUi();
+        console.log('[sos] точки отправлены:', sosCfg.to.join(', '));
+      }
+    } finally { sosFlushing = false; }
+  }
+
+  // Браузер сам разбудит service worker, когда появится сеть. Отправить
+  // оттуда мы не сможем — ключа шифрования там нет, — но напомнить человеку
+  // открыть приложение можно. Это единственный способ не проспать связь.
+  async function askSosWake() {
+    try {
+      const reg = await navigator.serviceWorker?.ready;
+      if (reg && 'sync' in reg) await reg.sync.register('sos-flush');
+    } catch (e) {}
+  }
+
+  // --- Запасной канал ---
+
+  function sosSmsText() {
+    const p = sosPoints[sosPoints.length - 1];
+    const coords = p ? p.lat + ', ' + p.lon : '—';
+    const time = p ? new Date(p.t).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }) : '—';
+    const link = p ? 'https://maps.google.com/?q=' + p.lat + ',' + p.lon : '';
+    return (sosCfg.tpl || sosDefaultTpl())
+      .replace('{coords}', coords).replace('{time}', time).replace('{link}', link);
+  }
+
+  // Отправить SMS молча из браузера нельзя — открываем готовое сообщение,
+  // человеку остаётся нажать «отправить»
+  function sosSendSms() {
+    if (!sosCfg.phone) { showToast('Номер не указан'); return; }
+    const body = encodeURIComponent(sosSmsText());
+    location.href = 'sms:' + sosCfg.phone + '?body=' + body;
+  }
+
+  // --- Экраны ---
+
+  function renderSosUi() {
+    const item = document.getElementById('sos-item');
+    if (item) {
+      item.style.display = myName ? 'flex' : 'none';
+      const sub = document.getElementById('sos-sub');
+      if (sub) sub.textContent = !sosCfg.on ? 'Выключен'
+        : sosCfg.to.length ? 'Включён · ' + sosCfg.to.map(n => '@' + n).join(', ')
+        : 'Включён · получатели не выбраны';
+      const mark = document.getElementById('sos-mark');
+      if (mark) { mark.textContent = sosCfg.on ? '●' : '›'; mark.style.color = sosCfg.on ? '#ef4444' : ''; }
+    }
+    // Полоса вверху: человек не должен вспоминать, что он включил три месяца назад
+    const bar = document.getElementById('sos-bar');
+    if (!bar) return;
+    bar.style.display = sosCfg.on ? 'flex' : 'none';
+    if (!sosCfg.on) return;
+    const waiting = sosPoints.length - sosSent;
+    bar.className = 'sos-bar' + (sosCfg.sms ? ' warn' : '');
+    bar.innerHTML = '<span class="sos-dot">🆘</span>' +
+      '<span class="sos-text"><b>Аварийный сигнал включён</b>' +
+      (sosCfg.sms
+        ? ' · <span class="sos-warn">⚠️ при потере интернета уйдёт незашифрованное SMS</span>'
+        : ' · только зашифрованный канал') +
+      (waiting ? '<br><span class="sos-wait">не отправлено точек: ' + waiting + '</span>' : '') +
+      '</span>';
+  }
+
+  const sosModal = (id, inner, wide) => {
+    document.getElementById(id)?.remove();
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = id;
+    ov.innerHTML = `<div class="modal" style="max-width:${wide || 360}px;">${inner}</div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    return ov;
+  };
+
+  function showSosSettings() {
+    closeSidebar();
+    if (!myName) { showToast('Нужно войти в аккаунт'); return; }
+    if (!sosCfg.on) { showSosIntro(); return; }
+    const list = sosCfg.to.length
+      ? sosCfg.to.map(n => '<div class="acc-row" style="cursor:default;"><div class="acc-avatar">🆘</div>' +
+          '<div class="acc-info"><div class="acc-nick">@' + esc(n) + '</div></div></div>').join('')
+      : '<div class="adm-empty">Получатели не выбраны</div>';
+    sosModal('sos-overlay', `
+      <div class="modal-title">АВАРИЙНЫЙ СИГНАЛ</div>
+      <div style="font-size:12px;color:var(--text3);">Записано точек: ${sosPoints.length}${
+        sosPoints.length - sosSent ? ' · не отправлено: ' + (sosPoints.length - sosSent) : ''}</div>
+      <div class="reg-label">Кому уйдёт сигнал</div>
+      <div class="acc-list">${list}</div>
+      <button class="reg-btn" style="width:100%;" onclick="showSosRecipients()">Изменить получателей</button>
+
+      <div class="reg-label">Запасной канал: SMS</div>
+      <div style="font-size:12px;color:var(--text2);line-height:1.5;">${
+        sosCfg.sms
+          ? 'Включён, номер: <b style="color:var(--text);">' + esc(sosCfg.phone) + '</b>'
+          : 'Выключен'}</div>
+      <button class="reg-btn" style="width:100%;background:var(--bg3);color:var(--text);border:1px solid var(--border);"
+        onclick="${sosCfg.sms ? 'disableSosSms()' : 'showSosSmsIntro()'}">${
+        sosCfg.sms ? 'Выключить запасной канал' : 'Настроить запасной канал'}</button>
+      ${sosCfg.sms ? '<button class="reg-btn" style="width:100%;" onclick="sosSendSms()">Отправить SMS сейчас</button>' : ''}
+
+      <div class="modal-btns" style="margin-top:6px;">
+        <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
+        <button class="btn-primary" style="background:#ef4444;" onclick="disableSos()">Выключить</button>
+      </div>`);
+  }
+
+  function showSosIntro() {
+    sosModal('sos-intro', `
+      <div class="modal-title">АВАРИЙНЫЙ СИГНАЛ</div>
+      <div style="font-size:14px;color:var(--text2);line-height:1.6;">
+        Void запомнит, где вы находитесь, и передаст это выбранным людям,
+        когда появится связь.
+      </div>
+
+      <div class="reg-label">Как это работает</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.65;">
+        Пока приложение открыто, оно записывает ваши координаты — примерно раз
+        в минуту в движении и раз в несколько минут в покое. Спутникам интернет
+        не нужен, поэтому запись идёт и без сети.<br><br>
+        Координаты хранятся только на этом телефоне и зашифрованы так же, как
+        ваша переписка. Пока нет связи — их не видит никто, включая сервер Void.<br><br>
+        Как только связь появится, выбранным людям придёт ваша последняя точка,
+        а следом — путь, который вы прошли. Обычным сообщением, зашифрованным
+        для них одних.
+      </div>
+
+      <div class="reg-label" style="color:#f59e0b;">Чего эта функция не делает</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.65;">
+        Она работает, только пока приложение открыто на экране. Если свернуть
+        его или заблокировать телефон — запись остановится. Это ограничение
+        браузера, обойти его сможет только отдельное приложение для Android.
+        Мы над ним работаем.
+      </div>
+
+      <div class="modal-btns" style="margin-top:8px;">
+        <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+        <button class="btn-primary" onclick="enableSos()">Включить</button>
+      </div>`, 380);
+  }
+
+  async function enableSos() {
+    document.getElementById('sos-intro')?.remove();
+    sosCfg.on = true;
+    await saveSos();
+    startSosWatch();
+    renderSosUi();
+    showSosRecipients();
+  }
+
+  async function disableSos() {
+    if (!confirm('Выключить аварийный сигнал?\n\nЗаписанные точки будут удалены с устройства.')) return;
+    sosCfg.on = false;
+    sosPoints = []; sosSent = 0;
+    await saveSos();
+    stopSosWatch();
+    renderSosUi();
+    document.getElementById('sos-overlay')?.remove();
+    showToast('Аварийный сигнал выключен');
+  }
+
+  function showSosRecipients() {
+    document.getElementById('sos-overlay')?.remove();
+    const people = Object.keys(chats).filter(n => !isRoom(n));
+    sosModal('sos-to', `
+      <div class="modal-title">КОМУ УЙДЁТ СИГНАЛ</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.6;">
+        Выберите до трёх человек из ваших чатов. Первым узнает тот, кто окажется
+        в сети раньше.<br><br>
+        Они увидят вашу последнюю точку на карте, время и пройденный путь.
+        Больше ничего — переписка и остальные данные не передаются.
+      </div>
+      <div class="acc-list" id="sos-people">${
+        people.length ? people.map(n =>
+          '<div class="acc-row' + (sosCfg.to.includes(n) ? ' active' : '') + '" data-nick="' + esc(n) + '"' +
+          ' onclick="toggleSosPeer(this.dataset.nick)">' +
+            '<div class="acc-avatar" style="background:' + esc(chats[n].color || '#888') + '">' +
+              esc(n[0].toUpperCase()) + '</div>' +
+            '<div class="acc-info"><div class="acc-nick">@' + esc(n) + '</div></div>' +
+            (sosCfg.to.includes(n) ? '<div class="settings-item-arrow" style="color:var(--online);">✓</div>' : '') +
+          '</div>').join('')
+        : '<div class="adm-empty">Сначала заведите переписку с теми, кому доверяете</div>'}</div>
+      <div class="modal-btns">
+        <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove();renderSosUi()">Готово</button>
+        <button class="btn-primary" onclick="showSosSmsIntro()">Запасной канал</button>
+      </div>`);
+  }
+
+  async function toggleSosPeer(nick) {
+    const i = sosCfg.to.indexOf(nick);
+    if (i >= 0) sosCfg.to.splice(i, 1);
+    else {
+      if (sosCfg.to.length >= 3) { showToast('Больше трёх получателей не нужно'); return; }
+      sosCfg.to.push(nick);
+    }
+    await saveSos();
+    showSosRecipients();
+    renderSosUi();
+  }
+
+  function showSosSmsIntro() {
+    document.getElementById('sos-to')?.remove();
+    document.getElementById('sos-overlay')?.remove();
+    sosModal('sos-sms', `
+      <div class="modal-title">ЗАПАСНОЙ КАНАЛ: SMS</div>
+      <div style="font-size:12px;color:var(--text3);">Выключен</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.65;">
+        Если интернета не будет, но телефон поймает сотовую сеть, координаты
+        уйдут обычным SMS на указанный номер.<br><br>
+        Так же это сработает при отключениях мобильного интернета: когда
+        у оператора работает только белый список разрешённых сервисов,
+        Void в него не входит — а SMS и звонки проходят.
+      </div>
+
+      <div class="reg-label" style="color:#f59e0b;">Это работает иначе, чем всё остальное в Void</div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.7;">
+        — SMS не шифруется. Оператор связи видит текст целиком: ваши координаты,
+        время и оба номера.<br>
+        — Номер друга останется на этом устройстве. Сейчас Void не знает ни одного
+        телефонного номера — ни вашего, ни чужого. Это будет первое исключение.<br>
+        — Ваш номер увидит получатель. Если он его не знал — узнает.
+      </div>
+      <div style="font-size:13px;color:var(--text2);line-height:1.6;">
+        Мы считаем, что в настоящей аварии помощь важнее анонимности.
+        Но выбор ваш, и по умолчанию этот канал выключен.
+      </div>
+
+      <div class="modal-btns" style="margin-top:8px;">
+        <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove();renderSosUi()">Не включать</button>
+        <button class="btn-primary" onclick="showSosPhone()">Включить и указать номер</button>
+      </div>`, 400);
+  }
+
+  function showSosPhone() {
+    document.getElementById('sos-sms')?.remove();
+    sosModal('sos-phone', `
+      <div class="modal-title">НОМЕР ДЛЯ SMS</div>
+      <input class="adm-search" id="sos-num" placeholder="+7 900 000-00-00" inputmode="tel"
+             value="${esc(sosCfg.phone || '')}" autocomplete="off">
+      <div id="sos-num-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.5;">
+        Номер хранится только на этом устройстве и зашифрован вместе с остальными
+        данными Void.
+      </div>
+      <div class="modal-btns">
+        <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove();renderSosUi()">Отмена</button>
+        <button class="btn-primary" onclick="saveSosPhone()">Дальше</button>
+      </div>`);
+    setTimeout(() => document.getElementById('sos-num')?.focus(), 120);
+  }
+
+  async function saveSosPhone() {
+    const el = document.getElementById('sos-num');
+    const err = document.getElementById('sos-num-err');
+    const raw = (el?.value || '').trim();
+    // Не выдумываем правил про формат: достаточно, чтобы это был похожий на
+    // номер набор цифр, остальное решит телефон
+    const digits = raw.replace(/[^\d]/g, '');
+    if (digits.length < 10) {
+      err.textContent = 'Похоже, номер неполный'; err.style.display = 'block'; return;
+    }
+    sosCfg.phone = raw;
+    sosCfg.sms = true;
+    if (!sosCfg.tpl) sosCfg.tpl = sosDefaultTpl();
+    await saveSos();
+    showSosPreview();
+  }
+
+  function showSosPreview() {
+    document.getElementById('sos-phone')?.remove();
+    sosModal('sos-preview', `
+      <div class="modal-title">ЧТО ИМЕННО УЙДЁТ</div>
+      <pre id="sos-tpl-view" style="white-space:pre-wrap;word-break:break-word;background:var(--bg3);
+        border:1px solid var(--border);border-radius:12px;padding:12px;font-family:'Space Mono',monospace;
+        font-size:12px;line-height:1.6;color:var(--text);margin:0;">${esc(sosSmsText())}</pre>
+      <div style="font-size:12px;color:var(--text2);line-height:1.6;">
+        Названия Void в сообщении нет намеренно: координаты оператор увидит
+        в любом случае, но знать, каким мессенджером вы пользуетесь, ему незачем.
+      </div>
+      <div style="font-size:12px;color:var(--text3);">Текст можно изменить — например, добавить своё имя.</div>
+      <div class="modal-btns">
+        <button class="btn-secondary" onclick="showSosTplEdit()">Изменить текст</button>
+        <button class="btn-primary" onclick="this.closest('.modal-overlay').remove();renderSosUi();showToast('Запасной канал включён')">Готово</button>
+      </div>`, 380);
+  }
+
+  function showSosTplEdit() {
+    document.getElementById('sos-preview')?.remove();
+    sosModal('sos-tpl', `
+      <div class="modal-title">ТЕКСТ SMS</div>
+      <textarea id="sos-tpl-input" rows="5" class="adm-search" style="resize:vertical;line-height:1.5;"
+        >${esc(sosCfg.tpl || sosDefaultTpl())}</textarea>
+      <div style="font-size:11px;color:var(--text3);line-height:1.6;">
+        Вместо <b>{coords}</b> подставятся координаты, вместо <b>{time}</b> — время,
+        вместо <b>{link}</b> — ссылка на карту.
+      </div>
+      <div class="modal-btns">
+        <button class="btn-secondary" onclick="showSosPreview()">Назад</button>
+        <button class="btn-primary" onclick="saveSosTpl()">Сохранить</button>
+      </div>`);
+  }
+
+  async function saveSosTpl() {
+    const v = (document.getElementById('sos-tpl-input')?.value || '').trim();
+    sosCfg.tpl = v || sosDefaultTpl();
+    await saveSos();
+    showSosPreview();
+  }
+
+  async function disableSosSms() {
+    sosCfg.sms = false;
+    sosCfg.phone = '';
+    await saveSos();
+    document.getElementById('sos-overlay')?.remove();
+    renderSosUi();
+    showToast('Запасной канал выключен, номер удалён');
+  }
+
+  // --- Как это выглядит у получателя ---
+
+  function sosCard(payload, from) {
+    let d;
+    try { d = JSON.parse(payload); } catch (e) { return '<div class="sos-card">🆘 Аварийный сигнал</div>'; }
+    const p = d.last;
+    if (!p) return '<div class="sos-card">🆘 Аварийный сигнал</div>';
+    const when = new Date(p.t).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+    const link = 'https://maps.google.com/?q=' + p.lat + ',' + p.lon;
+    const track = Array.isArray(d.track) ? d.track.length : 0;
+    const path = track > 1 && d.from
+      ? 'путь за ' + Math.max(1, Math.round((p.t - d.from) / 60000)) + ' мин · точек: ' + track
+      : 'одна точка';
+    return `<div class="sos-card">
+      <div class="sos-card-head">🆘 Аварийный сигнал</div>
+      <div class="sos-card-coords">${esc(p.lat + ', ' + p.lon)}</div>
+      <div class="sos-card-meta">${esc(when)}${p.acc ? ' · точность ±' + p.acc + ' м' : ''}<br>${esc(path)}</div>
+      <a class="sos-card-btn" href="${link}" target="_blank" rel="noopener noreferrer">Открыть на карте</a>
+    </div>`;
   }
 
   // ===== УДАЛЕНИЕ СВОЕГО АККАУНТА =====
@@ -5322,6 +5850,9 @@
   }
 
   setInterval(sweepExpired, 30000);
+
+  // Свернули и вернулись — самый частый момент, когда связь успела появиться
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) sosFlush(); });
 
   // ===== ПЕРЕСЫЛКА =====
   // Пересланное отличается от обычного пометкой в начале текста: сервер по-
@@ -6453,6 +6984,8 @@
       if (e.data?.type === 'OPEN_CHAT' && e.data.peer && chats[e.data.peer]) {
         openChat(e.data.peer);
       }
+      // Браузер разбудил нас: сеть вернулась, накопленные точки могут уйти
+      if (e.data?.type === 'SOS_FLUSH') sosFlush();
     });
   }
 

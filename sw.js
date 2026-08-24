@@ -1,7 +1,7 @@
 // Имя кэша — это и есть версия. Пока оно не меняется, браузер не считает
 // service worker обновлённым, и в приложении может остаться старая страница:
 // именно так стикеры нового набора превращались в битые картинки.
-const CACHE = 'void-v9';
+const CACHE = 'void-v10';
 const ASSETS = ['./', './index.html', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -23,6 +23,32 @@ self.addEventListener('fetch', e => {
   e.respondWith(
     fetch(e.request).catch(() => caches.match(e.request))
   );
+});
+
+// ===== АВАРИЙНЫЙ СИГНАЛ: СВЯЗЬ ПОЯВИЛАСЬ =====
+// Единственный способ узнать о возвращении сети при закрытом приложении.
+// Отправить координаты отсюда нельзя: ключ шифрования живёт на странице,
+// и service worker к нему доступа не имеет — это не недоделка, а причина,
+// по которой сервер и не может прочитать переписку. Поэтому будим человека.
+self.addEventListener('sync', e => {
+  if (e.tag !== 'sos-flush') return;
+  e.waitUntil((async () => {
+    const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    // Приложение открыто — оно отправит само, беспокоить незачем
+    if (clients.some(c => c.visibilityState === 'visible')) {
+      clients.forEach(c => c.postMessage({ type: 'SOS_FLUSH' }));
+      return;
+    }
+    await self.registration.showNotification('Связь появилась', {
+      body: 'Откройте Void, чтобы отправить координаты',
+      icon: './icon-192.png',
+      badge: './icon-192.png',
+      tag: 'void-sos',
+      requireInteraction: true,
+      data: { sos: true },
+      vibrate: [100, 50, 100]
+    });
+  })());
 });
 
 // ===== УВЕДОМЛЕНИЯ ПРИ ЗАКРЫТОМ ПРИЛОЖЕНИИ =====
