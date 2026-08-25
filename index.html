@@ -403,6 +403,10 @@
   .file-holder { min-width:190px; }
   .file-loading { padding:14px; text-align:center; font-size:13px; color:var(--text3); }
   .msg-voice { width:230px; max-width:100%; height:36px; }
+  .media-save { display:block; width:100%; margin-top:6px; padding:7px; border-radius:10px; cursor:pointer;
+    background:var(--bg3); border:1px solid var(--border); color:var(--text2); font-size:12px;
+    font-family:'Inter',sans-serif; }
+  .media-save:hover { background:var(--glass); color:var(--text); }
   #voice-btn.recording { background:rgba(239,68,68,0.18); color:#ef4444; font-family:'Space Mono',monospace; font-size:12px; min-width:58px; }
   @keyframes recPulse { 0%,100% { opacity:1; } 50% { opacity:0.45; } }
   #voice-btn.recording { animation:recPulse 1.1s ease-in-out infinite; }
@@ -3053,14 +3057,14 @@
              </button>
            </div>`;
       } else if (fileMeta) {
-        const isImg = /^image\//.test(fileMeta.mime || '');
+        const isImg = /^(image|video)\//.test(fileMeta.mime || '');
         bubbleContent = isImg
           // Картинку не тянем сразу: сначала показываем заглушку, грузим по нажатию
           ? `<div class="file-holder" data-file-idx="${idx}">
                <button class="file-card" onclick="revealImage(${idx})">
-                 <span class="file-ico">🖼</span>
+                 <span class="file-ico">${/^video\//.test(fileMeta.mime || '') ? '🎬' : '🖼'}</span>
                  <span class="file-info"><span class="file-name">${esc(fileMeta.name || 'Изображение')}</span>
-                 <span class="file-sub">${humanSize(fileMeta.size || 0)} · нажми, чтобы показать</span></span>
+                 <span class="file-sub">${humanSize(fileMeta.size || 0)} · нажми, чтобы ${/^video\//.test(fileMeta.mime || '') ? 'посмотреть' : 'показать'}</span></span>
                </button>
              </div>`
           : `<button class="file-card" onclick="saveFile(${idx})">
@@ -5136,31 +5140,63 @@
   async function revealImage(idx) {
     const msg = chats[currentChat]?.messages[idx];
     if (!msg) return;
-    const meta = parseFileMeta(await decryptText(msg.enc));
+    // Пересланное вложение несёт пометку в начале текста — снимаем её,
+    // иначе описание файла не разбиралось и открыть его было нельзя
+    const meta = parseFileMeta(stripFwd(await decryptText(msg.enc)).body);
     if (!meta) return;
     const holder = document.querySelector('[data-file-idx="' + idx + '"]');
     if (holder) holder.innerHTML = '<div class="file-loading">Загружаю...</div>';
     const buf = await loadBlob(currentChat, meta);
     if (!buf) { if (holder) holder.innerHTML = '<div class="file-loading">Не удалось открыть</div>'; return; }
     const url = URL.createObjectURL(new Blob([buf], { type: meta.mime }));
-    if (holder) holder.innerHTML = '<img class="msg-image" src="' + url + '" alt="">';
+    if (!holder) return;
+    const isVideo = /^video\//.test(meta.mime || '');
+    holder.innerHTML =
+      (isVideo
+        ? '<video class="msg-image" src="' + url + '" controls playsinline></video>'
+        : '<img class="msg-image" src="' + url + '" alt="">') +
+      '<button class="media-save" onclick="saveMedia(' + idx + ')">⤓ Сохранить</button>';
   }
 
-  // Сохранение файла на устройство
-  async function saveFile(idx) {
+  // Сохранение файла на устройство.
+  // На телефоне обычная ссылка на скачивание кладёт файл в «Загрузки», и в
+  // галерее он не появляется. Поэтому сначала пробуем системное окно
+  // «Поделиться» — там есть «Сохранить в галерею» и «Сохранить в Фото».
+  async function saveMedia(idx) {
     const msg = chats[currentChat]?.messages[idx];
     if (!msg) return;
-    const meta = parseFileMeta(await decryptText(msg.enc));
+    const meta = parseFileMeta(stripFwd(await decryptText(msg.enc)).body);
     if (!meta) return;
-    showToast('Загружаю...');
+    showToast('Готовлю файл...');
     const buf = await loadBlob(currentChat, meta);
     if (!buf) { showToast('Не удалось загрузить'); return; }
-    const url = URL.createObjectURL(new Blob([buf], { type: meta.mime }));
+
+    const name = meta.name || 'file';
+    const type = meta.mime || 'application/octet-stream';
+    const file = new File([buf], name, { type });
+
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return;                                  // окно открылось, дальше решает человек
+      } catch (e) {
+        if (e && e.name === 'AbortError') return; // передумал — это не ошибка
+        // системное окно не сработало — уходим в обычное скачивание
+      }
+    }
+
+    const url = URL.createObjectURL(file);
     const a = document.createElement('a');
-    a.href = url; a.download = meta.name;
+    a.href = url; a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
+    showToast('Сохранено в загрузки');
   }
+
+  // Старое имя осталось в разметке карточек файлов. Именно function, а не
+  // const: обработчики onclick ищут функцию в глобальной области, куда
+  // объявление через const не попадает.
+  function saveFile(idx) { return saveMedia(idx); }
 
   // ===== ГРУППОВЫЕ ЧАТЫ =====
   // Сервер про группы ничего не знает: сообщение шифруется отдельно для
