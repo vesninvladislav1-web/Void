@@ -403,6 +403,21 @@
   .file-holder { min-width:190px; }
   .file-loading { padding:14px; text-align:center; font-size:13px; color:var(--text3); }
   .msg-voice { width:230px; max-width:100%; height:36px; }
+  .viewer { position:fixed; inset:0; z-index:400; background:#000; display:flex; align-items:center;
+    justify-content:center; animation:fadeIn 0.15s ease; }
+  .viewer-media { max-width:100%; max-height:100%; display:block; }
+  .viewer-bar { position:absolute; top:0; left:0; right:0; padding:10px 12px; display:flex;
+    align-items:flex-start; justify-content:space-between; z-index:2; }
+  .viewer-dots, .viewer-close { background:none; border:none; outline:none; box-shadow:none; padding:6px 10px;
+    color:#fff; font-size:22px; line-height:1; cursor:pointer; opacity:0.85; }
+  .viewer-dots:hover, .viewer-close:hover { opacity:1; }
+  .viewer-menu { position:absolute; top:44px; left:8px; display:none; flex-direction:column; min-width:190px;
+    background:var(--bg2); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  .viewer-menu.open { display:flex; }
+  .viewer-menu button { background:none; border:none; text-align:left; padding:12px 14px; color:var(--text);
+    font-size:14px; font-family:'Inter',sans-serif; cursor:pointer; }
+  .viewer-menu button:hover { background:var(--bg3); }
+  .msg-image { cursor:pointer; }
   .media-save { display:block; width:100%; margin-top:6px; padding:7px; border-radius:10px; cursor:pointer;
     background:var(--bg3); border:1px solid var(--border); color:var(--text2); font-size:12px;
     font-family:'Inter',sans-serif; }
@@ -5154,15 +5169,68 @@
     holder.innerHTML =
       (isVideo
         ? '<video class="msg-image" src="' + url + '" controls playsinline></video>'
-        : '<img class="msg-image" src="' + url + '" alt="">') +
+        : '<img class="msg-image" src="' + url + '" alt="" onclick="openMediaViewer(' + idx + ')">') +
       '<button class="media-save" onclick="saveMedia(' + idx + ')">⤓ Сохранить</button>';
+  }
+
+  // ===== ПРОСМОТР ВО ВЕСЬ ЭКРАН =====
+  // Открывается по нажатию на картинку: переписка не должна отвлекать,
+  // когда человек рассматривает фотографию.
+  let viewerUrl = '';
+
+  async function openMediaViewer(idx) {
+    const msg = chats[currentChat]?.messages[idx];
+    if (!msg) return;
+    const meta = parseFileMeta(stripFwd(await decryptText(msg.enc)).body);
+    if (!meta) return;
+    const buf = await loadBlob(currentChat, meta);
+    if (!buf) { showToast('Не удалось открыть'); return; }
+
+    closeMediaViewer();
+    viewerUrl = URL.createObjectURL(new Blob([buf], { type: meta.mime || 'image/jpeg' }));
+    const isVideo = /^video\//.test(meta.mime || '');
+    const ov = document.createElement('div');
+    ov.className = 'viewer';
+    ov.id = 'viewer';
+    ov.innerHTML = `
+      <div class="viewer-bar">
+        <button class="viewer-dots" onclick="event.stopPropagation();toggleViewerMenu()">⋮</button>
+        <div class="viewer-menu" id="viewer-menu">
+          <button onclick="event.stopPropagation();viewerSave(${idx}, true)">Сохранить</button>
+          <button onclick="event.stopPropagation();viewerSave(${idx}, false)">Сохранить без сжатия</button>
+        </div>
+        <button class="viewer-close" onclick="closeMediaViewer()">✕</button>
+      </div>
+      ${isVideo
+        ? '<video class="viewer-media" src="' + viewerUrl + '" controls autoplay playsinline onclick="event.stopPropagation()"></video>'
+        : '<img class="viewer-media" src="' + viewerUrl + '" alt="" onclick="event.stopPropagation()">'}`;
+    // Нажатие мимо картинки закрывает — привычнее, чем искать крестик
+    ov.addEventListener('click', () => closeMediaViewer());
+    document.body.appendChild(ov);
+  }
+
+  function toggleViewerMenu() {
+    const m = document.getElementById('viewer-menu');
+    if (m) m.classList.toggle('open');
+  }
+
+  function closeMediaViewer() {
+    document.getElementById('viewer')?.remove();
+    if (viewerUrl) { URL.revokeObjectURL(viewerUrl); viewerUrl = ''; }
+  }
+
+  // share=true — системное окно, где на телефоне есть «Сохранить в галерею».
+  // share=false — файл ровно как он лежит, без пересжатия браузером.
+  function viewerSave(idx, share) {
+    toggleViewerMenu();
+    saveMedia(idx, share);
   }
 
   // Сохранение файла на устройство.
   // На телефоне обычная ссылка на скачивание кладёт файл в «Загрузки», и в
   // галерее он не появляется. Поэтому сначала пробуем системное окно
   // «Поделиться» — там есть «Сохранить в галерею» и «Сохранить в Фото».
-  async function saveMedia(idx) {
+  async function saveMedia(idx, useShare = true) {
     const msg = chats[currentChat]?.messages[idx];
     if (!msg) return;
     const meta = parseFileMeta(stripFwd(await decryptText(msg.enc)).body);
@@ -5175,7 +5243,7 @@
     const type = meta.mime || 'application/octet-stream';
     const file = new File([buf], name, { type });
 
-    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    if (useShare && navigator.canShare && navigator.canShare({ files: [file] })) {
       try {
         await navigator.share({ files: [file] });
         return;                                  // окно открылось, дальше решает человек
