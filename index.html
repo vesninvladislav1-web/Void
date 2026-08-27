@@ -168,7 +168,18 @@
   .chats-topbar-title { font-family:'Space Mono',monospace; font-size:16px; font-weight:700; letter-spacing:2px; flex:1; }
 
   .chats-search-wrap { padding:12px 16px; border-bottom:1px solid var(--border); position:relative; flex-shrink:0; }
-  .chats-search-icon { position:absolute; left:28px; top:50%; transform:translateY(-50%); color:var(--text3); font-size:13px; pointer-events:none; }
+  .chats-search-icon { position:absolute; left:28px; top:50%; transform:translateY(-50%); color:var(--text3); pointer-events:none; display:flex; }
+  /* Значки наследуют цвет текста рядом, поэтому сами подстраиваются под тему */
+  .ico { display:block; flex-shrink:0; }
+  .settings-item-icon .ico { width:19px; height:19px; color:var(--text2); }
+  .chat-menu-item .ico, .modal .ico { width:17px; height:17px; }
+  .chat-menu-item i, .modal i[data-ico] { display:flex; flex-shrink:0; }
+  .chats-search-icon .ico { width:15px; height:15px; }
+  .fab .ico { width:24px; height:24px; }
+  .back-btn .ico, .send-btn .ico { width:20px; height:20px; }
+  .attach-btn .ico { width:18px; height:18px; }
+  .sos-bar .ico { width:15px; height:15px; }
+  .file-ico .ico { width:22px; height:22px; color:var(--text2); }
   .chats-search { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:12px; padding:9px 14px 9px 36px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; transition:border 0.2s; }
   .chats-search:focus { border-color:var(--accent); }
   /* Поиск внутри переписки */
@@ -592,7 +603,7 @@
     <div id="reg-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Только латинские буквы, цифры и _</div>
     <div class="reg-label" style="margin-top:4px;">Твоя сид-фраза</div>
     <div class="seed-box"><div class="seed-words" id="seed-words">—</div></div>
-    <button class="copy-seed-btn" onclick="copySeed()" id="copy-seed-btn">📋 Скопировать фразу</button>
+    <button class="copy-seed-btn" onclick="copySeed()" id="copy-seed-btn"><i data-ico="copy"></i>Скопировать фразу</button>
     <div class="reg-hint">Запиши фразу — нужна для восстановления аккаунта.</div>
     <div style="display:flex;gap:10px;width:100%;">
       <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
@@ -663,7 +674,7 @@
       <div class="seed-cell"><span class="seed-num">24</span><input class="seed-cell-input" id="sw24" placeholder="слово" autocomplete="off" autocorrect="off" spellcheck="false"></div>
     </div>
     <div id="login-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Заполни все 24 слова</div>
-    <div class="reg-hint">Введи слова в нужном порядке.<br>💡 Можно вставить всю фразу сразу в первое поле.</div>
+    <div class="reg-hint">Введи слова в нужном порядке.<br>Можно вставить всю фразу сразу в первое поле.</div>
     <div style="display:flex;gap:10px;width:100%;">
       <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="login()">ВОЙТИ</button>
@@ -694,7 +705,7 @@
     <div class="profile-section">
       <label for="avatar-input" class="profile-avatar-wrap" style="cursor:pointer;">
         <div class="profile-avatar" id="profile-avatar-el">?</div>
-        <div class="profile-avatar-edit">✏️</div>
+        <div class="profile-avatar-edit" data-ico="edit" data-ico-size="13"></div>
       </label>
       <div class="profile-nick" id="profile-nick">—</div>
       <div class="profile-status" id="profile-status-el" onclick="editStatus()">● В сети</div>
@@ -706,7 +717,7 @@
       <div class="settings-section-label">Внешний вид</div>
 
       <div class="settings-item" onclick="toggleTheme()">
-        <div class="settings-item-icon">🌙</div>
+        <div class="settings-item-icon" data-ico="moon"></div>
         <div class="settings-item-info">
           <div class="settings-item-name" id="theme-label">Тёмная тема</div>
           <div class="settings-item-sub" id="theme-sub">Сейчас: тёмная</div>
@@ -715,7 +726,7 @@
       </div>
 
       <div class="settings-item" onclick="showAccentModal()">
-        <div class="settings-item-icon">🎨</div>
+        <div class="settings-item-icon" data-ico="palette"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Тема оформления</div>
           <div class="settings-item-sub">Выбрать градиент</div>
@@ -726,7 +737,7 @@
       <div class="settings-section-label">Аккаунт</div>
 
       <div class="settings-item" id="accounts-menu-item" style="display:none;" onclick="showAccountsModal()">
-        <div class="settings-item-icon">👥</div>
+        <div class="settings-item-icon" data-ico="people"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Аккаунты</div>
           <div class="settings-item-sub" id="accounts-menu-sub">Добавить ещё один</div>
@@ -735,7 +746,7 @@
       </div>
 
       <div class="settings-item" id="blocked-item" onclick="showBlockedModal()">
-        <div class="settings-item-icon">🚫</div>
+        <div class="settings-item-icon" data-ico="ban"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Чёрный список</div>
           <div class="settings-item-sub" id="blocked-sub">Никого нет</div>
@@ -744,7 +755,7 @@
       </div>
 
       <div class="settings-item" id="sos-item" onclick="showSosSettings()">
-        <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);">🆘</div>
+        <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);" data-ico="sos"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Аварийный сигнал</div>
           <div class="settings-item-sub" id="sos-sub">Выключен</div>
@@ -753,16 +764,16 @@
       </div>
 
       <div class="settings-item" id="presence-item" onclick="togglePresencePrivacy()">
-        <div class="settings-item-icon">👁️</div>
+        <div class="settings-item-icon" data-ico="eye"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Показывать, когда я в сети</div>
           <div class="settings-item-sub" id="presence-sub">Собеседники видят это</div>
         </div>
-        <div class="settings-item-arrow" id="presence-mark">✓</div>
+        <div class="settings-item-arrow" id="presence-mark" data-ico="check" data-ico-size="16"></div>
       </div>
 
       <div class="settings-item" id="change-pass-item" onclick="showChangePassModal()">
-        <div class="settings-item-icon">🔑</div>
+        <div class="settings-item-icon" data-ico="lock"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Сменить пароль</div>
           <div class="settings-item-sub">Переписка сохранится</div>
@@ -771,7 +782,7 @@
       </div>
 
       <div class="settings-item" id="devices-item" onclick="showDevicesModal()">
-        <div class="settings-item-icon">📱</div>
+        <div class="settings-item-icon" data-ico="phone"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Устройства</div>
           <div class="settings-item-sub" id="devices-sub">Где выполнен вход</div>
@@ -780,7 +791,7 @@
       </div>
 
       <div class="settings-item" id="delete-account-item" onclick="showDeleteAccountModal()">
-        <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);">🗑️</div>
+        <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);" data-ico="trash"></div>
         <div class="settings-item-info">
           <div class="settings-item-name" style="color:#ef4444;">Удалить аккаунт</div>
           <div class="settings-item-sub">Навсегда, вместе с перепиской</div>
@@ -791,7 +802,7 @@
       <div class="settings-section-label">Система</div>
 
       <div class="settings-item" onclick="showLangModal()">
-        <div class="settings-item-icon">🌐</div>
+        <div class="settings-item-icon" data-ico="globe"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Язык</div>
           <div class="settings-item-sub" id="lang-sub">Русский</div>
@@ -800,7 +811,7 @@
       </div>
 
       <div class="settings-item" id="seed-menu-item" onclick="showSeedModal()">
-        <div class="settings-item-icon">🔑</div>
+        <div class="settings-item-icon" data-ico="key"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Сид-фраза</div>
           <div class="settings-item-sub">Показать мою фразу</div>
@@ -809,7 +820,7 @@
       </div>
 
       <div class="settings-item" id="admin-menu-item" style="display:none;" onclick="showAdminPanel()">
-        <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);">🛡️</div>
+        <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);" data-ico="shield"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Админ-панель</div>
           <div class="settings-item-sub">Управление аккаунтами</div>
@@ -820,7 +831,7 @@
       <div class="settings-section-label">О приложении</div>
 
       <div class="settings-item" onclick="showAboutModal()">
-        <div class="settings-item-icon">ℹ️</div>
+        <div class="settings-item-icon" data-ico="info"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">О Void</div>
           <div class="settings-item-sub">Версия 1.0</div>
@@ -831,7 +842,7 @@
       <div class="settings-divider"></div>
 
       <div class="logout-item" onclick="logout()">
-        <div class="logout-item-icon">🚪</div>
+        <div class="logout-item-icon" data-ico="door" data-ico-size="18"></div>
         <span>Выйти из аккаунта</span>
       </div>
     </div>
@@ -844,25 +855,25 @@
     <div class="chats-screen" id="chats-screen">
       <div class="sos-bar" id="sos-bar" style="display:none;" onclick="showSosSettings()"></div>
       <div class="chats-topbar">
-        <button class="icon-btn burger-btn" onclick="toggleSidebar()">☰</button>
+        <button class="icon-btn burger-btn" onclick="toggleSidebar()" data-ico="burger" aria-label="Меню"></button>
         <div class="chats-topbar-title">Сообщения</div>
         <div class="chat-menu-wrap">
-          <button class="icon-btn" onclick="toggleChatsMenu()" id="chats-menu-btn">⋮</button>
+          <button class="icon-btn" onclick="toggleChatsMenu()" id="chats-menu-btn" data-ico="dots" aria-label="Ещё"></button>
           <div class="chat-menu" id="chats-menu">
-            <button class="chat-menu-item" onclick="showNewGroupModal()">👥 Новая группа</button>
-            <button class="chat-menu-item" onclick="showLanModal();closeChatsMenu()">📡 LAN чат</button>
+            <button class="chat-menu-item" onclick="showNewGroupModal()"><i data-ico="group"></i>Новая группа</button>
+            <button class="chat-menu-item" onclick="showLanModal();closeChatsMenu()"><i data-ico="lan"></i>LAN чат</button>
           </div>
         </div>
       </div>
 
       <div class="chats-search-wrap">
-        <span class="chats-search-icon">🔍</span>
+        <span class="chats-search-icon" data-ico="search"></span>
         <input type="text" class="chats-search" id="chats-search" placeholder="Поиск чатов..." oninput="filterChats(this.value)">
       </div>
 
       <div class="chats-list" id="chat-list">
         <div class="empty-chats" id="empty-chats" onclick="showNewChatModal()">
-          <div class="empty-icon">💬</div>
+          <div class="empty-icon" data-ico="smile" data-ico-size="40"></div>
           <p>Нет активных чатов.<br>Нажми чтобы начать переписку</p>
         </div>
       </div>
@@ -871,7 +882,7 @@
     <!-- ЧАТ -->
     <div class="chat-view" id="chat-view">
       <div class="chat-topbar">
-        <button class="back-btn" onclick="backToChats()">←</button>
+        <button class="back-btn" onclick="backToChats()" data-ico="back" aria-label="Назад"></button>
         <div class="avatar" id="cv-avatar" style="width:38px;height:38px;border-radius:12px;font-size:14px;">?</div>
         <div class="chat-topbar-info">
           <div class="chat-topbar-name" id="cv-name">—</div>
@@ -879,17 +890,17 @@
         </div>
         <div class="chat-topbar-actions">
           <div class="chat-menu-wrap">
-            <button class="icon-btn" onclick="toggleChatMenu()" id="chat-menu-btn">⋮</button>
+            <button class="icon-btn" onclick="toggleChatMenu()" id="chat-menu-btn" data-ico="dots" aria-label="Ещё"></button>
             <div class="chat-menu" id="chat-menu">
-              <button class="chat-menu-item" id="search-item" onclick="openChatSearch();closeChatMenu()">🔍 Поиск в переписке</button>
-              <button class="chat-menu-item" onclick="showBgModal();closeChatMenu()">🖼️ Фон чата</button>
-              <button class="chat-menu-item" id="secure-btn" onclick="toggleSecure();closeChatMenu()">🛡️ Защита</button>
-              <button class="chat-menu-item" id="lan-invite-item" onclick="lanInvite()" style="display:none">📋 Код комнаты</button>
-              <button class="chat-menu-item" id="group-info-item" onclick="showGroupInfo();closeChatMenu()" style="display:none">👥 Состав группы</button>
-              <button class="chat-menu-item" id="safety-item" onclick="showSafetyModal();closeChatMenu()">🔐 Сверить ключи</button>
-              <button class="chat-menu-item" id="ttl-item" onclick="showTtlModal();closeChatMenu()">🔥 Исчезающие сообщения</button>
-              <button class="chat-menu-item" id="block-item" onclick="toggleBlockCurrent();closeChatMenu()">🚫 Заблокировать</button>
-              <button class="chat-menu-item danger" id="delete-chat-item" onclick="deleteCurrentChat();closeChatMenu()">🗑️ Удалить чат</button>
+              <button class="chat-menu-item" id="search-item" onclick="openChatSearch();closeChatMenu()"><i data-ico="search"></i>Поиск в переписке</button>
+              <button class="chat-menu-item" onclick="showBgModal();closeChatMenu()"><i data-ico="image"></i>Фон чата</button>
+              <button class="chat-menu-item" id="secure-btn" onclick="toggleSecure();closeChatMenu()"><i data-ico="shield"></i>Защита</button>
+              <button class="chat-menu-item" id="lan-invite-item" onclick="lanInvite()" style="display:none"><i data-ico="copy"></i>Код комнаты</button>
+              <button class="chat-menu-item" id="group-info-item" onclick="showGroupInfo();closeChatMenu()" style="display:none"><i data-ico="group"></i>Состав группы</button>
+              <button class="chat-menu-item" id="safety-item" onclick="showSafetyModal();closeChatMenu()"><i data-ico="verify"></i>Сверить ключи</button>
+              <button class="chat-menu-item" id="ttl-item" onclick="showTtlModal();closeChatMenu()"><i data-ico="fire"></i>Исчезающие сообщения</button>
+              <button class="chat-menu-item" id="block-item" onclick="toggleBlockCurrent();closeChatMenu()"><i data-ico="ban"></i>Заблокировать</button>
+              <button class="chat-menu-item danger" id="delete-chat-item" onclick="deleteCurrentChat();closeChatMenu()"><i data-ico="trash"></i>Удалить чат</button>
             </div>
           </div>
         </div>
@@ -899,13 +910,13 @@
         <input type="text" id="chat-search-input" placeholder="Искать в переписке..."
                oninput="runChatSearch(this.value)" onkeydown="chatSearchKey(event)" autocomplete="off">
         <span class="chat-search-count" id="chat-search-count"></span>
-        <button class="icon-btn" onclick="chatSearchStep(-1)" title="Раньше">↑</button>
-        <button class="icon-btn" onclick="chatSearchStep(1)" title="Позже">↓</button>
-        <button class="icon-btn" onclick="closeChatSearch()" title="Закрыть">✕</button>
+        <button class="icon-btn" onclick="chatSearchStep(-1)" title="Раньше" data-ico="up"></button>
+        <button class="icon-btn" onclick="chatSearchStep(1)" title="Позже" data-ico="down"></button>
+        <button class="icon-btn" onclick="closeChatSearch()" title="Закрыть" data-ico="close"></button>
       </div>
 
       <div class="messages" id="messages">
-        <div class="no-messages" id="no-messages">Напиши первое сообщение 👋</div>
+        <div class="no-messages" id="no-messages">Напиши первое сообщение</div>
       </div>
 
       <div class="sticker-panel" id="sticker-panel" style="display:none;">
@@ -919,23 +930,23 @@
       <input type="file" id="file-input" style="display:none;" onchange="sendFile(event)">
       <div class="reply-bar" id="reply-bar" style="display:none;">
         <div class="reply-bar-quote" id="reply-bar-quote"></div>
-        <button class="reply-bar-cancel" onclick="clearReply()">✕</button>
+        <button class="reply-bar-cancel" onclick="clearReply()" data-ico="close" aria-label="Отменить"></button>
       </div>
 
       <div class="reply-bar" id="edit-bar" style="display:none;">
         <div class="reply-bar-quote" id="edit-bar-quote" style="border-left-color:#F59E0B;"></div>
-        <button class="reply-bar-cancel" onclick="cancelEdit()">✕</button>
+        <button class="reply-bar-cancel" onclick="cancelEdit()" data-ico="close" aria-label="Отменить"></button>
       </div>
       <div class="input-area">
-        <button class="icon-btn" onclick="toggleStickerPanel()" title="Стикеры" style="flex-shrink:0;">😊</button>
-        <button class="attach-btn" onclick="pickFile()" title="Прикрепить файл">📎</button>
-        <button class="attach-btn" id="voice-btn" onclick="toggleVoice()" title="Голосовое сообщение">🎤</button>
-        <button class="attach-btn" id="voice-cancel" onclick="cancelVoice()" title="Отменить запись" style="display:none;">✕</button>
+        <button class="icon-btn" onclick="toggleStickerPanel()" title="Стикеры" style="flex-shrink:0;" data-ico="smile"></button>
+        <button class="attach-btn" onclick="pickFile()" title="Прикрепить файл" data-ico="clip"></button>
+        <button class="attach-btn" id="voice-btn" onclick="toggleVoice()" title="Голосовое сообщение" data-ico="mic"></button>
+        <button class="attach-btn" id="voice-cancel" onclick="cancelVoice()" title="Отменить запись" style="display:none;" data-ico="close"></button>
         <div class="input-wrap">
           <input type="text" class="msg-input" id="msg-input" placeholder="Написать сообщение..." onkeydown="handleKey(event)">
         </div>
-        <button class="send-btn" id="send-btn" onmousedown="sendBtnDown()" onmouseup="sendBtnUp()" onmouseleave="sendBtnCancel()" ontouchstart="sendBtnDown(event)" ontouchend="sendBtnUp()" ontouchcancel="sendBtnCancel()">➤</button>
-        <button class="icon-btn" id="capsule-btn" onclick="showCapsuleModal()" title="Капсула времени" style="flex-shrink:0;">🕰️</button>
+        <button class="send-btn" id="send-btn" data-ico="send" onmousedown="sendBtnDown()" onmouseup="sendBtnUp()" onmouseleave="sendBtnCancel()" ontouchstart="sendBtnDown(event)" ontouchend="sendBtnUp()" ontouchcancel="sendBtnCancel()"></button>
+        <button class="icon-btn" id="capsule-btn" onclick="showCapsuleModal()" title="Капсула времени" style="flex-shrink:0;" data-ico="clock"></button>
       </div>
     </div>
 
@@ -945,13 +956,88 @@
 <input type="file" id="avatar-input" accept="image/*" style="display:none;position:fixed;" onchange="loadAvatar(event)">
 
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
-<button class="fab" id="fab" onclick="showNewChatModal()">✏️</button>
+<button class="fab" id="fab" onclick="showNewChatModal()" data-ico="plus" aria-label="Новый чат"></button>
 
 <script>
+  // ===== ЗНАЧКИ ИНТЕРФЕЙСА =====
+  // Свои вместо системных смайлов. Причина простая: один и тот же смайл
+  // Android, iPhone и старый Samsung рисуют по-разному — приложение
+  // выглядело собранным из чужих кусков. Здесь всё в одном стиле и
+  // одинаково везде.
+  //
+  // Линии, а не заливка: значок наследует цвет текста рядом с собой,
+  // поэтому сам подстраивается под тему и под состояние кнопки.
+  const ICON_PATHS = {
+    // — меню и навигация —
+    burger:   '<path d="M4 7h16M4 12h16M4 17h16"/>',
+    back:     '<path d="M15 5l-7 7 7 7"/>',
+    close:    '<path d="M6 6l12 12M18 6L6 18"/>',
+    dots:     '<circle cx="12" cy="5" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.4" fill="currentColor" stroke="none"/>',
+    chevron:  '<path d="M9 5l7 7-7 7"/>',
+    up:       '<path d="M12 19V5M6 11l6-6 6 6"/>',
+    down:     '<path d="M12 5v14M6 13l6 6 6-6"/>',
+    check:    '<path d="M4 12.5l5 5L20 6.5"/>',
+
+    // — действия с сообщением —
+    reply:    '<path d="M9 7L4 12l5 5"/><path d="M4 12h9a7 7 0 017 7v1"/>',
+    forward:  '<path d="M15 7l5 5-5 5"/><path d="M20 12h-9a7 7 0 00-7 7v1"/>',
+    copy:     '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 012-2h10"/>',
+    edit:     '<path d="M4 20h4l10-10-4-4L4 16v4z"/><path d="M14 6l4 4"/>',
+    trash:    '<path d="M4 7h16"/><path d="M9 7V5a1 1 0 011-1h4a1 1 0 011 1v2"/><path d="M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12"/>',
+
+    // — вложения —
+    clip:     '<path d="M20 11l-8.5 8.5a4.5 4.5 0 01-6.4-6.4L14 4.2a3 3 0 014.3 4.3l-8.8 8.8a1.5 1.5 0 01-2.2-2.1l8-8"/>',
+    mic:      '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v3"/>',
+    image:    '<rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M4 17l5-5 4 4 3-2 4 4"/>',
+    video:    '<rect x="3" y="6" width="12" height="12" rx="2"/><path d="M15 10l6-3v10l-6-3z"/>',
+    file:     '<path d="M14 3H7a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8z"/><path d="M14 3v5h5"/>',
+    music:    '<path d="M9 18V5l10-2v13"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/>',
+    archive:  '<rect x="3" y="4" width="18" height="5" rx="1"/><path d="M5 9v10a1 1 0 001 1h12a1 1 0 001-1V9"/><path d="M10 13h4"/>',
+    download: '<path d="M12 4v11M7 11l5 5 5-5"/><path d="M4 19h16"/>',
+
+    // — настройки —
+    moon:     '<path d="M20 14a8 8 0 01-10-10 8 8 0 1010 10z"/>',
+    palette:  '<path d="M12 3a9 9 0 000 18c1.5 0 2-1 1.4-2-.7-1.2 0-2.5 1.4-2.5H17a4 4 0 004-4c0-5-4-9.5-9-9.5z"/><circle cx="7.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="9.5" cy="8" r="1.2" fill="currentColor" stroke="none"/><circle cx="14.5" cy="7.5" r="1.2" fill="currentColor" stroke="none"/>',
+    people:   '<circle cx="9" cy="8" r="3.2"/><path d="M3 20a6 6 0 0112 0"/><path d="M16 5.5a3.2 3.2 0 010 6M17 14.5a6 6 0 014 5.5"/>',
+    eye:      '<path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="2.7"/>',
+    key:      '<circle cx="8" cy="12" r="4"/><path d="M12 12h9M18 12v3M15.5 12v2.5"/>',
+    phone:    '<rect x="6" y="2.5" width="12" height="19" rx="3"/><path d="M10.5 18.5h3"/>',
+    globe:    '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/>',
+    shield:   '<path d="M12 3l8 3v6c0 5-3.5 8.2-8 9-4.5-.8-8-4-8-9V6z"/>',
+    lock:     '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/>',
+    info:     '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.2"/>',
+    door:     '<path d="M14 3H6a1 1 0 00-1 1v16a1 1 0 001 1h8"/><path d="M18 12H10M14 8l4 4-4 4"/>',
+    search:   '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
+    ban:      '<circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/>',
+    fire:     '<path d="M12 3s1 3-1 5.5C9 11 7 11.5 7 14.5A5 5 0 0017 15c0-3-2-4-2.5-6.5C14 6 12 3 12 3z"/>',
+    verify:   '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
+    group:    '<circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M2.5 19a5.5 5.5 0 0111 0M13 14a5.5 5.5 0 018.5 5"/>',
+    lan:      '<path d="M12 19v-3"/><rect x="8" y="19" width="8" height="3" rx="1"/><path d="M6.5 12a7 7 0 0111 0M3.5 8.5a11 11 0 0117 0"/>',
+    clock:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.5l3.5 2"/>',
+    warn:     '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.2"/>',
+    sos:      '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16v.2"/>',
+    send:     '<path d="M4 12l16-8-6 16-2.5-6.5z"/>',
+    smile:    '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.5 6 1.5 7 0"/><path d="M9 9.5v.2M15 9.5v.2"/>',
+    online:   '<circle cx="12" cy="12" r="5" fill="currentColor" stroke="none"/>',
+    map:      '<path d="M9 3L3 5.5v15L9 18l6 3 6-2.5v-15L15 6z"/><path d="M9 3v15M15 6v15"/>',
+    plus:     '<path d="M12 5v14M5 12h14"/>'
+  };
+
+  // size — в пикселях; цвет берётся от текста, поэтому отдельно не задаём
+  function ico(name, size) {
+    const p = ICON_PATHS[name];
+    if (!p) return '';
+    const s = size || 20;
+    return '<svg class="ico" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" ' +
+      'stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ' +
+      'aria-hidden="true">' + p + '</svg>';
+  }
+
+
   // ===== ПЕРЕВОДЫ =====
   const LANGS = {
-    ru: { messages:'Сообщения', search:'Поиск чатов...', noChats:'Нет активных чатов.\nНажми чтобы начать переписку', noMessages:'Напиши первое сообщение 👋', writeMsg:'Написать сообщение...', newChat:'НОВЫЙ ЧАТ', newChatPh:'Ник собеседника...', cancel:'Отмена', start:'Начать', online:'● В сети', langName:'Русский' },
-    en: { messages:'Messages', search:'Search chats...', noChats:'No active chats.\nTap to start a conversation', noMessages:'Send the first message 👋', writeMsg:'Write a message...', newChat:'NEW CHAT', newChatPh:'Enter username...', cancel:'Cancel', start:'Start', online:'● Online', langName:'English' }
+    ru: { messages:'Сообщения', search:'Поиск чатов...', noChats:'Нет активных чатов.\nНажми чтобы начать переписку', noMessages:'Напиши первое сообщение', writeMsg:'Написать сообщение...', newChat:'НОВЫЙ ЧАТ', newChatPh:'Ник собеседника...', cancel:'Отмена', start:'Начать', online:'● В сети', langName:'Русский' },
+    en: { messages:'Messages', search:'Search chats...', noChats:'No active chats.\nTap to start a conversation', noMessages:'Send the first message', writeMsg:'Write a message...', newChat:'NEW CHAT', newChatPh:'Enter username...', cancel:'Cancel', start:'Start', online:'● Online', langName:'English' }
   };
   let lang = 'ru';
   function t(k) { return LANGS[lang][k] || k; }
@@ -1432,9 +1518,9 @@
     const text = currentSeed.join(' ');
     const btn = document.getElementById('copy-seed-btn');
     const success = () => {
-      btn.textContent = '✅ Скопировано!';
+      btn.innerHTML = ico('check', 16) + 'Скопировано';
       btn.classList.add('copied');
-      setTimeout(()=>{ btn.textContent='📋 Скопировать фразу'; btn.classList.remove('copied'); }, 2000);
+      setTimeout(()=>{ btn.innerHTML = ico('copy', 15) + 'Скопировать фразу'; btn.classList.remove('copied'); }, 2000);
     };
     if (navigator.clipboard && window.isSecureContext) {
       navigator.clipboard.writeText(text).then(success).catch(()=>fallbackCopy(text,success));
@@ -1683,7 +1769,7 @@
     const el = document.getElementById('cv-sub');
     if (!el) return;
     // Своя блокировка важнее статуса: полезнее видеть, почему тихо
-    if (isBlockedPeer(nick)) { el.textContent = '🚫 заблокирован'; el.style.color = 'var(--text3)'; return; }
+    if (isBlockedPeer(nick)) { el.innerHTML = ico('ban', 12) + ' заблокирован'; el.style.color = 'var(--text3)'; return; }
     const p = nick ? presence[nick] : null;
     if (!p || p.hidden) { el.textContent = ''; return; }
     if (p.online) { el.textContent = '● в сети'; el.style.color = 'var(--online)'; }
@@ -1784,7 +1870,7 @@
         '</div>'
       : '';
     ov.innerHTML =
-      '<div style="font-size:52px;">' + (deleted ? '🗑️' : '🚫') + '</div>' +
+      '<div style="display:flex;justify-content:center;">' + ico(deleted ? 'trash' : 'ban', 52) + '</div>' +
       '<div style="font-size:19px;font-weight:700;color:var(--text);">' +
         (deleted ? 'Аккаунт удалён' : 'Аккаунт заблокирован') + '</div>' +
       '<div style="font-size:13px;color:var(--text2);line-height:1.6;max-width:300px;">' +
@@ -1801,9 +1887,9 @@
     if (!el) return;
     if (!myRawPass) { el.style.display = 'none'; return; }
     el.style.display = 'block';
-    if (status === 'ok')         { el.textContent = '🟢 Сервер подключён'; el.style.color = 'var(--online)'; }
-    else if (status === 'wait')  { el.textContent = '🟡 Подключение...';   el.style.color = '#F59E0B'; }
-    else                         { el.textContent = '🔴 Нет связи';        el.style.color = '#EF4444'; }
+    if (status === 'ok')         { el.textContent = 'Сервер подключён'; el.style.color = 'var(--online)'; }
+    else if (status === 'wait')  { el.textContent = 'Подключение...';   el.style.color = '#F59E0B'; }
+    else                         { el.textContent = 'Нет связи';        el.style.color = '#EF4444'; }
   }
 
   // ===== УВЕДОМЛЕНИЯ ПРИ ЗАКРЫТОМ ПРИЛОЖЕНИИ =====
@@ -1998,9 +2084,9 @@
     const shown = stripFwd(text).body;
     const fm = parseFileMeta(shown);
     sendNotification(key,
-      shown.startsWith('__SOS__') ? '🆘 Аварийный сигнал'
-        : shown.startsWith('__STICKER__') ? '🎭 Стикер'
-        : fm ? (fm.voice ? '🎤 Голосовое сообщение' : '📎 ' + (fm.name || 'Вложение'))
+      shown.startsWith('__SOS__') ? 'Аварийный сигнал'
+        : shown.startsWith('__STICKER__') ? 'Стикер'
+        : fm ? (fm.voice ? 'Голосовое сообщение' : (fm.name || 'Вложение'))
         : shown);
   }
 
@@ -2746,14 +2832,20 @@
       box.appendChild(b);
       return b;
     };
+    // То же самое, но со значком слева
+    const addIco = (name, label, style, fn) => {
+      const b = add(label, style + 'display:flex;align-items:center;gap:10px;', fn);
+      b.insertAdjacentHTML('afterbegin', ico(name, 17));
+      return b;
+    };
 
     // Текст кладём обработчику напрямую, а не в разметку: подставлять
     // содержимое сообщения в onclick — верный способ однажды сломать страницу
-    if (canCopy) add('📋 Скопировать', plain, () => copyMsg(body));
-    if (canFwd)  add('↪️ Переслать', plain, () => showForwardModal(idx));
-    if (canEdit) add('✏️ Изменить', plain, () => startEdit(idx));
-    add('🗑️ Удалить у себя', danger, () => deleteMsg(idx, false));
-    if (canUnsend) add('🗑️ Удалить у всех', danger, () => deleteMsg(idx, true));
+    if (canCopy) addIco('copy', 'Скопировать', plain, () => copyMsg(body));
+    if (canFwd)  addIco('forward', 'Переслать', plain, () => showForwardModal(idx));
+    if (canEdit) addIco('edit', 'Изменить', plain, () => startEdit(idx));
+    addIco('trash', 'Удалить у себя', danger, () => deleteMsg(idx, false));
+    if (canUnsend) addIco('trash', 'Удалить у всех', danger, () => deleteMsg(idx, true));
     add('Отмена', B('background:var(--bg3);border:1px solid var(--border);color:var(--text2);text-align:center;'), () => {});
 
     document.body.appendChild(menu);
@@ -2829,11 +2921,11 @@
       const isLan = isLanChat(nick);
       const grp = groupOf(nick);
       const displayName = grp ? esc(grp.name) : isLan ? esc(chat.name || 'LAN') : '@' + esc(nick);
-      const avatarContent = grp ? '👥' : isLan ? '📡' : avatarInner(nick);
+      const avatarContent = grp ? ico('group', 20) : isLan ? ico('lan', 20) : avatarInner(nick);
       const lastText = last
         ? (last.system
             ? `<i>${esc(last.text)}</i>`
-            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.isSos ? '🆘 Аварийный сигнал' : last.isVoice ? '🎤 Голосовое' : last.isFile ? '📎 Вложение' : last.enc?.ct ? '🔒 Сообщение' : esc(last.enc?.plain || last.text || '')))
+            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.isSos ? 'Аварийный сигнал' : last.isVoice ? 'Голосовое' : last.isFile ? 'Вложение' : last.enc?.ct ? 'Сообщение' : esc(last.enc?.plain || last.text || '')))
         : 'Нет сообщений';
       const item = document.createElement('div');
       item.className = 'chat-item' + (currentChat===nick?' active':'');
@@ -2865,7 +2957,7 @@
       document.getElementById('chat-view').classList.add('active');
       document.getElementById('fab').classList.remove('visible');
       const gav = document.getElementById('cv-avatar');
-      gav.textContent = '👥'; gav.style.fontSize = '20px'; gav.style.background = chats[nick].color || '#888';
+      gav.innerHTML = ico('group', 22); gav.style.fontSize = ''; gav.style.background = chats[nick].color || '#888';
       document.getElementById('cv-name').textContent = g ? g.name : 'Группа';
       document.getElementById('cv-sub').textContent = g ? 'участников: ' + g.members.length : '';
       document.getElementById('cv-sub').style.color = 'var(--text3)';
@@ -2886,8 +2978,8 @@
       document.getElementById('chat-view').classList.add('active');
       document.getElementById('fab').classList.remove('visible');
       const av = document.getElementById('cv-avatar');
-      av.textContent = '📡'; av.style.fontSize = '22px'; av.style.background = '#FF6B4A';
-      document.getElementById('cv-name').textContent = chats[nick]?.name || '📡 LAN';
+      av.innerHTML = ico('lan', 22); av.style.fontSize = ''; av.style.background = '#FF6B4A';
+      document.getElementById('cv-name').textContent = chats[nick]?.name || 'LAN';
       document.getElementById('voice-btn').style.display = 'none';
       applyBg(chats[nick]?.bg || '');
       renderMessages();
@@ -3066,7 +3158,7 @@
         // Голосовое: сразу видно, сколько слушать, а звук грузится по нажатию
         bubbleContent = `<div class="file-holder" data-voice-idx="${idx}">
              <button class="file-card" onclick="playVoice(${idx})">
-               <span class="file-ico">🎤</span>
+               <span class="file-ico">${ico('mic', 22)}</span>
                <span class="file-info"><span class="file-name">Голосовое сообщение</span>
                <span class="file-sub">${esc(voiceLen(fileMeta.dur))} · нажми, чтобы послушать</span></span>
              </button>
@@ -3077,7 +3169,7 @@
           // Картинку не тянем сразу: сначала показываем заглушку, грузим по нажатию
           ? `<div class="file-holder" data-file-idx="${idx}">
                <button class="file-card" onclick="revealImage(${idx})">
-                 <span class="file-ico">${/^video\//.test(fileMeta.mime || '') ? '🎬' : '🖼'}</span>
+                 <span class="file-ico">${/^video\//.test(fileMeta.mime || '') ? ico('video', 22) : ico('image', 22)}</span>
                  <span class="file-info"><span class="file-name">${esc(fileMeta.name || 'Изображение')}</span>
                  <span class="file-sub">${humanSize(fileMeta.size || 0)} · нажми, чтобы ${/^video\//.test(fileMeta.mime || '') ? 'посмотреть' : 'показать'}</span></span>
                </button>
@@ -3106,25 +3198,25 @@
             ? `<div class="msg-sticker-emoji">${esc(sval)}</div>`
             : isPicture
               ? `<img class="msg-sticker" src="${esc(sval)}">`
-              : `<div class="msg-sticker-missing">🚫<span>стикер из набора,<br>которого здесь нет</span></div>`;
+              : `<div class="msg-sticker-missing">${ico('ban', 22)}<span>стикер из набора,<br>которого здесь нет</span></div>`;
       } else if (isLocked) {
-        bubbleContent = `<div class="capsule-bubble">🔒<br><span style="font-size:11px;color:var(--text2);font-family:'Space Mono',monospace;">Откроется ${unlockDate}</span><br><span class="capsule-countdown" data-unlock="${msg.unlockAt}">${formatCountdown(msg.unlockAt)}</span></div>`;
+        bubbleContent = `<div class="capsule-bubble">${ico('lock', 22)}<br><span style="font-size:11px;color:var(--text2);font-family:'Space Mono',monospace;">Откроется ${unlockDate}</span><br><span class="capsule-countdown" data-unlock="${msg.unlockAt}">${formatCountdown(msg.unlockAt)}</span></div>`;
       } else {
-        bubbleContent = msg.unlockAt ? `🎉 ${hlText(text)}` : hlText(text);
+        bubbleContent = hlText(text);
       }
 
       // У своих сообщений пузырь светится оранжевым. Для стикера фон и рамку
       // убрали, а тень осталась и обводила его ореолом — гасим и её.
       const bubbleStyle = isSticker ? 'style="background:transparent;border:none;padding:4px;box-shadow:none;"' : '';
-      const replyQuote = msg.reply ? `<div class="reply-quote">↩ ${esc(msg.reply.text.slice(0,60))}</div>` : '';
-      const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">↩</button>`;
+      const replyQuote = msg.reply ? `<div class="reply-quote">${ico('reply', 13)}${esc(msg.reply.text.slice(0,60))}</div>` : '';
+      const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">${ico('reply', 15)}</button>`;
       const editedMark = msg.edited ? '<span class="msg-edited">изменено</span> ' : '';
-      const ttlMark = msg.expiresAt ? `<span class="msg-ttl" title="Исчезнет через ${ttlLeft(msg.expiresAt)}">🔥</span> ` : '';
+      const ttlMark = msg.expiresAt ? `<span class="msg-ttl" title="Исчезнет через ${ttlLeft(msg.expiresAt)}">${ico('fire', 11)}</span> ` : '';
       const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${ttlMark}${editedMark}${msg.time}${msg.own?' <span class="check'+(msg.read?' read':'')+'">'+(msg.read?CHECK2_ICON:CHECK_ICON)+'</span>':''}</span>`;
       const reactionsHtml = (msg.reactions && msg.reactions.length)
         ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
-      const fwdHead = fwdFrom ? `<div class="fwd-head">↪ переслано от @${esc(fwdFrom)}</div>` : '';
+      const fwdHead = fwdFrom ? `<div class="fwd-head">${ico('forward', 12)}переслано от @${esc(fwdFrom)}</div>` : '';
       const bubbleInner = isSticker ? `${fwdHead}${bubbleContent}` : `${fwdHead}${replyQuote}${bubbleContent}${timeHtml}`;
       const avatarLetter = isLanRoom ? (msg.sender?.[0] || '?').toUpperCase() : avatarInner(chatKey);
       const senderDiv = (isLanRoom && !msg.own && msg.sender) ? `<div class="msg-sender">${esc(msg.sender)}</div>` : '';
@@ -3366,7 +3458,7 @@
     const bar = document.getElementById('edit-bar');
     if (bar) bar.style.display = 'flex';
     const q = document.getElementById('edit-bar-quote');
-    if (q) q.textContent = '✏️ ' + text.slice(0, 60);
+    if (q) q.innerHTML = ico('edit', 12) + esc(text.slice(0, 60));
     const input = document.getElementById('msg-input');
     input.value = text;
     input.focus();
@@ -3440,7 +3532,7 @@
         <div class="modal-title">ФОН ЧАТА</div>
         <div class="bg-picker-grid" id="bg-swatches">${swatches}</div>
         <label style="display:flex;align-items:center;gap:8px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;cursor:pointer;font-size:13px;color:var(--text2);">
-          🖼️ Своя картинка
+          Своя картинка
           <input type="file" accept="image/*" style="display:none;" onchange="loadBgImage(event,this.closest('.modal-overlay'))">
         </label>
         <div class="modal-btns"><button class="btn-primary" onclick="this.closest('.modal-overlay').remove()">Готово</button></div>
@@ -3583,8 +3675,8 @@
         <div class="modal-title">АДМИН-ПАНЕЛЬ</div>
         <input class="adm-search" id="adm-search" placeholder="Поиск по нику..." autocomplete="off">
         <div class="adm-list" id="adm-list"><div class="adm-empty">Загрузка...</div></div>
-        <button class="adm-btn" style="width:100%;" id="adm-totp-btn" onclick="showTotpModal()">🔐 Двухфакторная защита</button>
-        <button class="adm-btn danger" style="width:100%;" onclick="adminPurgeMessages()">🗑️ Очистить все сообщения на сервере</button>
+        <button class="adm-btn" style="width:100%;" id="adm-totp-btn" onclick="showTotpModal()"><i data-ico="verify"></i>Двухфакторная защита</button>
+        <button class="adm-btn danger" style="width:100%;" onclick="adminPurgeMessages()"><i data-ico="trash"></i>Очистить все сообщения на сервере</button>
         <div class="modal-btns">
           <button class="btn-secondary" onclick="loadAdminUsers()">Обновить</button>
           <button class="btn-primary" onclick="document.getElementById('admin-overlay')?.remove()">Закрыть</button>
@@ -3627,7 +3719,7 @@
         (u.online ? '<span class="adm-tag on">онлайн</span>' : '');
       const meta = 'Сообщений: ' + u.messages + (u.banned && u.banReason ? ' · причина: ' + esc(u.banReason) : '');
       const shots = (u.banned && u.evidence)
-        ? '<button class="adm-btn" style="width:100%;" onclick="showBanEvidence(\'' + u.nick + '\')">🖼 Скриншоты: ' + u.evidence + '</button>'
+        ? '<button class="adm-btn" style="width:100%;" onclick="showBanEvidence(\'' + u.nick + '\')"><i data-ico="image"></i>Скриншоты: ' + u.evidence + '</button>'
         : '';
       // Ник подставляется в onclick, поэтому пропускаем только заведомо
       // безопасный набор символов, а не полагаемся на валидацию в другом месте
@@ -3656,7 +3748,7 @@
     if (!btn) return;
     try {
       const r = await adminCall('totp-status', {});
-      btn.textContent = r.enabled ? '🔐 Двухфакторная защита: включена' : '🔐 Двухфакторная защита: выключена';
+      btn.innerHTML = ico('verify', 16) + 'Двухфакторная защита: ' + (r.enabled ? 'включена' : 'выключена');
       btn.classList.toggle('good', !!r.enabled);
     } catch (e) { /* панель откроется и без этого */ }
   }
@@ -3712,7 +3804,7 @@
         <a href="${esc(r.uri)}" class="reg-btn" style="width:100%;display:block;text-align:center;text-decoration:none;line-height:1.2;">ДОБАВИТЬ В ПРИЛОЖЕНИЕ</a>
         <div style="font-size:11px;color:var(--text3);text-align:center;">Не открылось? Введи ключ вручную:</div>
         <div style="background:var(--bg3);border:1px solid var(--border);border-radius:12px;padding:11px;font-family:'Space Mono',monospace;font-size:12px;color:var(--text);word-break:break-all;text-align:center;letter-spacing:1px;">${esc(r.secret)}</div>
-        <button class="adm-btn" style="width:100%;" onclick="copyMsg('${esc(r.secret)}');showToast('Ключ скопирован')">📋 Скопировать ключ</button>
+        <button class="adm-btn" style="width:100%;" onclick="copyMsg('${esc(r.secret)}');showToast('Ключ скопирован')"><i data-ico="copy"></i>Скопировать ключ</button>
         <div style="font-size:13px;color:var(--text2);">3. Введи код, который показывает приложение:</div>
         <input class="adm-search" id="totp-code" placeholder="000000" inputmode="numeric" maxlength="6" autocomplete="off" style="text-align:center;letter-spacing:6px;font-size:20px;font-family:'Space Mono',monospace;">
         <div id="totp-err" style="color:#ef4444;font-size:12px;display:none;"></div>
@@ -3798,7 +3890,7 @@
         <input class="adm-search" id="ban-reason" placeholder="например: спам" autocomplete="off" maxlength="200">
         <div class="reg-label">Скриншоты <span style="color:var(--text3);font-weight:400;">— до ${EVIDENCE_MAX}, необязательно</span></div>
         <div class="shot-grid" id="ban-shots"></div>
-        <button class="adm-btn" id="ban-add" style="width:100%;" onclick="document.getElementById('ban-file').click()">📎 Прикрепить картинку</button>
+        <button class="adm-btn" id="ban-add" style="width:100%;" onclick="document.getElementById('ban-file').click()"><i data-ico="clip"></i>Прикрепить картинку</button>
         <input type="file" id="ban-file" accept="image/*" multiple style="display:none;" onchange="addBanShots(event)">
         <div id="ban-err" style="color:#ef4444;font-size:12px;display:none;"></div>
         <button class="reg-btn" style="width:100%;background:#F59E0B;" id="ban-btn" onclick="doAdminBan('${nick}')">ЗАБЛОКИРОВАТЬ</button>
@@ -3813,14 +3905,14 @@
     const box = document.getElementById('ban-shots');
     if (!box) return;
     box.innerHTML = banShots.map((src, i) =>
-      '<div class="shot"><img src="' + src + '" alt=""><button class="shot-x" onclick="removeBanShot(' + i + ')">✕</button></div>'
+      '<div class="shot"><img src="' + src + '" alt=""><button class="shot-x" onclick="removeBanShot(' + i + ')" data-ico="close" data-ico-size="12"></button></div>'
     ).join('');
     const add = document.getElementById('ban-add');
     if (add) {
       add.disabled = banShots.length >= EVIDENCE_MAX;
       add.textContent = banShots.length >= EVIDENCE_MAX
         ? 'Больше ' + EVIDENCE_MAX + ' нельзя'
-        : '📎 Прикрепить картинку' + (banShots.length ? ' (' + banShots.length + '/' + EVIDENCE_MAX + ')' : '');
+        : 'Прикрепить картинку' + (banShots.length ? ' (' + banShots.length + '/' + EVIDENCE_MAX + ')' : '');
     }
   }
 
@@ -4173,7 +4265,7 @@
         const current = dev.id === me;
         const safe = /^[A-Za-z0-9_-]+$/.test(dev.id);
         return '<div class="acc-row' + (current ? ' active' : '') + '" style="cursor:default;">' +
-            '<div class="acc-avatar">' + (dev.online ? '🟢' : '📱') + '</div>' +
+            '<div class="acc-avatar">' + (dev.online ? ico('online', 14) : ico('phone', 16)) + '</div>' +
             '<div class="acc-info">' +
               '<div class="acc-nick">' + esc(dev.name) + (current ? ' · это устройство' : '') + '</div>' +
               '<div class="acc-sub">' + (dev.online ? 'на связи' : 'был(а) ' + whenSeen(dev.lastSeen)) + '</div>' +
@@ -4208,7 +4300,7 @@
     const sub = document.getElementById('presence-sub');
     const mark = document.getElementById('presence-mark');
     if (sub) sub.textContent = hidePresence ? 'Скрыто от собеседников' : 'Собеседники видят это';
-    if (mark) { mark.textContent = hidePresence ? '✕' : '✓'; mark.style.color = hidePresence ? 'var(--text3)' : 'var(--online)'; }
+    if (mark) { mark.innerHTML = ico(hidePresence ? 'close' : 'check', 16); mark.style.color = hidePresence ? 'var(--text3)' : 'var(--online)'; }
     const item = document.getElementById('presence-item');
     if (item) item.style.display = myName ? 'flex' : 'none';
   }
@@ -4282,7 +4374,7 @@
     btn.style.display = isLan ? 'none' : 'flex';
     if (isLan) return;
     const on = isBlockedPeer(currentChat);
-    btn.textContent = on ? '✅ Разблокировать' : '🚫 Заблокировать';
+    btn.innerHTML = ico(on ? 'check' : 'ban', 17) + (on ? 'Разблокировать' : 'Заблокировать');
     btn.classList.toggle('danger', !on);
   }
 
@@ -4338,7 +4430,7 @@
     if (!res.list.length) { list.innerHTML = '<div class="adm-empty">Список пуст</div>'; return; }
     list.innerHTML = res.list.map(b =>
       '<div class="acc-row" style="cursor:default;">' +
-        '<div class="acc-avatar">🚫</div>' +
+        '<div class="acc-avatar">' + ico('ban', 17) + '</div>' +
         '<div class="acc-info">' +
           '<div class="acc-nick">@' + esc(b.nick) + '</div>' +
           '<div class="acc-sub">с ' + esc(whenSeen(b.at)) + '</div>' +
@@ -4567,10 +4659,10 @@
     if (!sosCfg.on) return;
     const waiting = sosPoints.length - sosSent;
     bar.className = 'sos-bar' + (sosCfg.sms ? ' warn' : '');
-    bar.innerHTML = '<span class="sos-dot">🆘</span>' +
+    bar.innerHTML = '<span class="sos-dot">' + ico('sos', 15) + '</span>' +
       '<span class="sos-text"><b>Аварийный сигнал включён</b>' +
       (sosCfg.sms
-        ? ' · <span class="sos-warn">⚠️ при потере интернета уйдёт незашифрованное SMS</span>'
+        ? ' · <span class="sos-warn">при потере интернета уйдёт незашифрованное SMS</span>'
         : ' · только зашифрованный канал') +
       (waiting ? '<br><span class="sos-wait">не отправлено точек: ' + waiting + '</span>' : '') +
       '</span>';
@@ -4691,7 +4783,7 @@
             '<div class="acc-avatar" style="background:' + esc(chats[n].color || '#888') + '">' +
               esc(n[0].toUpperCase()) + '</div>' +
             '<div class="acc-info"><div class="acc-nick">@' + esc(n) + '</div></div>' +
-            (sosCfg.to.includes(n) ? '<div class="settings-item-arrow" style="color:var(--online);">✓</div>' : '') +
+            (sosCfg.to.includes(n) ? '<div class="settings-item-arrow" style="color:var(--online);" data-ico="check" data-ico-size="15"></div>' : '') +
           '</div>').join('')
         : '<div class="adm-empty">Сначала заведите переписку с теми, кому доверяете</div>'}</div>
       <div class="modal-btns">
@@ -4834,9 +4926,9 @@
 
   function sosCard(payload, from) {
     let d;
-    try { d = JSON.parse(payload); } catch (e) { return '<div class="sos-card">🆘 Аварийный сигнал</div>'; }
+    try { d = JSON.parse(payload); } catch (e) { return '<div class="sos-card">Аварийный сигнал</div>'; }
     const p = d.last;
-    if (!p) return '<div class="sos-card">🆘 Аварийный сигнал</div>';
+    if (!p) return '<div class="sos-card">Аварийный сигнал</div>';
     const when = new Date(p.t).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
     const link = 'https://maps.google.com/?q=' + p.lat + ',' + p.lon;
     const track = Array.isArray(d.track) ? d.track.length : 0;
@@ -4844,7 +4936,7 @@
       ? 'путь за ' + Math.max(1, Math.round((p.t - d.from) / 60000)) + ' мин · точек: ' + track
       : 'одна точка';
     return `<div class="sos-card">
-      <div class="sos-card-head">🆘 Аварийный сигнал</div>
+      <div class="sos-card-head">${ico('sos', 15)}Аварийный сигнал</div>
       <div class="sos-card-coords">${esc(p.lat + ', ' + p.lon)}</div>
       <div class="sos-card-meta">${esc(when)}${p.acc ? ' · точность ±' + p.acc + ' м' : ''}<br>${esc(path)}</div>
       <a class="sos-card-btn" href="${link}" target="_blank" rel="noopener noreferrer">Открыть на карте</a>
@@ -5170,7 +5262,7 @@
       (isVideo
         ? '<video class="msg-image" src="' + url + '" controls playsinline></video>'
         : '<img class="msg-image" src="' + url + '" alt="" onclick="openMediaViewer(' + idx + ')">') +
-      '<button class="media-save" onclick="saveMedia(' + idx + ')">⤓ Сохранить</button>';
+      '<button class="media-save" onclick="saveMedia(' + idx + ')">' + ico('download', 15) + 'Сохранить</button>';
   }
 
   // ===== ПРОСМОТР ВО ВЕСЬ ЭКРАН =====
@@ -5199,7 +5291,7 @@
           <button onclick="event.stopPropagation();viewerSave(${idx}, true)">Сохранить</button>
           <button onclick="event.stopPropagation();viewerSave(${idx}, false)">Сохранить без сжатия</button>
         </div>
-        <button class="viewer-close" onclick="closeMediaViewer()">✕</button>
+        <button class="viewer-close" onclick="closeMediaViewer()" data-ico="close" data-ico-size="20"></button>
       </div>
       ${isVideo
         ? '<video class="viewer-media" src="' + viewerUrl + '" controls autoplay playsinline onclick="event.stopPropagation()"></video>'
@@ -5440,7 +5532,7 @@
     if (currentChat === key) renderMessages();
     renderChatList();
     sendNotification(chats[key].group.name + ' · ' + from,
-      parsed.body.startsWith('__STICKER__') ? '🎭 Стикер' : parsed.body);
+      parsed.body.startsWith('__STICKER__') ? 'Стикер' : parsed.body);
     return true;
   }
 
@@ -5522,7 +5614,7 @@
     const box = document.getElementById('grp-chosen');
     if (!box) return;
     box.innerHTML = groupDraft.map((n, i) =>
-      '<span class="grp-chip">@' + esc(n) + '<button onclick="removeGroupMember(' + i + ')">✕</button></span>').join('');
+      '<span class="grp-chip">@' + esc(n) + '<button onclick="removeGroupMember(' + i + ')" data-ico="close" data-ico-size="11"></button></span>').join('');
   }
 
   async function doCreateGroup() {
@@ -5623,7 +5715,7 @@
       btn.textContent = '⏹ ' + String(Math.floor(sec / 60)) + ':' + String(sec % 60).padStart(2, '0');
       btn.classList.add('recording');
     } else {
-      btn.textContent = '🎤';
+      btn.innerHTML = ico('mic', 18);
       btn.classList.remove('recording');
     }
     const cancel = document.getElementById('voice-cancel');
@@ -5761,7 +5853,7 @@
       chat.verified = false;
       chat.messages.push({
         system: true,
-        text: '⚠️ Ключ @' + nick + ' изменился. Если вы не меняли устройство — сверьте ключи заново.',
+        text: 'Ключ @' + nick + ' изменился. Если вы не меняли устройство — сверьте ключи заново.',
         timestamp: Date.now()
       });
       if (currentChat === nick) renderMessages();
@@ -5777,7 +5869,7 @@
     const isLan = isRoom(currentChat);
     btn.style.display = isLan ? 'none' : 'flex';
     if (isLan) return;
-    btn.textContent = chats[currentChat]?.verified ? '🔐 Ключи сверены ✓' : '🔐 Сверить ключи';
+    btn.innerHTML = ico('verify', 17) + (chats[currentChat]?.verified ? 'Ключи сверены' : 'Сверить ключи');
   }
 
   async function showSafetyModal() {
@@ -5815,7 +5907,7 @@
         ${sn.groups.slice(0, 6).map(esc).join(' ')}<br>${sn.groups.slice(6).map(esc).join(' ')}
       </div>
       <div id="safety-state" style="font-size:12px;color:${verified ? 'var(--online)' : 'var(--text3)'};text-align:center;">
-        ${verified ? '✓ Вы отметили, что ключи сверены' : 'Ключи ещё не сверены'}
+        ${verified ? 'Вы отметили, что ключи сверены' : 'Ключи ещё не сверены'}
       </div>
       <div class="modal-btns" style="margin-top:12px;">
         <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
@@ -5888,7 +5980,7 @@
     btn.style.display = isLan ? 'none' : 'flex';
     if (isLan) return;
     const sec = ttlFor(currentChat);
-    btn.textContent = sec ? '🔥 Исчезают: ' + ttlLabel(sec).toLowerCase() : '🔥 Исчезающие сообщения';
+    btn.innerHTML = ico('fire', 17) + (sec ? 'Исчезают: ' + ttlLabel(sec).toLowerCase() : 'Исчезающие сообщения');
   }
 
   function showTtlModal() {
@@ -5906,9 +5998,9 @@
         </div>
         <div class="acc-list">${TTL_CHOICES.map(c =>
           '<div class="acc-row' + (c.sec === cur ? ' active' : '') + '" onclick="pickTtl(' + c.sec + ')">' +
-            '<div class="acc-avatar">' + (c.sec ? '🔥' : '∞') + '</div>' +
+            '<div class="acc-avatar">' + (c.sec ? ico('fire', 17) : '∞') + '</div>' +
             '<div class="acc-info"><div class="acc-nick">' + c.label + '</div></div>' +
-            (c.sec === cur ? '<div class="settings-item-arrow" style="color:var(--online);">✓</div>' : '') +
+            (c.sec === cur ? '<div class="settings-item-arrow" style="color:var(--online);" data-ico="check" data-ico-size="15"></div>' : '') +
           '</div>').join('')}</div>
         <div class="modal-btns"><button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Отмена</button></div>
       </div>`;
@@ -6059,14 +6151,13 @@
   }
 
   function fileIcon(mime) {
-    if (/^image\//.test(mime)) return '🖼';
-    if (/^video\//.test(mime)) return '🎬';
-    if (/^audio\//.test(mime)) return '🎵';
-    if (/pdf/.test(mime)) return '📕';
-    if (/zip|rar|7z|tar|gz/.test(mime)) return '🗜';
-    if (/word|document|text/.test(mime)) return '📄';
-    if (/sheet|excel|csv/.test(mime)) return '📊';
-    return '📎';
+    if (/^image\//.test(mime)) return ico('image', 22);
+    if (/^video\//.test(mime)) return ico('video', 22);
+    if (/^audio\//.test(mime)) return ico('music', 22);
+    if (/pdf|word|document|text/.test(mime)) return ico('file', 22);
+    if (/zip|rar|7z|tar|gz/.test(mime)) return ico('archive', 22);
+    if (/sheet|excel|csv/.test(mime)) return ico('file', 22);
+    return ico('clip', 22);
   }
 
   // ===== СВОИ СТИКЕРЫ =====
@@ -6509,7 +6600,7 @@
     const overlay = document.createElement('div');
     overlay.id = 'lan-overlay';
     overlay.className = 'lan-overlay';
-    overlay.innerHTML = `<button class="lan-back" onclick="closeLanModal()">←</button><div class="lan-icon">📡</div><div class="lan-title">LAN ЧАТ</div><div class="lan-sub">Групповой чат по коду комнаты. Работает в локальной сети и через интернет.</div><div class="lan-divider"></div><button class="lan-btn lan-btn-primary" onclick="lanCreateStep1()">Создать комнату</button><button class="lan-btn lan-btn-secondary" onclick="lanJoin()">Войти в комнату</button>`;
+    overlay.innerHTML = `<button class="lan-back" onclick="closeLanModal()">←</button><div class="lan-icon" data-ico="lan" data-ico-size="34"></div><div class="lan-title">LAN ЧАТ</div><div class="lan-sub">Групповой чат по коду комнаты. Работает в локальной сети и через интернет.</div><div class="lan-divider"></div><button class="lan-btn lan-btn-primary" onclick="lanCreateStep1()">Создать комнату</button><button class="lan-btn lan-btn-secondary" onclick="lanJoin()">Войти в комнату</button>`;
     document.body.appendChild(overlay);
   }
 
@@ -6542,13 +6633,13 @@
         <div class="lan-title">КОМНАТА СОЗДАНА</div>
         <div class="lan-sub">Поделись кодом с участниками</div>
         <div class="lan-code">${roomId}</div>
-        <button class="lan-btn lan-btn-secondary" style="max-width:240px;padding:10px;" onclick="navigator.clipboard.writeText('${roomId}').then(()=>showToast('Код скопирован ✓'))">📋 Скопировать код</button>
+        <button class="lan-btn lan-btn-secondary" style="max-width:240px;padding:10px;" onclick="navigator.clipboard.writeText('${roomId}').then(()=>showToast('Код скопирован'))"><i data-ico="copy"></i>Скопировать код</button>
         <div class="lan-divider"></div>
         <div class="lan-status" id="lan-status">⏳ Ожидаю участников...</div>
         <div id="lan-peers-list" style="width:100%;max-width:320px;"></div>
       `);
     } catch(err) {
-      lanHtml(`<div class="lan-status">❌ ${esc(err.message)}</div><button class="lan-btn lan-btn-secondary" onclick="lanCreateStep1()">← Назад</button>`);
+      lanHtml(`<div class="lan-status">${esc(err.message)}</div><button class="lan-btn lan-btn-secondary" onclick="lanCreateStep1()">← Назад</button>`);
     }
   }
 
@@ -6585,7 +6676,7 @@
       const st = document.getElementById('lan-status');
       if (st) st.textContent = '⏳ Ожидаю хоста...';
     } catch(err) {
-      lanHtml(`<div class="lan-status">❌ ${esc(err.message)}</div><button class="lan-btn lan-btn-secondary" onclick="lanJoin()">← Назад</button>`);
+      lanHtml(`<div class="lan-status">${esc(err.message)}</div><button class="lan-btn lan-btn-secondary" onclick="lanJoin()">← Назад</button>`);
     }
   }
 
@@ -6651,7 +6742,7 @@
       await pc.setLocalDescription(answer);
       lanRoom.ws.send(JSON.stringify({ type:'answer', to:fromPeerId, sdp:answer.sdp }));
       const st = document.getElementById('lan-status');
-      if (st) st.textContent = '🔗 Устанавливаю соединение...';
+      if (st) st.textContent = 'Устанавливаю соединение...';
     } catch(e) {}
   }
 
@@ -6672,7 +6763,7 @@
     if (!lanRoom) return;
     const chatKey = `__lan__:${lanRoom.id}`;
     if (chats[chatKey]) {
-      lanStoreSys(chatKey, '⚠️ Связь с сервером потеряна');
+      lanStoreSys(chatKey, 'Связь с сервером потеряна');
       if (currentChat === chatKey) renderMessages();
     }
   }
@@ -6739,9 +6830,9 @@
         lanRoom.myLabel = data.yourLabel;
         if (data.roomName) {
           lanRoom.name = data.roomName;
-          if (chats[chatKey]) chats[chatKey].name = `📡 ${data.roomName}`;
+          if (chats[chatKey]) chats[chatKey].name = `${data.roomName}`;
           const nameEl = document.getElementById('cv-name');
-          if (nameEl && currentChat === chatKey) nameEl.textContent = `📡 ${data.roomName}`;
+          if (nameEl && currentChat === chatKey) nameEl.textContent = `${data.roomName}`;
         }
       } else if (data.type === 'join') {
         lanStoreSys(chatKey, `${data.label} присоединился`);
@@ -6758,12 +6849,12 @@
   }
 
   function lanStoreMsg(chatKey, text, time, sender, own) {
-    if (!chats[chatKey]) chats[chatKey] = { name:`📡 ${lanRoom?.name||'LAN'}`, color:'#FF6B4A', messages:[], isLan:true };
+    if (!chats[chatKey]) chats[chatKey] = { name:`${lanRoom?.name||'LAN'}`, color:'#FF6B4A', messages:[], isLan:true };
     chats[chatKey].messages.push({ enc:{ plain:text }, own, time, timestamp:Date.now(), sender });
     if (currentChat === chatKey) renderMessages();
   }
   function lanStoreSys(chatKey, text) {
-    if (!chats[chatKey]) chats[chatKey] = { name:`📡 ${lanRoom?.name||'LAN'}`, color:'#FF6B4A', messages:[], isLan:true };
+    if (!chats[chatKey]) chats[chatKey] = { name:`${lanRoom?.name||'LAN'}`, color:'#FF6B4A', messages:[], isLan:true };
     chats[chatKey].messages.push({ system:true, text, time:now(), timestamp:Date.now() });
   }
 
@@ -6772,13 +6863,13 @@
     if (!lanRoom) return;
     closeSidebar();
     const chatKey = `__lan__:${lanRoom.id}`;
-    if (!chats[chatKey]) chats[chatKey] = { name:`📡 ${lanRoom.name}`, color:'#FF6B4A', messages:[], isLan:true };
+    if (!chats[chatKey]) chats[chatKey] = { name:`${lanRoom.name}`, color:'#FF6B4A', messages:[], isLan:true };
     document.getElementById('chats-screen').classList.add('hidden');
     document.getElementById('fab').classList.remove('visible');
     document.getElementById('chat-view').classList.add('active');
-    document.getElementById('cv-name').textContent = `📡 ${lanRoom.name}`;
+    document.getElementById('cv-name').textContent = `${lanRoom.name}`;
     const av = document.getElementById('cv-avatar');
-    av.textContent = '📡'; av.style.fontSize = '22px'; av.style.background = '#FF6B4A';
+    av.innerHTML = ico('lan', 22); av.style.fontSize = ''; av.style.background = '#FF6B4A';
     currentChat = chatKey;
     applyBg(chats[chatKey].bg || '');
     renderMessages();
@@ -6801,7 +6892,7 @@
       <div class="lan-title">КОД КОМНАТЫ</div>
       <div class="lan-sub">Поделись этим кодом с новыми участниками</div>
       <div class="lan-code">${esc(code)}</div>
-      <button class="lan-btn lan-btn-secondary" style="max-width:240px;padding:10px;" onclick="navigator.clipboard.writeText('${esc(code)}').then(()=>showToast('Код скопирован ✓'))">📋 Скопировать код</button>
+      <button class="lan-btn lan-btn-secondary" style="max-width:240px;padding:10px;" onclick="navigator.clipboard.writeText('${esc(code)}').then(()=>showToast('Код скопирован'))"><i data-ico="copy"></i>Скопировать код</button>
     `);
   }
 
@@ -6816,7 +6907,7 @@
     overlay.className = 'modal-overlay';
     overlay.innerHTML = `
       <div class="modal">
-        <div class="modal-title">🕰️ КАПСУЛА ВРЕМЕНИ</div>
+        <div class="modal-title"><i data-ico="clock"></i>КАПСУЛА ВРЕМЕНИ</div>
         <div style="font-size:13px;color:var(--text2);text-align:center;">Сообщение откроется в указанное время</div>
         <input type="datetime-local" class="modal-input" id="capsule-dt" min="${min}" style="font-family:monospace;font-size:14px;">
         <div class="modal-btns">
@@ -6834,7 +6925,7 @@
     pendingCapsuleTime = new Date(val).getTime();
     document.querySelector('.modal-overlay').remove();
     document.getElementById('capsule-btn').classList.add('armed');
-    document.getElementById('capsule-btn').title = '🕰️ ' + new Date(pendingCapsuleTime).toLocaleString('ru');
+    document.getElementById('capsule-btn').title = new Date(pendingCapsuleTime).toLocaleString('ru');
   }
 
   function cancelCapsule() {
@@ -6882,7 +6973,7 @@
     const btn = document.getElementById('secure-btn');
     if (!btn) return;
     btn.classList.toggle('active', secureMode);
-    btn.textContent = secureMode ? '🛡️ Защита: вкл' : '🛡️ Защита: выкл';
+    btn.innerHTML = ico('shield', 17) + (secureMode ? 'Защита: вкл' : 'Защита: выкл');
     btn.title = secureMode ? 'Защита включена' : 'Защита выключена';
   }
 
@@ -6896,7 +6987,7 @@
     try { localStorage.setItem('void_secure', secureMode ? '1' : '0'); } catch(e) {}
     updateSecureBtn();
     if (secureMode) {
-      showToast('🛡️ Защита включена');
+      showToast('Защита включена');
     } else {
       hideSecureOverlay();
       showToast('Защита выключена');
@@ -6910,7 +7001,7 @@
     // Экран НЕ убирается сам при возврате: иначе подсмотреть содержимое можно
     // было бы в момент переключения, да и пользователь не видел, что защита сработала
     secureOverlay.innerHTML = `
-      <div class="secure-overlay-icon">🛡️</div>
+      <div class="secure-overlay-icon" data-ico="shield" data-ico-size="46"></div>
       <div class="secure-overlay-text">СОДЕРЖИМОЕ СКРЫТО</div>
       <button onclick="hideSecureOverlay()" style="margin-top:24px;padding:12px 28px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:14px;color:var(--text2);font-size:14px;font-family:'Space Mono',monospace;cursor:pointer;letter-spacing:2px;">ПОКАЗАТЬ</button>
       <button onclick="toggleSecure();hideSecureOverlay();" style="margin-top:8px;padding:10px 24px;background:transparent;border:none;color:var(--text3);font-size:12px;font-family:'Inter',sans-serif;cursor:pointer;">Выключить защиту</button>
@@ -6927,14 +7018,14 @@
   // ===== ОНБОРДИНГ =====
   const OB_SLIDES = {
     simple: [
-      { icon:'🎉', title:'ДОБРО ПОЖАЛОВАТЬ', text:'VOID — мессенджер без телефона,\nпочты и слежки.' },
-      { icon:'💬', title:'КАК ПИСАТЬ', text:'Нажми ✏️ внизу → введи ник собеседника → начни переписку.' },
-      { icon:'🔒', title:'БЕЗОПАСНОСТЬ', text:'Не забудь пароль.\nВосстановить аккаунт без него невозможно.' }
+      { ico:'shield', title:'ДОБРО ПОЖАЛОВАТЬ', text:'VOID — мессенджер без телефона,\nпочты и слежки.' },
+      { ico:'smile', title:'КАК ПИСАТЬ', text:'Нажми кнопку внизу справа, введи ник собеседника и начни переписку.' },
+      { ico:'lock', title:'БЕЗОПАСНОСТЬ', text:'Не забудь пароль.\nВосстановить аккаунт без него невозможно.' }
     ],
     anon: [
-      { icon:'🎉', title:'ДОБРО ПОЖАЛОВАТЬ', text:'VOID — анонимный мессенджер.\nНикакой почты, телефона или имени.' },
-      { icon:'🔑', title:'ЧТО ТАКОЕ СИД-ФРАЗА', text:'24 слова = твой ключ к аккаунту.\nБез них войти снова невозможно.' },
-      { icon:'📝', title:'ЗАПИШИ ФРАЗУ СЕЙЧАС', seed: true }
+      { ico:'shield', title:'ДОБРО ПОЖАЛОВАТЬ', text:'VOID — анонимный мессенджер.\nНикакой почты, телефона или имени.' },
+      { ico:'key', title:'ЧТО ТАКОЕ СИД-ФРАЗА', text:'24 слова — твой ключ к аккаунту.\nБез них войти снова невозможно.' },
+      { ico:'edit', title:'ЗАПИШИ ФРАЗУ СЕЙЧАС', seed: true }
     ]
   };
   let obIdx = 0, obList = [];
@@ -6949,10 +7040,10 @@
   function renderObSlide(animate = false) {
     const s = obList[obIdx];
     const content = document.getElementById('ob-content');
-    let html = `<div class="ob-icon">${s.icon}</div><div class="ob-title">${s.title}</div>`;
+    let html = `<div class="ob-icon">${ico(s.ico, 44)}</div><div class="ob-title">${s.title}</div>`;
     if (s.seed) {
       html += `<div class="ob-seed-display">${currentSeed.join(' · ')}</div>`;
-      html += `<button class="ob-copy-btn" onclick="copySeed()">📋 Скопировать фразу</button>`;
+      html += `<button class="ob-copy-btn" onclick="copySeed()"><i data-ico="copy"></i>Скопировать фразу</button>`;
       html += `<div class="ob-warn">Запиши или скопируй фразу прежде чем продолжить</div>`;
     } else {
       html += `<div class="ob-text">${s.text.replace(/\n/g,'<br>')}</div>`;
@@ -7030,21 +7121,21 @@
 
     if (isIOS) {
       banner.innerHTML = `
-        <div class="install-banner-icon">📲</div>
+        <div class="install-banner-icon" data-ico="download" data-ico-size="24"></div>
         <div class="install-banner-text">
           <div class="install-banner-title">Установить VOID</div>
           <div class="install-banner-sub">Нажми «Поделиться» → «На экран Домой»</div>
         </div>
-        <button class="install-banner-close" onclick="this.closest('#install-banner').remove()">✕</button>`;
+        <button class="install-banner-close" onclick="this.closest('#install-banner').remove()" data-ico="close" data-ico-size="14"></button>`;
     } else {
       banner.innerHTML = `
-        <div class="install-banner-icon">📲</div>
+        <div class="install-banner-icon" data-ico="download" data-ico-size="24"></div>
         <div class="install-banner-text">
           <div class="install-banner-title">Установить VOID</div>
           <div class="install-banner-sub">Добавить как приложение на телефон</div>
         </div>
         <button class="install-banner-btn" onclick="triggerInstall()">Установить</button>
-        <button class="install-banner-close" onclick="this.closest('#install-banner').remove()">✕</button>`;
+        <button class="install-banner-close" onclick="this.closest('#install-banner').remove()" data-ico="close" data-ico-size="14"></button>`;
     }
     document.body.appendChild(banner);
   }
@@ -7111,6 +7202,30 @@
 
   function handleKey(e) { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();} }
   function now() { const d=new Date(); return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0'); }
+  // Разметка рождается в десятке мест — от статической страницы до окон,
+  // которые собираются на ходу. Поэтому не расставляем значки вручную в
+  // каждом, а подставляем их всюду, где встретили пометку.
+  function paintIcons(root) {
+    (root || document).querySelectorAll('[data-ico]').forEach(el => {
+      if (el.querySelector(':scope > svg.ico')) return;        // уже нарисован
+      const html = ico(el.dataset.ico, +el.dataset.icoSize || 20);
+      if (html) el.insertAdjacentHTML('afterbegin', html);
+    });
+  }
+
+  // Перерисовка переписки меняет разметку часто, поэтому не бросаемся
+  // обходить дерево на каждое изменение, а копим их до следующего кадра
+  let icoPending = false;
+  function schedulePaint() {
+    if (icoPending) return;
+    icoPending = true;
+    requestAnimationFrame(() => { icoPending = false; paintIcons(); });
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    paintIcons();
+    new MutationObserver(schedulePaint).observe(document.body, { childList: true, subtree: true });
+  });
+
   function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function showToast(msg) {
     const t = document.createElement('div');
