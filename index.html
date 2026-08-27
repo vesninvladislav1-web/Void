@@ -522,6 +522,68 @@
   /* Реакции */
   .reaction-picker { position:fixed; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:40px; padding:6px 10px; display:flex; gap:4px; z-index:300; box-shadow:0 8px 32px rgba(0,0,0,0.3); transform-origin:bottom center; animation:popIn 0.2s cubic-bezier(0.34,1.56,0.64,1); }
   @keyframes popIn { from{opacity:0;transform:scale(0.7)} to{opacity:1;transform:scale(1)} }
+
+  /* ===== ДВИЖЕНИЕ =====
+     Правило одно: анимируем только прозрачность и сдвиг. Высота, тени и
+     размытие заставляют телефон пересчитывать картинку целиком — на слабых
+     устройствах это не украшение, а тормоза. */
+
+  /* Отклик на касание: палец жмёт — картинка отвечает. Самое незаметное
+     из всего и при этом самое ощутимое. */
+  .icon-btn, .attach-btn, .send-btn, .back-btn, .fab, .reg-btn, .btn-primary,
+  .btn-secondary, .adm-btn, .settings-item, .chat-item, .sticker-item,
+  .chat-menu-item, .acc-row, .media-save, .copy-seed-btn, .viewer-menu button {
+    transition: transform 0.12s cubic-bezier(0.2,0,0.2,1), background 0.15s, border-color 0.15s, opacity 0.15s;
+  }
+  .icon-btn:active, .attach-btn:active, .send-btn:active, .back-btn:active,
+  .reg-btn:active, .btn-primary:active, .btn-secondary:active, .adm-btn:active,
+  .sticker-item:active, .media-save:active, .copy-seed-btn:active { transform: scale(0.94); }
+  .fab:active { transform: scale(0.92); }
+  /* Строки списков вжимаются слабее: они большие, и сильное сжатие выглядит нелепо */
+  .settings-item:active, .chat-item:active, .chat-menu-item:active,
+  .acc-row:active, .viewer-menu button:active { transform: scale(0.985); }
+
+  /* Прочитано. Полсекунды радости за то, что тебя прочли. */
+  @keyframes checkIn { from { opacity:0; transform:scale(0.5) } 60% { transform:scale(1.15) } to { opacity:1; transform:scale(1) } }
+  .check.read { animation: checkIn 0.28s cubic-bezier(0.34,1.4,0.64,1); }
+
+  /* Счётчик непрочитанных выскакивает, а не появляется из ниоткуда */
+  @keyframes badgePop { from { opacity:0; transform:scale(0.4) } to { opacity:1; transform:scale(1) } }
+  .unread-badge { animation: badgePop 0.22s cubic-bezier(0.34,1.5,0.64,1); }
+
+  /* Чат переезжает наверх плавно: иначе глаз теряет, что произошло */
+  .chat-item { transition: transform 0.28s cubic-bezier(0.2,0,0.2,1), background 0.15s; }
+
+  /* Картинки и стикеры проявляются, а не возникают рывком */
+  @keyframes softIn { from { opacity:0; transform:scale(0.97) } to { opacity:1; transform:none } }
+  .msg-image, .msg-sticker-void, .msg-sticker, .msg-sticker-emoji, .file-card { animation: softIn 0.2s ease-out; }
+
+  /* Окна и просмотрщик */
+  .modal-overlay { animation: fadeIn 0.14s ease-out; }
+  .modal { animation: popIn 0.18s cubic-bezier(0.34,1.3,0.64,1); }
+  @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
+
+  /* Меню выезжает из-под кнопки, а не появляется на месте */
+  @keyframes menuIn { from { opacity:0; transform:translateY(-6px) scale(0.97) } to { opacity:1; transform:none } }
+  .chat-menu.open { animation: menuIn 0.15s cubic-bezier(0.2,0,0.2,1); }
+
+  /* Смена темы: цвета переходят, а не перещёлкиваются.
+     Строки списка сюда не входят: у них свой переход, и перечисление
+     свойств здесь отменило бы им сдвиг, ради которого всё и затевалось. */
+  body, .sidebar, .bubble, .modal, .input-area, .chats-topbar, .chat-topbar {
+    transition-property: background, color, border-color;
+    transition-duration: 0.25s;
+  }
+
+  /* У части людей от движения кружится голова — это не редкость.
+     Системная настройка «уменьшить движение» отключает всё разом. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
   .reaction-emoji { font-size:26px; cursor:pointer; padding:4px; border-radius:50%; transition:transform 0.15s; line-height:1; border:none; background:none; }
   .reaction-emoji:hover { transform:scale(1.3); }
   .msg-ttl { font-size:10px; opacity:0.8; }
@@ -2901,13 +2963,42 @@
   // Обновляем время каждую минуту
   setInterval(() => { if(Object.keys(chats).length > 0) renderChatList(); }, 60000);
 
+  // Список перерисовывается целиком, поэтому чат, поднявшийся наверх,
+  // просто оказывается на новом месте — глаз не успевает понять, что
+  // произошло. Запоминаем, где строки были, и доигрываем переезд.
+  function chatRowPositions() {
+    const was = new Map();
+    document.querySelectorAll('#chat-list .chat-item').forEach(el => {
+      if (el.dataset.nick) was.set(el.dataset.nick, el.getBoundingClientRect().top);
+    });
+    return was;
+  }
+
+  function playChatMove(was) {
+    if (!was.size) return;
+    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    document.querySelectorAll('#chat-list .chat-item').forEach(el => {
+      const from = was.get(el.dataset.nick);
+      if (from === undefined) return;
+      const dy = from - el.getBoundingClientRect().top;
+      if (Math.abs(dy) < 2) return;
+      // ставим строку туда, где она была, и отпускаем — дальше доводит переход
+      el.style.transition = 'none';
+      el.style.transform = 'translateY(' + dy + 'px)';
+      requestAnimationFrame(() => { el.style.transition = ''; el.style.transform = ''; });
+    });
+  }
+
   function renderChatList() {
     const list = document.getElementById('chat-list');
     const empty = document.getElementById('empty-chats');
+    const was = chatRowPositions();
     list.querySelectorAll('.chat-item').forEach(e=>e.remove());
     const keys = Object.keys(chats);
     if (keys.length===0) { empty.style.display='flex'; return; }
     empty.style.display='none';
+    // выполнится после того, как обход ниже расставит строки
+    requestAnimationFrame(() => playChatMove(was));
     keys.sort((a, b) => {
       const aLast = chats[a].messages[chats[a].messages.length-1]?.timestamp || 0;
       const bLast = chats[b].messages[chats[b].messages.length-1]?.timestamp || 0;
@@ -2939,7 +3030,7 @@
         </div>
         <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
           <div class="chat-time">${last?relativeTime(last.timestamp):''}</div>
-          ${unread>0?`<div style="width:18px;height:18px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:10px;color:white;font-weight:600;">${unread}</div>`:''}
+          ${unread>0?`<div class="unread-badge" style="width:18px;height:18px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:10px;color:white;font-weight:600;">${unread}</div>`:''}
         </div>`;
       list.appendChild(item);
     });
