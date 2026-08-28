@@ -409,7 +409,7 @@
   /* Огонёк. Он же кольцо, он же стержень: разница только в ширине.
      Кольцо — когда ширина равна высоте, стержень — когда растянут.
      Ничего третьего не бывает: ни изгибов, ни концов в пустоте. */
-  .tab-light { position:absolute; z-index:1; top:9px; height:30px; width:30px; border-radius:15px;
+  .tab-light { position:absolute; z-index:1; top:12px; height:30px; width:30px; border-radius:15px;
     border:1.6px solid var(--tab-hue, var(--accent)); background:transparent;
     box-shadow:0 0 12px -2px var(--tab-hue, var(--accent)), inset 0 0 8px -4px var(--tab-hue, var(--accent));
     opacity:0; pointer-events:none;
@@ -1165,7 +1165,7 @@
     fire:     '<path d="M12 3s1 3-1 5.5C9 11 7 11.5 7 14.5A5 5 0 0017 15c0-3-2-4-2.5-6.5C14 6 12 3 12 3z"/>',
     verify:   '<path d="M12 3l7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z"/><path d="M9 12l2 2 4-4"/>',
     group:    '<circle cx="8" cy="9" r="3"/><circle cx="16" cy="9" r="3"/><path d="M2.5 19a5.5 5.5 0 0111 0M13 14a5.5 5.5 0 018.5 5"/>',
-    lan:      '<path d="M12 19v-3"/><rect x="8" y="19" width="8" height="3" rx="1"/><path d="M6.5 12a7 7 0 0111 0M3.5 8.5a11 11 0 0117 0"/>',
+    lan:      '<path d="M12 18v-3"/><rect x="8" y="18" width="8" height="3" rx="1"/><path d="M6.5 11a7 7 0 0111 0M3.5 7.5a11 11 0 0117 0"/>',
     clock:    '<circle cx="12" cy="12" r="9"/><path d="M12 7v5.5l3.5 2"/>',
     warn:     '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.2"/>',
     sos:      '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16v.2"/>',
@@ -2774,18 +2774,26 @@
     if (!свет || !цель || !панель.classList.contains('visible')) return;
 
     const рамка = панель.getBoundingClientRect();
+    // Кольцо садится не на вкладку, а ровно на её значок: у вкладки под значком
+    // ещё подпись, из-за неё середина вкладки и середина значка — разные точки.
+    // clientLeft/clientTop — толщина рамки панели: absolute-потомки отсчитываются
+    // от внутреннего края, а getBoundingClientRect меряет от внешнего.
     const место = el => {
-      const r = el.getBoundingClientRect();
-      return r.left - рамка.left + r.width / 2;   // середина вкладки
+      const знак = el.querySelector('.tab-ico svg') || el.querySelector('.tab-ico') || el;
+      const r = знак.getBoundingClientRect();
+      return { x: r.left - рамка.left - панель.clientLeft + r.width / 2,
+               y: r.top - рамка.top - панель.clientTop + r.height / 2 };
     };
     const размер = 30;
-    const конец = место(цель) - размер / 2;
+    const центр = место(цель);
+    const конец = центр.x - размер / 2;
+    свет.style.top = (центр.y - размер / 2) + 'px';
 
     панель.style.setProperty('--tab-hue', TAB_HUES[в]);
     свет.classList.add('on');
 
     clearTimeout(lightTimer);
-    const начало = tabButton(из) ? место(tabButton(из)) - размер / 2 : конец;
+    const начало = tabButton(из) ? место(tabButton(из)).x - размер / 2 : конец;
     const плавно = !мгновенно && из !== в &&
       !matchMedia('(prefers-reduced-motion: reduce)').matches;
 
