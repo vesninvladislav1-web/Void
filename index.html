@@ -421,9 +421,13 @@
   .tab-light.running { border-width:2.6px; }
 
   /* Отблеск под панелью — как отражение света на столе */
-  .tabbar::after { content:''; position:absolute; left:12%; right:12%; bottom:-9px; height:16px;
-    background:radial-gradient(ellipse at center, var(--tab-hue, var(--accent)) 0%, transparent 70%);
-    opacity:0.14; filter:blur(6px); pointer-events:none; transition:background 0.3s; }
+  .tabbar::after { content:''; position:absolute; left:0; right:0; bottom:-11px; height:14px;
+    background:linear-gradient(90deg, transparent 0%, var(--tab-hue, var(--accent)) 9%,
+                               var(--tab-hue, var(--accent)) 91%, transparent 100%);
+    /* по вертикали гасим с обеих сторон, иначе получается не отблеск, а брусок */
+    -webkit-mask-image:linear-gradient(to bottom, transparent 0%, #000 42%, transparent 100%);
+            mask-image:linear-gradient(to bottom, transparent 0%, #000 42%, transparent 100%);
+    opacity:0.16; filter:blur(6px); pointer-events:none; transition:background 0.3s; }
 
   /* Экран «Рядом» */
   .near-screen { display:none; flex-direction:column; height:100%; }
