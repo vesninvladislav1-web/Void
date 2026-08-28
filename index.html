@@ -31,6 +31,8 @@
     --text3: #938B80;   /* 4.9 — минимум для читаемости, но заметно тише */
     --msg-own: #2E1A14;
     --msg-other: #231F1C;
+    --badge: #CC3A1E;   /* белым по нему 5.0. Свой цвет, а не акцент: акцент переключаемый,
+                           и ни белый, ни тёмный текст не держат норму на всех пяти */
     --online: #4ade80;
     --shadow: rgba(255,107,74,0.18);
     --glass: rgba(44,39,36,0.55);
@@ -45,7 +47,7 @@
     --bg: #FAFAFA; --bg2: #F5F5F3; --bg3: #FFFFFF;
     --border: rgba(0,0,0,0.08); --accent: #FF6B4A; --accent2: #C9573F;
     --text: #1C1917; --text2: #5F5954; --text3: #6B6460;   /* 5.5 и 4.9 к светлому фону */
-    --msg-own: #FCEAE5; --msg-other: #FFFFFF; --online: #22c55e;
+    --msg-own: #FCEAE5; --msg-other: #FFFFFF; --online: #22c55e; --badge: #CC3A1E;
     --shadow: rgba(255,107,74,0.14);
     --glass: rgba(250,250,250,0.75);
     --glass2: rgba(255,255,255,0.9);
@@ -208,6 +210,11 @@
   .chat-item:hover { background:var(--glass2); }
   .chat-item.active { background:var(--glass2); }
   .chat-item.active::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); border-radius:0 2px 2px 0; }
+  /* Правая колонка прибита к верху: иначе строка со счётчиком поднимала время
+     на 11px, и правый край списка получался рваным — время скакало от того,
+     прочитана переписка или нет. */
+  .chat-meta { display:flex; flex-direction:column; align-items:flex-end; gap:5px;
+    flex-shrink:0; align-self:flex-start; }
 
   .avatar img { width:100%; height:100%; object-fit:cover; }
   .avatar { width:46px; height:46px; border-radius:15px; display:flex; align-items:center; justify-content:center; font-size:18px; font-weight:700; color:white; flex-shrink:0; font-family:'Space Mono',monospace; overflow:hidden; }
@@ -440,9 +447,14 @@
   .near-secondary { background:var(--bg3) !important; color:var(--text) !important; border:1px solid var(--border) !important; }
   .near-label { font-family:'Space Mono',monospace; font-size:11px; letter-spacing:2px; color:var(--text3); text-transform:uppercase; margin-top:4px; }
 
-  /* Панель перекрывает низ списков — освобождаем место */
-  .chats-screen .chats-list { padding-bottom:96px; }
-  .sidebar.screen .settings-menu { padding-bottom:96px; }
+  /* Панель и кнопка перекрывают низ списков — освобождаем место.
+     Числа считаются от размеров того, что закрывает: панель занимает 83px,
+     кнопка «плюс» поднята на 96 и сама 56 высотой. Совпадение 96 = 96 было
+     случайным, из-за него последняя строка списка чатов пряталась под кнопкой. */
+  :root { --над-панелью: 96px; --над-кнопкой: 164px; }
+  .chats-screen .chats-list { padding-bottom:var(--над-кнопкой); }
+  .sidebar.screen .settings-menu { padding-bottom:var(--над-панелью); }
+  .near-body { padding-bottom:var(--над-панелью); }
 
   .sos-bar { display:flex; align-items:center; gap:10px; padding:9px 14px; cursor:pointer; flex-shrink:0;
     background:rgba(239,68,68,0.12); border-bottom:1px solid rgba(239,68,68,0.3); font-size:12px; color:var(--text2); }
@@ -607,6 +619,12 @@
   /* Счётчик непрочитанных выскакивает, а не появляется из ниоткуда */
   @keyframes badgePop { from { opacity:0; transform:scale(0.4) } to { opacity:1; transform:scale(1) } }
   .unread-badge { animation: badgePop 0.22s cubic-bezier(0.34,1.5,0.64,1); }
+  /* Плашка непрочитанных. Белым по акценту контраст 2.82 — ниже нормы AA,
+     а это самый частый элемент списка. Фон затемнён до отдельного цвета,
+     акцент при этом узнаётся. */
+  .unread-badge { min-width:18px; height:18px; padding:0 5px; border-radius:9px;
+    background:var(--badge); color:#fff; font-size:10px; font-weight:600;
+    display:flex; align-items:center; justify-content:center; box-sizing:border-box; }
 
   /* Чат переезжает наверх плавно: иначе глаз теряет, что произошло */
   .chat-item { transition: transform 0.28s cubic-bezier(0.2,0,0.2,1), background 0.15s; }
@@ -3231,9 +3249,9 @@
           <div class="chat-name">${displayName}</div>
           <div class="chat-preview">${lastText}</div>
         </div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;">
+        <div class="chat-meta">
           <div class="chat-time">${last?relativeTime(last.timestamp):''}</div>
-          ${unread>0?`<div class="unread-badge" style="width:18px;height:18px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:10px;color:white;font-weight:600;">${unread}</div>`:''}
+          ${unread>0?`<div class="unread-badge">${unread}</div>`:''}
         </div>`;
       list.appendChild(item);
     });
