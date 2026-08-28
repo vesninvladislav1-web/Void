@@ -102,6 +102,10 @@
   .app.visible { opacity:1; }
 
   /* БОКОВАЯ ПАНЕЛЬ (профиль/настройки) */
+  /* Раньше выезжала сбоку, теперь это экран вкладки «Я» */
+  .sidebar.screen { position:static; width:100%; min-width:0; transform:none !important;
+    border-right:none; display:none; }
+  .sidebar.screen.active { display:flex; }
   .sidebar {
     width:280px; min-width:280px; background:var(--glass2);
     backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur);
@@ -286,7 +290,7 @@
   .send-btn:active { transform:scale(0.95); }
 
   /* FAB */
-  .fab { position:fixed; bottom:28px; right:28px; width:56px; height:56px; border-radius:18px; background:var(--accent); border:none; cursor:pointer; display:none; align-items:center; justify-content:center; font-size:24px; color:white; box-shadow:0 4px 24px var(--shadow); transition:transform 0.2s,opacity 0.2s; z-index:50; }
+  .fab { position:fixed; bottom:96px; right:22px; width:56px; height:56px; border-radius:18px; background:var(--accent); border:none; cursor:pointer; display:none; align-items:center; justify-content:center; font-size:24px; color:white; box-shadow:0 4px 24px var(--shadow); transition:transform 0.2s,opacity 0.2s; z-index:50; }
   .fab.visible { display:flex; }
   .fab:hover { background:#E55A3C; transform:scale(1.08); }
   .fab:active { transform:scale(0.95); }
@@ -387,6 +391,55 @@
   .sticker-upload-btn:hover { border-color:var(--accent); color:var(--accent); }
   .msg-sticker { width:96px; height:96px; border-radius:16px; object-fit:cover; }
   .msg-sticker-emoji { font-size:72px; line-height:1; }
+  /* ===== ПАНЕЛЬ ВКЛАДОК ===== */
+  .tabbar { position:fixed; left:50%; transform:translateX(-50%); bottom:calc(14px + env(safe-area-inset-bottom,0px));
+    display:none; align-items:center; gap:2px; padding:8px 10px; z-index:60;
+    background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur);
+    border:1px solid var(--glass-border); border-radius:26px; box-shadow:0 10px 34px rgba(0,0,0,0.45); }
+  .tabbar.visible { display:flex; }
+
+  .tab { position:relative; z-index:2; display:flex; flex-direction:column; align-items:center; gap:3px;
+    background:none; border:none; cursor:pointer; padding:7px 16px 5px; color:var(--text3);
+    font-family:'Inter',sans-serif; font-size:10.5px; letter-spacing:0.2px;
+    transition:color 0.2s, transform 0.12s; min-width:76px; }
+  .tab .tab-ico { display:flex; align-items:center; justify-content:center; height:24px; }
+  .tab.active { color:var(--text); }
+  .tab:active { transform:scale(0.94); }
+
+  /* Огонёк. Он же кольцо, он же стержень: разница только в ширине.
+     Кольцо — когда ширина равна высоте, стержень — когда растянут.
+     Ничего третьего не бывает: ни изгибов, ни концов в пустоте. */
+  .tab-light { position:absolute; z-index:1; top:9px; height:30px; width:30px; border-radius:15px;
+    border:1.6px solid var(--tab-hue, var(--accent)); background:transparent;
+    box-shadow:0 0 12px -2px var(--tab-hue, var(--accent)), inset 0 0 8px -4px var(--tab-hue, var(--accent));
+    opacity:0; pointer-events:none;
+    transition:left 0.26s cubic-bezier(0.34,0,0.2,1), width 0.26s cubic-bezier(0.34,0,0.2,1),
+               border-color 0.3s, box-shadow 0.3s, opacity 0.2s, border-width 0.16s; }
+  .tab-light.on { opacity:1; }
+  /* Растянутый стержень при той же толщине читался бы тусклее кольца,
+     хотя работы делает больше — поэтому на ходу он плотнеет */
+  .tab-light.running { border-width:2.6px; }
+
+  /* Отблеск под панелью — как отражение света на столе */
+  .tabbar::after { content:''; position:absolute; left:12%; right:12%; bottom:-9px; height:16px;
+    background:radial-gradient(ellipse at center, var(--tab-hue, var(--accent)) 0%, transparent 70%);
+    opacity:0.14; filter:blur(6px); pointer-events:none; transition:background 0.3s; }
+
+  /* Экран «Рядом» */
+  .near-screen { display:none; flex-direction:column; height:100%; }
+  .near-screen.active { display:flex; }
+  .near-body { flex:1; overflow-y:auto; padding:4px 16px 100px; display:flex; flex-direction:column; gap:14px; }
+  .near-lead { font-size:13px; line-height:1.6; color:var(--text2); }
+  .near-actions { display:flex; flex-direction:column; gap:8px; }
+  .near-actions .reg-btn { display:flex; align-items:center; justify-content:center; gap:9px; }
+  .near-actions .reg-btn .ico { flex-shrink:0; }
+  .near-secondary { background:var(--bg3) !important; color:var(--text) !important; border:1px solid var(--border) !important; }
+  .near-label { font-family:'Space Mono',monospace; font-size:11px; letter-spacing:2px; color:var(--text3); text-transform:uppercase; margin-top:4px; }
+
+  /* Панель перекрывает низ списков — освобождаем место */
+  .chats-screen .chats-list { padding-bottom:96px; }
+  .sidebar.screen .settings-menu { padding-bottom:96px; }
+
   .sos-bar { display:flex; align-items:center; gap:10px; padding:9px 14px; cursor:pointer; flex-shrink:0;
     background:rgba(239,68,68,0.12); border-bottom:1px solid rgba(239,68,68,0.3); font-size:12px; color:var(--text2); }
   .sos-bar.warn { background:rgba(245,158,11,0.13); border-bottom-color:rgba(245,158,11,0.35); }
@@ -503,10 +556,9 @@
 
   @media (max-width:640px) {
     .burger-btn { display:flex; }
-    .sidebar { position:fixed; left:0; top:0; bottom:0; z-index:100; transform:translateX(-100%); transition:transform 0.3s ease; }
-    .sidebar.open { transform:translateX(0); }
+    .burger-btn { display:none; }   /* вместо бокового меню — вкладка «Я» */
     .main { width:100%; }
-    .fab.visible { bottom:20px; right:20px; width:52px; height:52px; }
+    .fab.visible { bottom:96px; right:18px; width:52px; height:52px; }
   }
 
   /* Статус пользователя */
@@ -758,8 +810,8 @@
 <!-- ПРИЛОЖЕНИЕ -->
 <div class="app" id="app">
 
-  <!-- БОКОВАЯ ПАНЕЛЬ -->
-  <div class="sidebar" id="sidebar">
+  <!-- ЭКРАН «Я»: профиль и настройки. Раньше выезжал сбоку. -->
+  <div class="sidebar screen" id="sidebar">
     <div class="sidebar-header">
       <div class="logo">VOID</div>
     </div>
@@ -942,6 +994,25 @@
       </div>
     </div>
 
+    <!-- РЯДОМ: связь без сервера -->
+    <div class="near-screen" id="near-screen">
+      <div class="chats-topbar">
+        <div class="chats-topbar-title">Рядом</div>
+      </div>
+      <div class="near-body">
+        <div class="near-lead">
+          Связь напрямую между устройствами в одной сети — без сервера
+          и без интернета. Переписка не покидает вашу комнату.
+        </div>
+        <div class="near-actions">
+          <button class="reg-btn" onclick="lanCreateStep1()"><i data-ico="plus"></i>Создать комнату</button>
+          <button class="reg-btn near-secondary" onclick="lanJoin()"><i data-ico="lan"></i>Войти по коду</button>
+        </div>
+        <div class="near-label">Комнаты</div>
+        <div class="chats-list" id="near-list"></div>
+      </div>
+    </div>
+
     <!-- ЧАТ -->
     <div class="chat-view" id="chat-view">
       <div class="chat-topbar">
@@ -1019,6 +1090,25 @@
 <input type="file" id="avatar-input" accept="image/*" style="display:none;position:fixed;" onchange="loadAvatar(event)">
 
 <div class="sidebar-overlay" id="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+<!-- ПАНЕЛЬ ВКЛАДОК.
+     Огонёк живёт отдельным слоем под значками: он либо кольцо на одной
+     вкладке, либо стержень между двумя — и никогда ничего третьего. -->
+<nav class="tabbar" id="tabbar">
+  <div class="tab-light" id="tab-light"></div>
+  <button class="tab" data-tab="near" onclick="showTab('near')">
+    <span class="tab-ico" data-ico="lan" data-ico-size="21"></span>
+    <span class="tab-name">Рядом</span>
+  </button>
+  <button class="tab" data-tab="chats" onclick="showTab('chats')">
+    <span class="tab-ico" data-ico="chat" data-ico-size="21"></span>
+    <span class="tab-name">Чаты</span>
+  </button>
+  <button class="tab" data-tab="me" onclick="showTab('me')">
+    <span class="tab-ico" data-ico="person" data-ico-size="21"></span>
+    <span class="tab-name">Я</span>
+  </button>
+</nav>
 <button class="fab" id="fab" onclick="showNewChatModal()" data-ico="plus" aria-label="Новый чат"></button>
 
 <script>
@@ -1080,6 +1170,8 @@
     warn:     '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.2"/>',
     sos:      '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16v.2"/>',
     send:     '<path d="M4 12l16-8-6 16-2.5-6.5z"/>',
+    chat:     '<path d="M20 12a8 8 0 01-8 8H4l2.2-2.8A8 8 0 1120 12z"/>',
+    person:   '<circle cx="12" cy="8" r="3.6"/><path d="M4.5 20a7.5 7.5 0 0115 0"/>',
     smile:    '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.5 6 1.5 7 0"/><path d="M9 9.5v.2M15 9.5v.2"/>',
     online:   '<circle cx="12" cy="12" r="5" fill="currentColor" stroke="none"/>',
     map:      '<path d="M9 3L3 5.5v15L9 18l6 3 6-2.5v-15L15 6z"/><path d="M9 3v15M15 6v15"/>',
@@ -1243,6 +1335,7 @@
     app.classList.remove('visible');
     app.style.display = 'none';
     document.getElementById('fab').classList.remove('visible');
+    showTabbar(false);
     document.getElementById('unlock-nick').textContent = '@' + myName;
     document.getElementById('unlock-pass').value = '';
     document.getElementById('unlock-error').style.display = 'none';
@@ -1489,7 +1582,8 @@
         const app = document.getElementById('app');
         app.style.display='flex';
         app.classList.add('visible');
-        document.getElementById('fab').classList.add('visible');
+        showTabbar(true);
+        showTab('chats', true);
         renderChatList();
       }
     }, 500);
@@ -1555,8 +1649,9 @@
       const app = document.getElementById('app');
       app.style.display = 'flex';
       app.classList.add('visible');
-      document.getElementById('fab').classList.add('visible');
       sweepExpired();          // пока приложение было закрыто, сроки шли
+      showTabbar(true);
+      showTab('chats', true);
       renderChatList();
 
       // Приложение открыли нажатием на уведомление
@@ -2640,14 +2735,109 @@
   }
 
   // ===== САЙДБАР =====
-  function toggleSidebar() {
-    document.getElementById('sidebar').classList.toggle('open');
-    document.getElementById('sidebar-overlay').classList.toggle('active');
+  // ===== ВКЛАДКИ =====
+  // Три раздела вместо бокового меню: связь без сервера, переписка и свой
+  // профиль. Настройки раньше жили за кнопкой-гамбургером, и половина из них
+  // человек никогда не открывал.
+  //
+  // Огонёк под значками ведёт себя как физический предмет: он либо кольцо
+  // на одной вкладке, либо стержень между двумя. Переход — это растяжение
+  // от старого места к новому и сборка обратно в кольцо, а не исчезновение
+  // в одном месте и появление в другом.
+
+  const TAB_HUES = { near: '#35E6FF', chats: 'var(--accent)', me: '#A56BFF' };
+  let currentTab = 'chats';
+  let lightTimer = null;
+
+  function tabButton(name) { return document.querySelector('.tab[data-tab="' + name + '"]'); }
+
+  function showTab(name, мгновенно) {
+    if (!TAB_HUES[name]) return;
+    const прежняя = currentTab;
+    currentTab = name;
+
+    document.getElementById('near-screen').classList.toggle('active', name === 'near');
+    document.getElementById('chats-screen').classList.toggle('hidden', name !== 'chats');
+    document.getElementById('sidebar').classList.toggle('active', name === 'me');
+    // Кнопка нового чата принадлежит списку переписок
+    document.getElementById('fab').classList.toggle('visible', name === 'chats' && !!myName);
+
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+    if (name === 'near') renderNearList();
+    moveTabLight(прежняя, name, мгновенно);
   }
-  function closeSidebar() {
-    document.getElementById('sidebar').classList.remove('open');
-    document.getElementById('sidebar-overlay').classList.remove('active');
+
+  function moveTabLight(из, в, мгновенно) {
+    const свет = document.getElementById('tab-light');
+    const панель = document.getElementById('tabbar');
+    const цель = tabButton(в);
+    if (!свет || !цель || !панель.classList.contains('visible')) return;
+
+    const рамка = панель.getBoundingClientRect();
+    const место = el => {
+      const r = el.getBoundingClientRect();
+      return r.left - рамка.left + r.width / 2;   // середина вкладки
+    };
+    const размер = 30;
+    const конец = место(цель) - размер / 2;
+
+    панель.style.setProperty('--tab-hue', TAB_HUES[в]);
+    свет.classList.add('on');
+
+    clearTimeout(lightTimer);
+    const начало = tabButton(из) ? место(tabButton(из)) - размер / 2 : конец;
+    const плавно = !мгновенно && из !== в &&
+      !matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    if (!плавно) {
+      свет.style.transition = 'none';
+      свет.style.left = конец + 'px';
+      свет.style.width = размер + 'px';
+      requestAnimationFrame(() => { свет.style.transition = ''; });
+      return;
+    }
+
+    // Растягиваемся от прежнего места до нового: пока идёт путь, это стержень
+    свет.classList.add('running');
+    свет.style.left = Math.min(начало, конец) + 'px';
+    свет.style.width = (Math.abs(конец - начало) + размер) + 'px';
+
+    // Голова приземлилась — подтягиваем хвост и снова становимся кольцом
+    lightTimer = setTimeout(() => {
+      свет.style.left = конец + 'px';
+      свет.style.width = размер + 'px';
+      свет.classList.remove('running');
+    }, 200);
   }
+
+  function showTabbar(показать) {
+    const панель = document.getElementById('tabbar');
+    if (!панель) return;
+    панель.classList.toggle('visible', !!показать);
+    if (показать) requestAnimationFrame(() => moveTabLight(currentTab, currentTab, true));
+  }
+
+  // Список комнат на вкладке «Рядом»
+  function renderNearList() {
+    const list = document.getElementById('near-list');
+    if (!list) return;
+    const комнаты = Object.keys(chats).filter(isLanChat);
+    list.innerHTML = комнаты.length
+      ? комнаты.map(k => {
+          const c = chats[k];
+          const последнее = c.messages[c.messages.length - 1];
+          return '<div class="chat-item" data-nick="' + esc(k) + '" onclick="openChat(\'' + esc(k) + '\')">' +
+            '<div class="avatar" style="background:#FF6B4A">' + ico('lan', 20) + '</div>' +
+            '<div class="chat-info"><div class="chat-name">' + esc(c.name || 'Комната') + '</div>' +
+            '<div class="chat-preview">' + (последнее ? 'сообщений: ' + c.messages.length : 'пока пусто') + '</div></div>' +
+          '</div>';
+        }).join('')
+      : '<div class="adm-empty">Комнат пока нет</div>';
+  }
+
+  // Старые имена остались в полутора десятках мест: пусть ведут на вкладку
+  function toggleSidebar() { showTab(currentTab === 'me' ? 'chats' : 'me'); }
+  function closeSidebar() { /* закрывать нечего: настройки теперь вкладка */ }
 
   // ===== РЕАКЦИИ =====
   const REACTION_EMOJIS = ['❤️','😂','🔥','👍','😮','😢','🤝','🫡'];
@@ -2756,9 +2946,9 @@
     hideSecureOverlay();          // защиту не выключаем: она включается осознанно
     cancelEdit();
     document.getElementById('chat-view').classList.remove('active');
-    document.getElementById('chats-screen').classList.remove('hidden');
-    document.getElementById('fab').classList.add('visible');
     currentChat = null;
+    showTabbar(true);
+    showTab(currentTab, true);
     renderChatList();
   }
 
@@ -3048,6 +3238,7 @@
       document.getElementById('chats-screen').classList.add('hidden');
       document.getElementById('chat-view').classList.add('active');
       document.getElementById('fab').classList.remove('visible');
+    showTabbar(false);
       const gav = document.getElementById('cv-avatar');
       gav.innerHTML = ico('group', 22); gav.style.fontSize = ''; gav.style.background = chats[nick].color || '#888';
       document.getElementById('cv-name').textContent = g ? g.name : 'Группа';
@@ -3069,6 +3260,7 @@
       document.getElementById('chats-screen').classList.add('hidden');
       document.getElementById('chat-view').classList.add('active');
       document.getElementById('fab').classList.remove('visible');
+    showTabbar(false);
       const av = document.getElementById('cv-avatar');
       av.innerHTML = ico('lan', 22); av.style.fontSize = ''; av.style.background = '#FF6B4A';
       document.getElementById('cv-name').textContent = chats[nick]?.name || 'LAN';
@@ -3086,6 +3278,7 @@
     document.getElementById('chats-screen').classList.add('hidden');
     document.getElementById('chat-view').classList.add('active');
     document.getElementById('fab').classList.remove('visible');
+    showTabbar(false);
     const av = document.getElementById('cv-avatar');
     av.innerHTML = avatarInner(nick);
     av.style.background = chats[nick].color;
@@ -4175,6 +4368,7 @@
     document.getElementById('profile-avatar-el').innerHTML = '?';
     document.getElementById('profile-nick').textContent = '—';
     document.getElementById('fab').classList.remove('visible');
+    showTabbar(false);
     document.getElementById('chat-view').classList.remove('active');
     document.getElementById('chats-screen').classList.remove('hidden');
     closeSidebar();
@@ -6958,6 +7152,7 @@
     if (!chats[chatKey]) chats[chatKey] = { name:`${lanRoom.name}`, color:'#FF6B4A', messages:[], isLan:true };
     document.getElementById('chats-screen').classList.add('hidden');
     document.getElementById('fab').classList.remove('visible');
+    showTabbar(false);
     document.getElementById('chat-view').classList.add('active');
     document.getElementById('cv-name').textContent = `${lanRoom.name}`;
     const av = document.getElementById('cv-avatar');
@@ -7165,7 +7360,8 @@
         const app = document.getElementById('app');
         app.style.display = 'flex';
         app.classList.add('visible');
-        document.getElementById('fab').classList.add('visible');
+        showTabbar(true);
+        showTab('chats', true);
         renderChatList();
       });
     }
