@@ -1,7 +1,10 @@
 // Имя кэша — это и есть версия. Пока оно не меняется, браузер не считает
 // service worker обновлённым, и в приложении может остаться старая страница:
 // именно так стикеры нового набора превращались в битые картинки.
-const CACHE = 'void-v19';
+const CACHE = 'void-v20';
+// Здесь лежат настройки, которые нужны при закрытом приложении. Версии у него
+// нет намеренно: он должен пережить обновление, а не обнулиться вместе с ним.
+const PREFS = 'void-prefs';
 const ASSETS = ['./', './index.html', './manifest.json', './icon.svg', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -12,7 +15,7 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE && k !== PREFS).map(k => caches.delete(k))))
       .then(() => self.clients.matchAll({ includeUncontrolled: true }))
       .then(clients => clients.forEach(c => c.postMessage({ type: 'RELOAD' })))
   );
@@ -65,10 +68,19 @@ self.addEventListener('push', e => {
     const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     if (clients.some(c => c.visibilityState === 'visible')) return;
 
+    // Показывать ли имя отправителя. Настройка лежит в хранилище кэша:
+    // localStorage отсюда не виден, а страницы может не быть в памяти вовсе.
+    let показыватьОтКого = false;
+    try {
+      const кэш = await caches.open(PREFS);
+      const ответ = await кэш.match('/pref/show-sender');
+      показыватьОтКого = !!ответ && (await ответ.text()) === '1';
+    } catch (err) {}
+
     await self.registration.showNotification(
-      from ? '@' + from : 'Void',
+      показыватьОтКого && from ? '@' + from : 'Void',
       {
-        body: 'Новое сообщение',
+        body: показыватьОтКого ? 'Новое сообщение' : 'Неизвестное сообщение',
         icon: './icon-192.png',
         badge: './icon-192.png',
         // Уведомления от одного человека схлопываются в одно

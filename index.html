@@ -909,6 +909,15 @@
         <div class="settings-item-arrow" id="presence-mark" data-ico="check" data-ico-size="16"></div>
       </div>
 
+      <div class="settings-item" id="sender-item" onclick="toggleShowSender()">
+        <div class="settings-item-icon" data-ico="bell"></div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Показывать, от кого</div>
+          <div class="settings-item-sub" id="sender-sub">Только «Неизвестное сообщение»</div>
+        </div>
+        <div class="settings-item-arrow" id="sender-mark" data-ico="check" data-ico-size="16"></div>
+      </div>
+
       <div class="settings-item" id="change-pass-item" onclick="showChangePassModal()">
         <div class="settings-item-icon" data-ico="lock"></div>
         <div class="settings-item-info">
@@ -1180,6 +1189,7 @@
     globe:    '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 3 2.5 15 0 18M12 3c-2.5 3-2.5 15 0 18"/>',
     shield:   '<path d="M12 3l8 3v6c0 5-3.5 8.2-8 9-4.5-.8-8-4-8-9V6z"/>',
     lock:     '<rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 018 0v3"/>',
+    bell:     '<path d="M18 15.5V11a6 6 0 10-12 0v4.5L4.5 18h15z"/><path d="M10 20.5a2.2 2.2 0 004 0"/>',
     info:     '<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.2"/>',
     door:     '<path d="M14 3H6a1 1 0 00-1 1v16a1 1 0 001 1h8"/><path d="M18 12H10M14 8l4 4-4 4"/>',
     search:   '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>',
@@ -1495,7 +1505,7 @@
     try {
       // Тема, акцент и язык — настройки устройства, а не аккаунта:
       // при переключении между аккаунтами оформление не должно скакать
-      localStorage.setItem('void_prefs', JSON.stringify({ isDark, currentAccent, lang }));
+      localStorage.setItem('void_prefs', JSON.stringify({ isDark, currentAccent, lang, showSender }));
       localStorage.setItem('void_acct:' + id, JSON.stringify({
         name:myName, avatar:myAvatar, seed:currentSeed, authMode, passwordHash, myStatus, isAdmin
       }));
@@ -1511,6 +1521,9 @@
     isDark = p.isDark !== false;
     lang = p.lang || 'ru';
     currentAccent = p.currentAccent || 0;
+    showSender = p.showSender === true;   // умолчание — скрытно
+    renderSenderSetting();
+    saveSenderPref();
     document.body.classList.toggle('light', !isDark);
     document.getElementById('theme-label').textContent = isDark ? 'Тёмная тема' : 'Светлая тема';
     document.getElementById('theme-sub').textContent = 'Сейчас: ' + (isDark ? 'тёмная' : 'светлая');
@@ -1563,12 +1576,46 @@
     }
   }
 
+  // Показывать ли в уведомлении, от кого письмо и что в нём. По умолчанию нет:
+  // уведомление видно любому, кто взял телефон в руки, а до этого мы прятали
+  // переписку от всего мира и выкладывали её на экран блокировки.
+  let showSender = false;
+
   function sendNotification(title, body) {
     if (!('Notification' in window) || Notification.permission !== 'granted') return;
     if (document.hasFocus()) return;
     try {
-      new Notification('VOID · ' + title, { body, silent: false });
+      if (showSender) new Notification('VOID · ' + title, { body, silent: false });
+      else new Notification('Void', { body: 'Неизвестное сообщение', silent: false });
     } catch(e) {}
+  }
+
+  // Service worker не видит localStorage, а уведомление рисует именно он —
+  // когда приложения уже нет в памяти. Настройка кладётся в хранилище кэша:
+  // оно доступно обоим и переживает выгрузку.
+  async function saveSenderPref() {
+    try {
+      const кэш = await caches.open('void-prefs');
+      await кэш.put('/pref/show-sender', new Response(showSender ? '1' : '0'));
+    } catch(e) {}
+  }
+
+  function renderSenderSetting() {
+    const mark = document.getElementById('sender-mark');
+    const sub = document.getElementById('sender-sub');
+    if (!mark || !sub) return;
+    mark.style.display = showSender ? '' : 'none';
+    sub.textContent = showSender
+      ? 'Ник и текст видны в уведомлении'
+      : 'Только «Неизвестное сообщение»';
+  }
+
+  function toggleShowSender() {
+    showSender = !showSender;
+    saveState();
+    saveSenderPref();
+    renderSenderSetting();
+    showToast(showSender ? 'В уведомлениях будет видно, от кого' : 'Уведомления снова безымянные');
   }
 
   function updateSeedMenuVisibility() {
