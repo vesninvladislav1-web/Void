@@ -3,6 +3,7 @@ const { WebSocketServer } = require('ws');
 const Database = require('better-sqlite3');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 
 // ===== НАСТРОЙКИ =====
 const PORT          = Number(process.env.PORT) || 3000;
@@ -25,9 +26,13 @@ const MAX_AVATAR    = 96 * 1024;        // аватар тоже data:URI
 const MAX_EVIDENCE      = 3;            // сколько скриншотов можно приложить к бану
 const MAX_EVIDENCE_SIZE = 200 * 1024;   // на каждый
 const MAX_BAN_BODY      = 1024 * 1024;  // тело запроса на блокировку
-// Вложения: файл шифруется на устройстве, сервер хранит непрозрачные байты
-const MAX_BLOB      = 3 * 1024 * 1024;
-const MAX_BLOB_BODY = 5 * 1024 * 1024;
+// Вложения: файл шифруется на устройстве, сервер хранит непрозрачные байты.
+// Приём идёт потоком прямо в файл, поэтому предел размера больше не упирается
+// в оперативную память: раньше файл жил в ней трижды — склеенной строкой,
+// копией после разбора JSON и распакованным буфером.
+const MAX_BLOB      = 25 * 1024 * 1024;
+const MAX_BLOB_BODY = 5 * 1024 * 1024;   // только для старого способа, через JSON
+const BLOB_QUOTA    = 500 * 1024 * 1024; // сколько вложений держим на аккаунт
 const TTL_BLOB      = 30 * 86400000;
 const MAX_AVATAR_BODY = 128 * 1024;     // тело запроса с аватаром
 const MAX_PAYLOAD   = 512 * 1024;       // максимум размера WS-кадра (шифротекст крупнее)
@@ -47,6 +52,18 @@ const online = {};   // nick -> Set(ws)
 // ===== БАЗА ДАННЫХ =====
 const db = new Database(path.join(__dirname, 'void.db'));
 db.pragma('journal_mode = WAL');
+
+// Вложения лежат отдельными файлами, а не внутри базы. Так база остаётся
+// маленькой (её удобно копировать), а приём файла не требует держать его
+// в памяти целиком. ВАЖНО: резервная копия теперь должна включать и этот
+// каталог, одного void.db больше не достаточно.
+const BLOB_DIR = process.env.VOID_BLOB_DIR || path.join(__dirname, 'blobs');
+const BLOB_TMP = path.join(BLOB_DIR, 'tmp');
+try { fs.mkdirSync(BLOB_TMP, { recursive: true }); }
+catch (e) { console.error('[blob] Не удалось создать каталог вложений:', e.message); }
+// Недописанные куски от прерванных загрузок пережить перезапуск не должны
+try { for (const f of fs.readdirSync(BLOB_TMP)) fs.unlinkSync(path.join(BLOB_TMP, f)); } catch (e) {}
+const blobPath = id => path.join(BLOB_DIR, id);
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
     nick TEXT PRIMARY KEY,
@@ -181,6 +198,25 @@ const qReadSync    = db.prepare(`
 const qPutBlob     = db.prepare('INSERT INTO blobs (id, owner, data, size, created_at) VALUES (?, ?, ?, ?, ?)');
 const qGetBlob     = db.prepare('SELECT data, size FROM blobs WHERE id = ?');
 const qDropBlobsOf = db.prepare('DELETE FROM blobs WHERE owner = ?');
+// Вложения, лежащие файлами. Столбец добавляется на ходу: у уже работающего
+// сервера база создана без него, а ронять её ради этого незачем.
+try { db.exec('ALTER TABLE blobs ADD COLUMN on_disk INTEGER NOT NULL DEFAULT 0'); } catch (e) {}
+const qPutBlobDisk = db.prepare("INSERT INTO blobs (id, owner, data, size, created_at, on_disk) VALUES (?, ?, X'', ?, ?, 1)");
+const qBlobMeta    = db.prepare('SELECT size, on_disk FROM blobs WHERE id = ?');
+const qBlobIdsOf   = db.prepare('SELECT id FROM blobs WHERE owner = ? AND on_disk = 1');
+const qBlobIdsOld  = db.prepare('SELECT id FROM blobs WHERE on_disk = 1 AND created_at < ?');
+const qBlobIdsAll  = db.prepare('SELECT id FROM blobs WHERE on_disk = 1');
+
+// Удаление файлов вложений. Строку в базе снимает вызывающий: файл без строки
+// — мусор, который никто не найдёт, а строка без файла — битая ссылка.
+function dropBlobFiles(ids) {
+  let убрано = 0;
+  for (const { id } of ids) {
+    try { fs.unlinkSync(blobPath(id)); убрано++; }
+    catch (e) { if (e.code !== 'ENOENT') console.warn('[blob] Не удалось удалить', id, e.message); }
+  }
+  return убрано;
+}
 const qBlobUsage   = db.prepare('SELECT COALESCE(SUM(size), 0) AS total FROM blobs WHERE owner = ?');
 const qGetSetting  = db.prepare('SELECT value FROM settings WHERE key = ?');
 const qSetSetting  = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
@@ -740,7 +776,9 @@ function clientIp(req) {
 // ===== HTTP API =====
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  // x-void-nick / x-void-pass носят учётные данные при потоковой загрузке:
+  // тело там занято самим файлом, класть их туда больше некуда
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-void-nick, x-void-pass');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
@@ -874,6 +912,78 @@ const server = http.createServer((req, res) => {
     if (!rateLimit('blobput:' + clientIp(req), 60, 600000)) {
       return json(429, { error: 'Слишком часто, подожди' });
     }
+
+    // Новый способ: сырые байты в теле, учётные данные в заголовках.
+    // Файл нигде не собирается целиком — ни строкой, ни буфером.
+    if (String(req.headers['content-type'] || '').startsWith('application/octet-stream')) {
+      // Пока не повешен обработчик 'data', поток стоит на месте: успеваем
+      // проверить пароль, не приняв ни байта от неизвестного.
+      (async () => {
+        // Отказ на середине загрузки. Порядок важен: сперва ответ, и только
+        // после того, как он ушёл в сеть, — обрыв. Наоборот нельзя: клиент
+        // получит сброс соединения и покажет «нет связи» вместо причины.
+        const отказать = (код, текст) => {
+          req.pause();                       // остальное тело нам уже не нужно
+          res.setHeader('Connection', 'close');
+          json(код, { error: текст });
+          res.on('finish', () => req.destroy());
+        };
+
+        const u = await verifyUser(req.headers['x-void-nick'], req.headers['x-void-pass']);
+        if (!u) return отказать(401, 'Неверный ник или пароль');
+        if (u.banned) return отказать(403, 'Аккаунт заблокирован');
+
+        const занято = qBlobUsage.get(u.nick).total;
+        const остаток = Math.min(MAX_BLOB, BLOB_QUOTA - занято);
+        if (остаток <= 0) return отказать(413, 'Превышен объём вложений');
+
+        const id = crypto.randomBytes(24).toString('hex');
+        const времянка = path.join(BLOB_TMP, id);
+        const поток = fs.createWriteStream(времянка);
+        let принято = 0, сорвалось = false;
+
+        const сдаться = (код, текст) => {
+          if (сорвалось) return;
+          сорвалось = true;
+          поток.destroy();
+          try { fs.unlinkSync(времянка); } catch (e) {}
+          отказать(код, текст);
+        };
+
+        req.on('data', кусок => {
+          if (сорвалось) return;
+          принято += кусок.length;
+          // Обрываем на превышении, а не после: иначе предел ничего не защищает
+          if (принято > остаток) {
+            return сдаться(413, принято > MAX_BLOB ? 'Файл слишком большой' : 'Превышен объём вложений');
+          }
+          if (!поток.write(кусок)) { req.pause(); поток.once('drain', () => req.resume()); }
+        });
+
+        req.on('error', () => сдаться(400, 'Загрузка прервалась'));
+
+        req.on('end', () => {
+          if (сорвалось) return;
+          поток.end(() => {
+            if (!принято) { try { fs.unlinkSync(времянка); } catch (e) {} return json(400, { error: 'Пустое вложение' }); }
+            try {
+              fs.renameSync(времянка, blobPath(id));
+              qPutBlobDisk.run(id, u.nick, принято, Date.now());
+            } catch (e) {
+              try { fs.unlinkSync(времянка); } catch (e2) {}
+              console.error('[blob] Не удалось сохранить:', e.message);
+              return json(500, { error: 'Ошибка сервера' });
+            }
+            console.log('[blob] Принято потоком', Math.round(принято / 1024), 'КБ от', u.nick);
+            json(200, { ok: true, id, size: принято });
+          });
+        });
+      })().catch(err => { console.error('[blob]', err.message); json(500, { error: 'Ошибка сервера' }); });
+      return;
+    }
+
+    // Старый способ: base64 внутри JSON. Оставлен, чтобы вкладка, открытая
+    // до обновления, не сломалась на первой же отправке.
     readBody(async (body) => {
       const u = await verifyUser(body.nick, body.password);
       if (!u) return json(401, { error: 'Неверный ник или пароль' });
@@ -888,7 +998,7 @@ const server = http.createServer((req, res) => {
       }
       // Ограничиваем общий объём на аккаунт, иначе диск можно забить
       const used = qBlobUsage.get(u.nick).total;
-      if (used + buf.length > 200 * 1024 * 1024) {
+      if (used + buf.length > BLOB_QUOTA) {
         return json(413, { error: 'Превышен объём вложений' });
       }
 
@@ -914,6 +1024,26 @@ const server = http.createServer((req, res) => {
 
       const id = typeof body.id === 'string' ? body.id : '';
       if (!/^[0-9a-f]{48}$/.test(id)) return json(400, { error: 'Неверный опознаватель' });
+      const мета = qBlobMeta.get(id);
+      if (!мета) return json(404, { error: 'Вложение не найдено' });
+
+      // Вложение лежит файлом — отдаём его потоком, не поднимая в память
+      if (мета.on_disk) {
+        const файл = blobPath(id);
+        if (!fs.existsSync(файл)) return json(404, { error: 'Вложение не найдено' });
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': мета.size,
+          'Cache-Control': 'no-store'
+        });
+        const поток = fs.createReadStream(файл);
+        поток.on('error', () => res.destroy());
+        res.on('close', () => поток.destroy());
+        поток.pipe(res);
+        return;
+      }
+
+      // Вложения, залитые до перехода на файлы, так и лежат в базе
       const row = qGetBlob.get(id);
       if (!row) return json(404, { error: 'Вложение не найдено' });
       json(200, { ok: true, data: Buffer.from(row.data).toString('base64'), size: row.size });
@@ -1039,6 +1169,7 @@ const server = http.createServer((req, res) => {
       const msgs = qDeleteMsgs.run(u.nick, u.nick).changes;
       qDropDevices.run(u.nick);
       qDropPushAll.run(u.nick);
+      dropBlobFiles(qBlobIdsOf.all(u.nick));
       qDropBlobsOf.run(u.nick);
       qBlockWipe.run(u.nick, u.nick);
       qDeleteUser.run(u.nick);
@@ -1301,6 +1432,7 @@ const server = http.createServer((req, res) => {
       // остаются — сервер их не контролирует.
       if (action === 'purge-messages') {
         const removed = qPurgeMsgs.run().changes;
+        dropBlobFiles(qBlobIdsAll.all());
         const blobs = db.prepare('DELETE FROM blobs').run().changes;
         if (blobs) console.log('[admin] PURGE: удалено вложений:', blobs);
         console.log('[admin] PURGE: удалено сообщений с сервера:', removed);
@@ -1351,6 +1483,7 @@ const server = http.createServer((req, res) => {
         const msgs = qDeleteMsgs.run(target.nick, target.nick).changes;
         qDropDevices.run(target.nick);
         qDropPushAll.run(target.nick);
+        dropBlobFiles(qBlobIdsOf.all(target.nick));
         qDropBlobsOf.run(target.nick);
         qBlockWipe.run(target.nick, target.nick);
         qDeleteUser.run(target.nick);
@@ -1753,6 +1886,7 @@ const cleanup = setInterval(() => {
     const now = Date.now();
     const a = db.prepare('DELETE FROM messages WHERE delivered = 1 AND timestamp < ?').run(now - TTL_DELIVERED);
     const b = db.prepare('DELETE FROM messages WHERE delivered = 0 AND timestamp < ?').run(now - TTL_PENDING);
+    dropBlobFiles(qBlobIdsOld.all(now - TTL_BLOB));
     const c = db.prepare('DELETE FROM blobs WHERE created_at < ?').run(now - TTL_BLOB);
     if (a.changes || b.changes) console.log('[cleanup] Удалено сообщений:', a.changes + b.changes);
     if (c.changes) console.log('[cleanup] Удалено вложений:', c.changes);

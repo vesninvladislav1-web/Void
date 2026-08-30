@@ -5482,7 +5482,10 @@
   // Файл шифруется тем же ключом, что и переписка, и уходит в хранилище.
   // В сообщение попадает только опознаватель — сервер не знает ни имени
   // файла, ни его содержимого.
-  const FILE_MAX = 3 * 1024 * 1024;
+  // Предел держит сервер: у него на вложение 25 МБ. Здесь чуть меньше, потому
+  // что шифрование добавляет к файлу 16 байт метки подлинности, и упереться
+  // в потолок лучше до отправки, а не после.
+  const FILE_MAX = 25 * 1024 * 1024 - 1024;
   const IMAGE_SIDE = 1600;          // фото не сжимаем в мыло, но и не тащим оригинал
   const IMAGE_BYTES = 900 * 1024;
   const blobCache = {};             // опознаватель -> расшифрованный объект
@@ -5498,7 +5501,25 @@
     if (!key) return null;
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, bytes);
-    return { iv: b64(iv), data: b64(ct) };
+    return { iv: b64(iv), ct };
+  }
+
+  // Отправка вложения на сервер. Байты уходят как есть, без base64 и без JSON:
+  // так файл не удваивается в памяти ни здесь, ни на сервере, и предел размера
+  // перестаёт зависеть от оперативной памяти.
+  async function uploadBlob(ct) {
+    const r = await fetch(API + '/api/blob/put', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'x-void-nick': myName,
+        'x-void-pass': myRawPass
+      },
+      body: ct
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'Не удалось загрузить файл');
+    return d.id;
   }
 
   async function decryptBytes(peer, ivB64, cipher) {
@@ -5557,15 +5578,8 @@
     if (!enc) { showToast('Собеседник ещё ни разу не заходил — отправить нельзя'); return; }
 
     let blobId;
-    try {
-      const r = await fetch(API + '/api/blob/put', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nick: myName, password: myRawPass, data: enc.data })
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) { showToast(d.error || 'Не удалось загрузить файл'); return; }
-      blobId = d.id;
-    } catch (err) { showToast('Нет связи с сервером'); return; }
+    try { blobId = await uploadBlob(enc.ct); }
+    catch (err) { showToast(err.message === 'Failed to fetch' ? 'Нет связи с сервером' : err.message); return; }
 
     const meta = { id: blobId, iv: enc.iv, name: name.slice(0, 80), mime, size: bytes.length, ...(extra || {}) };
     const payloadText = '__FILE__' + JSON.stringify(meta);
@@ -5597,9 +5611,14 @@
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nick: myName, password: myRawPass, id: meta.id })
       });
-      const d = await r.json().catch(() => ({}));
       if (!r.ok) return null;
-      const plain = await decryptBytes(peer, meta.iv, unb64(d.data));
+      // Новые вложения приходят сырыми байтами, старые — base64 внутри JSON.
+      // Различаем по типу ответа, чтобы уже отправленное осталось читаемым.
+      const тип = r.headers.get('content-type') || '';
+      const cipher = тип.includes('application/json')
+        ? unb64((await r.json().catch(() => ({}))).data || '')
+        : await r.arrayBuffer();
+      const plain = await decryptBytes(peer, meta.iv, cipher);
       if (!plain) return null;
       blobCache[meta.id] = plain;
       return plain;
@@ -6486,15 +6505,10 @@
       const enc = await encryptBytes(to, new Uint8Array(buf));
       if (!enc) { showToast('Собеседник ещё ни разу не заходил — отправить нельзя'); return; }
       try {
-        const r = await fetch(API + '/api/blob/put', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nick: myName, password: myRawPass, data: enc.data })
-        });
-        const d = await r.json().catch(() => ({}));
-        if (!r.ok) { showToast(d.error || 'Не удалось переслать вложение'); return; }
-        blobCache[d.id] = buf;               // уже расшифровано, качать назад незачем
-        outBody = '__FILE__' + JSON.stringify({ ...meta, id: d.id, iv: enc.iv });
-      } catch (err) { showToast('Нет связи с сервером'); return; }
+        const id = await uploadBlob(enc.ct);
+        blobCache[id] = buf;                 // уже расшифровано, качать назад незачем
+        outBody = '__FILE__' + JSON.stringify({ ...meta, id, iv: enc.iv });
+      } catch (err) { showToast(err.message === 'Failed to fetch' ? 'Нет связи с сервером' : err.message); return; }
     }
 
     const ok = await sendTo(to, '__FWD__' + origin + ':' + outBody);
