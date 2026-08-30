@@ -5,3 +5,4 @@ gen-icons.js
 
 # Вложения лежат файлами рядом с базой — в репозитории им не место
 server/blobs/
+server/backups/
