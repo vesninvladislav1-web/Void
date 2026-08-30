@@ -316,12 +316,18 @@ function scryptHash(pass) {
 function scryptVerify(pass, stored) {
   return new Promise(resolve => {
     const parts = stored.split('$');
-    if (parts.length !== 3) return resolve(false);
-    let salt, expected;
-    try {
-      salt = Buffer.from(parts[1], 'hex');
-      expected = Buffer.from(parts[2], 'hex');
-    } catch (e) { return resolve(false); }
+    if (parts.length !== 3 || parts[0] !== 's2') return resolve(false);
+    // Проверка формата не придирка. Buffer.from(x, 'hex') на нешестнадцатеричной
+    // строке молча обрывается на первом плохом знаке и может вернуть пустой
+    // буфер. Тогда ниже сравнивались бы два пустых буфера — то есть подошёл бы
+    // ЛЮБОЙ пароль. Такую строку в базу пишем не мы, но одной испорченной
+    // записи хватило бы, чтобы аккаунт открылся настежь.
+    if (!/^[0-9a-f]{32}$/.test(parts[1]) || !/^[0-9a-f]{128}$/.test(parts[2])) {
+      console.error('[auth] Хеш испорчен, вход запрещён');
+      return resolve(false);
+    }
+    const salt = Buffer.from(parts[1], 'hex');
+    const expected = Buffer.from(parts[2], 'hex');
     crypto.scrypt(pass, salt, expected.length, (err, key) => {
       if (err) return resolve(false);
       resolve(key.length === expected.length && crypto.timingSafeEqual(key, expected));
