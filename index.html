@@ -33,6 +33,7 @@
     --msg-other: #231F1C;
     --badge: #CC3A1E;   /* белым по нему 5.0. Свой цвет, а не акцент: акцент переключаемый,
                            и ни белый, ни тёмный текст не держат норму на всех пяти */
+    --sos-text: #FF7A5C;   /* тем же #CC3A1E буквами по тёмному вышло бы 3.2 — мало */
     --online: #4ade80;
     --shadow: rgba(255,107,74,0.18);
     --glass: rgba(44,39,36,0.55);
@@ -47,7 +48,7 @@
     --bg: #FAFAFA; --bg2: #F5F5F3; --bg3: #FFFFFF;
     --border: rgba(0,0,0,0.08); --accent: #FF6B4A; --accent2: #C9573F;
     --text: #1C1917; --text2: #5F5954; --text3: #6B6460;   /* 5.5 и 4.9 к светлому фону */
-    --msg-own: #FCEAE5; --msg-other: #FFFFFF; --online: #22c55e; --badge: #CC3A1E;
+    --msg-own: #FCEAE5; --msg-other: #FFFFFF; --online: #22c55e; --badge: #CC3A1E; --sos-text: #CC3A1E;
     --shadow: rgba(255,107,74,0.14);
     --glass: rgba(250,250,250,0.75);
     --glass2: rgba(255,255,255,0.9);
@@ -221,6 +222,10 @@
   .chat-info { flex:1; min-width:0; }
   .chat-name { font-size:14px; font-weight:500; color:var(--text); margin-bottom:3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .chat-preview { font-size:12px; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  /* Тот же цвет, что у плашки непрочитанных: в списке он означает «сюда надо
+     посмотреть», и аварийный сигнал — как раз тот случай. */
+  .preview-sos { color:var(--sos-text); font-weight:600; }
+  .preview-empty { color:var(--text3); font-style:italic; }
   .chat-time { font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; flex-shrink:0; }
 
   /* ЧАТ */
@@ -834,8 +839,11 @@
 
   <!-- ЭКРАН «Я»: профиль и настройки. Раньше выезжал сбоку. -->
   <div class="sidebar screen" id="sidebar">
-    <div class="sidebar-header">
-      <div class="logo">VOID</div>
+    <!-- Заголовок, а не логотип: на двух других вкладках шапка называет экран,
+         и только здесь стоял знак приложения. Логотип остался там, где он к
+         месту, — на входе и в разделе «О VOID». -->
+    <div class="chats-topbar">
+      <div class="chats-topbar-title">Я</div>
     </div>
 
     <!-- Профиль -->
@@ -3281,15 +3289,32 @@
       const grp = groupOf(nick);
       const displayName = grp ? esc(grp.name) : isLan ? esc(chat.name || 'LAN') : '@' + esc(nick);
       const avatarContent = grp ? ico('group', 20) : isLan ? ico('lan', 20) : avatarInner(nick);
+      // Аварийный сигнал красится отдельно: это единственное сообщение, ради
+      // которого стоит бросить дела, а выглядело оно ровно как «привет».
+      // Пустая переписка, наоборот, приглушается — иначе строка «Нет сообщений»
+      // читается как настоящее сообщение с таким текстом.
       const lastText = last
         ? (last.system
             ? `<i>${esc(last.text)}</i>`
-            : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.isSos ? 'Аварийный сигнал' : last.isVoice ? 'Голосовое' : last.isFile ? 'Вложение' : last.enc?.ct ? 'Сообщение' : esc(last.enc?.plain || last.text || '')))
-        : 'Нет сообщений';
+            : last.isSos
+              ? `<span class="preview-sos">Аварийный сигнал</span>`
+              : (last.own ? 'Вы: ' : (isLan && last.sender ? last.sender + ': ' : '')) + (last.isVoice ? 'Голосовое' : last.isFile ? 'Вложение' : last.enc?.ct ? 'Сообщение' : esc(last.enc?.plain || last.text || '')))
+        : '<span class="preview-empty">Нет сообщений</span>';
       const item = document.createElement('div');
       item.className = 'chat-item' + (currentChat===nick?' active':'');
       item.dataset.nick = nick;
       item.onclick = () => openChat(nick);
+      // Строка была обычным div с onclick: до неё нельзя было добраться ни
+      // клавиатурой, ни экранным диктором — весь список чатов оставался
+      // недостижимым. Роль и tabindex возвращают её в обход по Tab, а имя для
+      // диктора собирается целиком, иначе он прочитал бы голое число рядом.
+      item.setAttribute('role', 'button');
+      item.setAttribute('tabindex', '0');
+      item.setAttribute('aria-label', displayName.replace(/<[^>]*>/g, '') +
+        (unread > 0 ? ', непрочитанных: ' + unread : ''));
+      item.onkeydown = e => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openChat(nick); }
+      };
       item.innerHTML = `
         <div class="avatar" style="background:${chat.color};font-size:${isLan?'22px':'inherit'}">${avatarContent}</div>
         <div class="chat-info">
@@ -5508,15 +5533,38 @@
   // так файл не удваивается в памяти ни здесь, ни на сервере, и предел размера
   // перестаёт зависеть от оперативной памяти.
   async function uploadBlob(ct) {
-    const r = await fetch(API + '/api/blob/put', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'x-void-nick': myName,
-        'x-void-pass': myRawPass
-      },
-      body: ct
-    });
+    const размер = ct.byteLength ?? ct.length ?? 0;
+    let r;
+    try {
+      r = await fetch(API + '/api/blob/put', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'x-void-nick': myName,
+          'x-void-pass': myRawPass
+        },
+        body: ct
+      });
+    } catch (e) {
+      // Посредник перед сервером (nginx и подобные) обрывает соединение прямо
+      // посреди отправки, если тело больше его предела. Ответ до браузера не
+      // доезжает, и запрос падает так же, как при пропавшем интернете — но
+      // причина совсем другая, и человек идёт чинить не то.
+      if (navigator.onLine && размер > 1024 * 1024) {
+        // Отличить обрыв по размеру от пропавшей связи отсюда нельзя, поэтому
+        // называем обе причины, а не выбираем одну наугад.
+        throw new Error('Отправка оборвалась на ' + humanSize(размер) +
+                        ': пропала связь или сервер не принимает такие файлы');
+      }
+      throw new Error('Нет связи с сервером');
+    }
+    // Отказ посредника приходит страницей, а не JSON: по этому его и узнаём
+    const тип = r.headers.get('content-type') || '';
+    if (!r.ok && !тип.includes('json')) {
+      throw new Error(r.status === 413
+        ? 'Сервер не принял файл: слишком большой (' + humanSize(размер) + ')'
+        : 'Сервер отказал, код ' + r.status);
+    }
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || 'Не удалось загрузить файл');
     return d.id;
@@ -5579,7 +5627,7 @@
 
     let blobId;
     try { blobId = await uploadBlob(enc.ct); }
-    catch (err) { showToast(err.message === 'Failed to fetch' ? 'Нет связи с сервером' : err.message); return; }
+    catch (err) { showToast(err.message); return; }
 
     const meta = { id: blobId, iv: enc.iv, name: name.slice(0, 80), mime, size: bytes.length, ...(extra || {}) };
     const payloadText = '__FILE__' + JSON.stringify(meta);
@@ -6508,7 +6556,7 @@
         const id = await uploadBlob(enc.ct);
         blobCache[id] = buf;                 // уже расшифровано, качать назад незачем
         outBody = '__FILE__' + JSON.stringify({ ...meta, id, iv: enc.iv });
-      } catch (err) { showToast(err.message === 'Failed to fetch' ? 'Нет связи с сервером' : err.message); return; }
+      } catch (err) { showToast(err.message); return; }
     }
 
     const ok = await sendTo(to, '__FWD__' + origin + ':' + outBody);
