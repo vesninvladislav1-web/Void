@@ -239,6 +239,17 @@
   .back-btn:active { transform:scale(0.95); }
   .chat-topbar-info { flex:1; min-width:0; }
   .chat-topbar-name { font-size:15px; font-weight:600; }
+  /* Отметка живёт рядом с именем, а не внутри него: имя ставится через
+     textContent, и любой вложенный элемент оно бы стирало при каждом
+     открытии переписки. */
+  .chat-topbar-namerow { display:flex; align-items:center; gap:6px; min-width:0; }
+  /* Отметка появляется только там, где ключи сверены лично. Обратной пометки
+     «не сверены» намеренно нет: то, что висит всегда, перестают замечать
+     через неделю, и в день настоящей подмены значок будет как вчера.
+     Пусть лучше человек заметит отметку в одной переписке, не найдёт её в
+     другой и спросит почему — любопытство работает вернее тревоги. */
+  .verified-mark { display:none; flex-shrink:0; color:var(--online); }
+  .verified-mark.on { display:inline-flex; }
   .chat-topbar-sub { font-size:12px; color:var(--text2); margin-top:2px; }
   .chat-topbar-actions { display:flex; gap:6px; align-items:center; }
   .chat-topbar-actions::before { content:''; width:1px; height:20px; background:var(--border); margin-right:2px; }
@@ -1058,7 +1069,10 @@
         <button class="back-btn" onclick="backToChats()" data-ico="back" aria-label="Назад"></button>
         <div class="avatar" id="cv-avatar" style="width:38px;height:38px;border-radius:12px;font-size:14px;">?</div>
         <div class="chat-topbar-info">
-          <div class="chat-topbar-name" id="cv-name">—</div>
+          <div class="chat-topbar-namerow">
+            <div class="chat-topbar-name" id="cv-name">—</div>
+            <span class="verified-mark" id="cv-verified" title="Ключи сверены лично"></span>
+          </div>
           <div class="chat-topbar-sub" id="cv-sub"></div>
         </div>
         <div class="chat-topbar-actions">
@@ -2014,6 +2028,17 @@
   // Раньше здесь была пометка о шифровании — теперь показываем статус
   function updateE2EBadge(nick) {
     watchPresence(nick);
+    renderVerifiedMark(nick);
+  }
+
+  // Отметка «ключи сверены» в шапке переписки. Показывается только для личных
+  // чатов: в комнатах и группах общего ключа на двоих нет, и сверять нечего.
+  function renderVerifiedMark(nick) {
+    const м = document.getElementById('cv-verified');
+    if (!м) return;
+    const годится = nick && !isRoom(nick) && chats[nick]?.verified;   // isRoom покрывает и группы
+    м.classList.toggle('on', !!годится);
+    м.innerHTML = годится ? ico('verify', 15) : '';
   }
 
   // ===== РЕГИСТРАЦИЯ =====
@@ -6286,7 +6311,7 @@
         text: 'Ключ @' + nick + ' изменился. Если вы не меняли устройство — сверьте ключи заново.',
         timestamp: Date.now()
       });
-      if (currentChat === nick) renderMessages();
+      if (currentChat === nick) { renderMessages(); renderVerifiedMark(nick); }
       renderChatList();
     }
     chat.keyFp = fp;
@@ -6353,6 +6378,7 @@
     saveState();
     document.getElementById('safety-overlay')?.remove();
     renderSafetyBtn();
+    renderVerifiedMark(peer);
     showToast(yes ? 'Ключи отмечены как сверенные' : 'Отметка снята');
   }
 
