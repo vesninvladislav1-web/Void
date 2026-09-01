@@ -1438,16 +1438,29 @@
     if (!passwordHash) {
       // Хеша локально нет — проверяем на сервере
       try {
-        const r = await fetch(API + '/api/login', {
+        const пропуск = await authSecret(myName, pass);
+        let r = await fetch(API + '/api/login', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nick: myName, password: pass })
+          body: JSON.stringify({ nick: myName, password: пропуск })
         });
+        // Аккаунт мог быть заведён до перехода — переводим его разово
+        if (r.status === 401) {
+          const пер = await fetch(API + '/api/account/upgrade-auth', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nick: myName, password: pass, newSecret: пропуск })
+          });
+          if (пер.ok) r = await fetch(API + '/api/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nick: myName, password: пропуск })
+          });
+        }
         if (!r.ok) { err.textContent = 'Неверный пароль'; err.style.display='block'; return; }
       } catch(e) { err.textContent = 'Нет связи с сервером'; err.style.display='block'; return; }
       passwordHash = hash;
     }
 
-    myRawPass = pass;
+    myPassword = pass;
+    myRawPass = await authSecret(myName, pass);
     storeSessionPass(pass, document.getElementById('unlock-remember').checked);
     cryptoKey = await deriveKey([myName, pass]);
     finishAuth(false, 'simple');
@@ -1737,7 +1750,8 @@
       if (authMode === 'simple') {
         const savedPass = readSessionPass();
         if (savedPass) {
-          myRawPass = savedPass;
+          myPassword = savedPass;
+          myRawPass = await authSecret(myName, savedPass);
           cryptoKey = await deriveKey([myName, savedPass]);
           connectDmWs();
         } else {
@@ -1824,6 +1838,20 @@
       { name:'PBKDF2', salt:enc.encode('VOID_v1'), iterations:100000, hash:'SHA-256' },
       keyMaterial, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']
     );
+  }
+
+  // Пропуск для сервера. Из пароля выводятся ДВА разных значения:
+  //   deriveKey (соль VOID_v1)      — ключ от сейфа, никогда не покидает устройство
+  //   authSecret (соль VOID_auth_v1) — пропуск на вход, только его и видит сервер
+  // Соли разные, поэтому по пропуску ключ не восстановить: сервер, записавший
+  // всё присланное, сейф всё равно не откроет. У сид-фраз так было с самого
+  // начала (seedAuthToken) — здесь то же самое для паролей.
+  async function authSecret(nick, pass) {
+    const enc = new TextEncoder();
+    const материал = await crypto.subtle.importKey('raw', enc.encode(nick + '\u0000' + pass), 'PBKDF2', false, ['deriveBits']);
+    const биты = await crypto.subtle.deriveBits(
+      { name:'PBKDF2', salt: enc.encode('VOID_auth_v1'), iterations: 100000, hash:'SHA-256' }, материал, 256);
+    return [...new Uint8Array(биты)].map(b => b.toString(16).padStart(2,'0')).join('');
   }
 
   async function encryptText(text) {
@@ -2080,7 +2108,9 @@
   // ===== СЕРВЕР =====
   const API = 'https://voidm.site';
   const WS_URL = 'wss://voidm.site/signal';
-  let myRawPass = null;    // пароль в памяти для auth WebSocket
+  let myRawPass = null;    // пропуск для сервера: производное от пароля, не сам пароль
+  let myPassword = null;   // сам пароль. Нужен, чтобы вывести ключ от переписки,
+                           // и на сервер не уходит никогда после перевода аккаунта
   let dmWs = null;         // WebSocket для личных сообщений
   let dmWsAuthOk = false;  // успешно авторизован на сервере
   let dmWsHeartbeat = null;// интервал keepalive ping
@@ -2232,13 +2262,14 @@
   }
 
   // При выходе отписываемся: чужие уведомления на это устройство приходить не должны
-  async function teardownPush(nick, pass) {
-    if (!pushSupported() || !nick || !pass) return;
+  // Второй параметр — пропуск, а не пароль: сюда передают myRawPass
+  async function teardownPush(nick, пропуск) {
+    if (!pushSupported() || !nick || !пропуск) return;
     pushReady = false;
     try {
       await fetch(API + '/api/push/unsubscribe', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nick, password: pass, deviceId: deviceId() })
+        body: JSON.stringify({ nick, password: пропуск, deviceId: deviceId() })
       });
     } catch (e) {}
   }
@@ -2664,7 +2695,7 @@
       const r = await fetch(API + '/api/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nick, password: pass })
+        body: JSON.stringify({ nick, password: await authSecret(nick, pass) })
       });
       const data = await r.json();
       if (!r.ok) { err.textContent = data.error || 'Ошибка сервера'; err.style.display='block'; if(btn) btn.textContent='СОЗДАТЬ'; return; }
@@ -2673,7 +2704,8 @@
     }
     myName = nick;
     authMode = 'simple';
-    myRawPass = pass;
+    myPassword = pass;
+    myRawPass = await authSecret(nick, pass);
     storeSessionPass(pass, document.getElementById('sreg-remember')?.checked !== false);
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
@@ -2692,12 +2724,28 @@
     // Проверка на сервере
     const полеКода = document.getElementById('slogin-code');
     try {
-      const r = await fetch(API + '/api/login', {
+      // На сервер уходит пропуск, а не пароль. Пароль остаётся здесь.
+      const пропуск = await authSecret(nick, pass);
+      const войти = (чем) => fetch(API + '/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nick, password: pass, deviceId: deviceId(),
+        body: JSON.stringify({ nick, password: чем, deviceId: deviceId(),
                                code: полеКода.value.trim() || undefined })
       });
+      let r = await войти(пропуск);
+      // Аккаунт заведён до перехода: в базе лежит хеш от старого пароля.
+      // Один раз предъявляем его, сервер запоминает пропуск — и больше пароль
+      // не уходит никуда. Код при этом ни при чём, его отказ трогать нельзя.
+      if (r.status === 401) {
+        const d0 = await r.clone().json().catch(() => ({}));
+        if (!d0.needCode) {
+          const пер = await fetch(API + '/api/account/upgrade-auth', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nick, password: pass, newSecret: пропуск })
+          });
+          if (пер.ok) r = await войти(пропуск);
+        }
+      }
       if (r.status === 403) {
         const d = await r.json().catch(() => ({}));
         err.textContent = d.reason ? 'Аккаунт заблокирован: ' + d.reason : 'Аккаунт заблокирован';
@@ -2727,7 +2775,8 @@
     }
     myName = nick;
     authMode = 'simple';
-    myRawPass = pass;
+    myPassword = pass;                              // только на устройстве
+    myRawPass = await authSecret(nick, pass);       // только это видит сервер
     storeSessionPass(pass, document.getElementById('slogin-remember')?.checked !== false);
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
@@ -4584,7 +4633,7 @@
     authMode = 'anon';
     isAdmin = false; adminUsers = []; adminSession = null;
     updateAdminMenuVisibility();
-    myRawPass = null; cryptoKey = null;
+    myRawPass = null; myPassword = null; cryptoKey = null;
     myKeyPair = null; myPubJwk = null;
     peerKeyCache = {}; pairKeyCache = {};
     blocked = new Set();       // список чужой, на другом аккаунте он свой
@@ -4847,7 +4896,10 @@
 
       const r = await fetch(API + '/api/account/password', {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ nick: myName, password: oldPass, newPassword: p1, encPrivateKey: encPriv })
+        body: JSON.stringify({ nick: myName,
+                               password: await authSecret(myName, oldPass),
+                               newPassword: await authSecret(myName, p1),
+                               encPrivateKey: encPriv })
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) { btn.textContent = label; btn.disabled = false; return fail(d.error || 'Не удалось сменить'); }
@@ -4871,7 +4923,8 @@
       }
 
       cryptoKey = newKey;
-      myRawPass = p1;
+      myPassword = p1;
+      myRawPass = await authSecret(myName, p1);
       passwordHash = await hashPassword(myName, p1);
       storeSessionPass(p1, !!readSessionPass());
       if (encPriv) { try { localStorage.setItem('void_e2e:' + acctId(myName), JSON.stringify({ pub: myPubJwk, priv: encPriv })); } catch(e) {} }
@@ -5656,10 +5709,12 @@
     }
     // У аккаунта по фразе роль пароля играет выведенный из неё токен —
     // он уже есть в памяти, спрашивать нечего
-    const pass = authMode === 'anon'
+    const введено = authMode === 'anon'
       ? myRawPass
       : (document.getElementById('delacc-pass')?.value || '');
-    if (!pass) { err.textContent = 'Введи пароль'; err.style.display = 'block'; return; }
+    if (!введено) { err.textContent = 'Введи пароль'; err.style.display = 'block'; return; }
+    // На сервер и здесь уходит пропуск, а не пароль
+    const pass = authMode === 'anon' ? введено : await authSecret(myName, введено);
     err.style.display = 'none';
     const label = btn.textContent;
     btn.textContent = 'УДАЛЯЮ...';
@@ -5735,7 +5790,8 @@
         showUnlockScreen();
         return;
       }
-      myRawPass = saved;
+      myPassword = saved;
+      myRawPass = await authSecret(myName, saved);
       cryptoKey = await deriveKey([myName, saved]);
     }
     showToast('Аккаунт: @' + myName);
