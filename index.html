@@ -941,7 +941,7 @@
         <div class="settings-item-arrow" id="sender-mark" data-ico="check" data-ico-size="16"></div>
       </div>
 
-      <div class="settings-item" id="totp-item" onclick="showTotpModal()">
+      <div class="settings-item" id="totp-item" onclick="showUserTotp()">
         <div class="settings-item-icon" data-ico="key"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Вход по коду</div>
@@ -4596,20 +4596,20 @@
     try { totpOn = !!(await totpApi('status')).enabled; renderTotpSetting(); } catch (e) {}
   }
 
-  function showTotpModal() {
+  function showUserTotp() {
     if (authMode === 'anon') { showToast('У аккаунта по сид-фразе пароля нет'); return; }
     if (!myRawPass) { showToast('Нет связи с сервером'); return; }
-    totpOn ? totpOffModal() : totpOnModal();
+    totpOn ? userTotpOffModal() : userTotpOnModal();
   }
 
-  async function totpOnModal() {
+  async function userTotpOnModal() {
     let данные;
     try { данные = await totpApi('setup'); }
     catch (e) { showToast(e.message); return; }
 
     const ov = document.createElement('div');
     ov.className = 'modal-overlay';
-    ov.id = 'totp-overlay';
+    ov.id = 'utotp-overlay';
     ov.innerHTML = `
       <div class="modal" style="max-width:340px;">
         <div class="modal-title">ВХОД ПО КОДУ</div>
@@ -4620,42 +4620,74 @@
         </div>
         <a class="reg-btn" style="text-decoration:none;text-align:center;" href="${esc(данные.uri)}">ДОБАВИТЬ В ПРИЛОЖЕНИЕ</a>
         <div class="reg-label">Или введи ключ вручную</div>
-        <div style="font-family:'Space Mono',monospace;font-size:12px;word-break:break-all;
-                    background:var(--bg3);padding:10px;border-radius:10px;color:var(--text2);">${esc(данные.secret)}</div>
+        <!-- Ключ нажимается целиком: чаще всего аутентификатор стоит на другом
+             устройстве, и набирать эти 32 знака руками — мучение. -->
+        <div id="totp-secret" onclick="copyTotpSecret()" title="Нажми, чтобы скопировать"
+             style="font-family:'Space Mono',monospace;font-size:12px;word-break:break-all;cursor:pointer;
+                    background:var(--bg3);padding:10px;border-radius:10px;color:var(--text2);
+                    display:flex;align-items:center;gap:8px;transition:background 0.15s;">
+          <span style="flex:1;">${esc(данные.secret)}</span>
+          <span id="totp-copy-ico" style="flex-shrink:0;color:var(--text3);">${ico('copy', 15)}</span>
+        </div>
         <div class="reg-label">Код из приложения</div>
-        <input type="text" inputmode="numeric" maxlength="6" class="adm-search" id="totp-code" placeholder="000000">
-        <div id="totp-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+        <input type="text" inputmode="numeric" maxlength="6" class="adm-search" id="utotp-code" placeholder="000000">
+        <div id="utotp-err" style="color:#ef4444;font-size:12px;display:none;"></div>
         <div style="font-size:11px;color:var(--text3);line-height:1.5;">
           Пока код не подтверждён, вход остаётся прежним — ошибка при настройке
           не запрёт тебя снаружи.
         </div>
         <div class="modal-btns">
           <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
-          <button class="btn-primary" onclick="totpEnable()">Включить</button>
+          <button class="btn-primary" onclick="userTotpEnable()">Включить</button>
         </div>
       </div>`;
     document.body.appendChild(ov);
     ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
     paintIcons(ov);
-    setTimeout(() => document.getElementById('totp-code')?.focus(), 50);
+    setTimeout(() => document.getElementById('utotp-code')?.focus(), 50);
   }
 
-  async function totpEnable() {
-    const поле = document.getElementById('totp-code');
-    const ош = document.getElementById('totp-err');
+  function copyTotpSecret() {
+    const блок = document.getElementById('totp-secret');
+    const значок = document.getElementById('totp-copy-ico');
+    if (!блок || !значок) return;
+    const ключ = блок.firstElementChild.textContent.trim();
+    const получилось = () => {
+      значок.innerHTML = ico('check', 15);
+      значок.style.color = 'var(--online)';
+      блок.style.background = 'var(--glass2)';
+      showToast('Ключ скопирован');
+      setTimeout(() => {
+        значок.innerHTML = ico('copy', 15);
+        значок.style.color = 'var(--text3)';
+        блок.style.background = 'var(--bg3)';
+      }, 2000);
+    };
+    // Тот же путь, что и у сид-фразы: без защищённого соединения буфер обмена
+    // напрямую недоступен, и приходится обходить через скрытое поле
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(ключ).then(получилось).catch(() => fallbackCopy(ключ, получилось));
+    } else {
+      fallbackCopy(ключ, получилось);
+    }
+  }
+
+  async function userTotpEnable() {
+    const поле = document.getElementById('utotp-code');
+    const ош = document.getElementById('utotp-err');
     ош.style.display = 'none';
     try {
       await totpApi('enable', { code: (поле.value || '').trim() });
       totpOn = true; renderTotpSetting();
-      document.getElementById('totp-overlay')?.remove();
+      document.getElementById('utotp-overlay')?.remove();
       showToast('Вход по коду включён');
     } catch (e) { ош.textContent = e.message; ош.style.display = 'block'; поле.focus(); }
   }
 
-  function totpOffModal() {
+  function userTotpOffModal() {
     const ov = document.createElement('div');
     ov.className = 'modal-overlay';
-    ov.id = 'totp-overlay';
+    ov.id = 'utotp-overlay';
     ov.innerHTML = `
       <div class="modal" style="max-width:320px;">
         <div class="modal-title">ВЫКЛЮЧИТЬ ВХОД ПО КОДУ</div>
@@ -4663,26 +4695,26 @@
           Введи код из приложения. Без него выключить нельзя: иначе укравший
           пароль просто снял бы вторую дверь.
         </div>
-        <input type="text" inputmode="numeric" maxlength="6" class="adm-search" id="totp-code" placeholder="000000">
-        <div id="totp-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+        <input type="text" inputmode="numeric" maxlength="6" class="adm-search" id="utotp-code" placeholder="000000">
+        <div id="utotp-err" style="color:#ef4444;font-size:12px;display:none;"></div>
         <div class="modal-btns">
           <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
-          <button class="btn-primary" onclick="totpDisable()">Выключить</button>
+          <button class="btn-primary" onclick="userTotpDisable()">Выключить</button>
         </div>
       </div>`;
     document.body.appendChild(ov);
     ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
-    setTimeout(() => document.getElementById('totp-code')?.focus(), 50);
+    setTimeout(() => document.getElementById('utotp-code')?.focus(), 50);
   }
 
-  async function totpDisable() {
-    const поле = document.getElementById('totp-code');
-    const ош = document.getElementById('totp-err');
+  async function userTotpDisable() {
+    const поле = document.getElementById('utotp-code');
+    const ош = document.getElementById('utotp-err');
     ош.style.display = 'none';
     try {
       await totpApi('disable', { code: (поле.value || '').trim() });
       totpOn = false; renderTotpSetting();
-      document.getElementById('totp-overlay')?.remove();
+      document.getElementById('utotp-overlay')?.remove();
       showToast('Вход по коду выключен');
     } catch (e) { ош.textContent = e.message; ош.style.display = 'block'; поле.focus(); }
   }
