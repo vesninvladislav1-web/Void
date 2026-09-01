@@ -740,6 +740,10 @@
 
   <!-- Стартовый экран с кнопками -->
   <div id="start-screen" class="start-screen">
+    <!-- Приветствие для пришедших по ссылке. Обычно скрыто: остальные видят
+         привычные три кнопки. -->
+    <div id="invite-greeting" style="display:none;width:100%;max-width:320px;margin-bottom:18px;
+         background:var(--glass);border:1px solid var(--glass-border);border-radius:var(--radius-lg);padding:16px;"></div>
     <button class="start-btn primary-btn" onclick="showSimpleRegForm()">Регистрация</button>
     <button class="start-btn secondary-btn" onclick="showLoginSelect()">Уже есть аккаунт</button>
     <button class="start-btn secondary-btn" onclick="showAnonRegForm()">Анонимно</button>
@@ -1050,6 +1054,7 @@
         <div class="chat-menu-wrap">
           <button class="icon-btn" onclick="toggleChatsMenu()" id="chats-menu-btn" data-ico="dots" aria-label="Ещё"></button>
           <div class="chat-menu" id="chats-menu">
+            <button class="chat-menu-item" onclick="showInviteModal();closeChatsMenu()"><i data-ico="person"></i>Позвать человека</button>
             <button class="chat-menu-item" onclick="showNewGroupModal()"><i data-ico="group"></i>Новая группа</button>
             <button class="chat-menu-item" onclick="showLanModal();closeChatsMenu()"><i data-ico="lan"></i>LAN чат</button>
           </div>
@@ -1405,6 +1410,102 @@
     hideAllForms();
     const ss = document.getElementById('start-screen');
     ss.style.display='flex'; ss.style.animation='fadeInUp 0.4s ease forwards';
+  }
+
+  // ===== ПРИШЁЛ ПО ССЫЛКЕ =====
+  // Человек открыл приглашение. Показываем не анкету, а кто его зовёт, —
+  // и одну кнопку. Ник, пароль и всё прочее подождут: сперва разговор.
+  let приглашение = null;
+
+  function кодПриглашения() {
+    const m = /^\/i\/([0-9a-f]{32})$/.exec(location.pathname || '');
+    return m ? m[1] : null;
+  }
+
+  async function показатьПриглашение(код) {
+    hideAllForms();
+    const экран = document.getElementById('start-screen');
+    экран.style.display = 'flex';
+    const обёртка = document.getElementById('invite-greeting');
+    if (!обёртка) return false;
+    обёртка.style.display = 'block';
+    обёртка.innerHTML = '<div style="font-size:13px;color:var(--text2);">Смотрю, кто зовёт...</div>';
+    try {
+      const r = await fetch(API + '/api/invite/peek', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: код })
+      });
+      const д = await r.json();
+      if (!r.ok) throw new Error(д.error || 'Ссылка не действует');
+      приглашение = { код, от: д.from };
+      обёртка.innerHTML =
+        '<div style="font-size:15px;color:var(--text);line-height:1.5;">' +
+        '<b>@' + esc(д.from) + '</b> зовёт тебя в Void</div>' +
+        '<div style="font-size:12px;color:var(--text3);line-height:1.6;margin-top:6px;">' +
+        'Ставить ничего не нужно. Номер телефона не спросят.</div>' +
+        '<input class="reg-input" id="invite-nick" maxlength="16" placeholder="как тебя звать (можно пропустить)" ' +
+        'style="width:100%;margin-top:12px;" autocomplete="off">' +
+        '<button class="reg-btn" style="width:100%;margin-top:8px;" onclick="принятьПриглашение(this)">ОТКРЫТЬ ПЕРЕПИСКУ</button>' +
+        '<div style="font-size:11px;color:var(--text3);text-align:center;margin-top:8px;">' +
+        'или заведи обычный аккаунт ниже</div>';
+      return true;
+    } catch (e) {
+      обёртка.innerHTML = '<div style="font-size:13px;color:var(--accent2);">' +
+        esc(e.message === 'Failed to fetch' ? 'Нет связи с сервером' : e.message) + '</div>';
+      return false;
+    }
+  }
+
+  // Согласился: заводим анонимный аккаунт молча и сразу открываем переписку.
+  // Про двадцать четыре слова скажем позже — сейчас человек пришёл говорить,
+  // а не запоминать фразу.
+  async function принятьПриглашение(кнопка) {
+    if (!приглашение) return;
+    const метка = кнопка ? кнопка.textContent : '';
+    if (кнопка) { кнопка.textContent = 'ОТКРЫВАЮ...'; кнопка.disabled = true; }
+    try {
+      const r = await fetch(API + '/api/invite/take', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: приглашение.код })
+      });
+      const д = await r.json();
+      if (!r.ok) throw new Error(д.error || 'Ссылка не действует');
+
+      // Ник только латиницей — так требует сервер. Не назвался — придумаем
+      // сами, но пусть у человека будет возможность назваться сразу: этот
+      // ник останется с ним навсегда, менять его Void не умеет.
+      const введено = (document.getElementById('invite-nick')?.value || '').trim();
+      if (введено && !/^[a-zA-Z0-9_]{2,16}$/.test(введено)) {
+        throw new Error('Ник: латиница, цифры и _, от 2 до 16 знаков');
+      }
+      const ник = введено || ('id' + Math.random().toString(36).slice(2, 8));
+      generateSeed();
+      const токен = await seedAuthToken(currentSeed);
+      const рег = await fetch(API + '/api/seed/register', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: ник, token: токен })
+      });
+      if (!рег.ok) {
+        const о = await рег.json().catch(() => ({}));
+        throw new Error(о.error || 'Не удалось завести аккаунт');
+      }
+
+      myName = ник; authMode = 'anon'; myRawPass = токен; myPassword = null;
+      storeSessionPass(токен, true);
+      cryptoKey = await deriveKey(currentSeed);
+      chats = {}; currentChat = null; myAvatar = null; myStatus = '';
+      // Переписка с позвавшим создаётся сразу: человек попадает в разговор,
+      // а не в пустой список
+      chats[д.from] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
+      history.replaceState(null, '', '/');
+      restoreProfileFields(ник);
+      applyPrefs();
+      finishAuth(false, 'anon');
+      setTimeout(() => { if (chats[д.from]) openChat(д.from); }, 400);
+    } catch (e) {
+      if (кнопка) { кнопка.textContent = метка; кнопка.disabled = false; }
+      showToast(e.message === 'Failed to fetch' ? 'Нет связи с сервером' : e.message);
+    }
   }
 
   // Сессия есть, ключа нет — просим пароль, не теряя аккаунт и историю
@@ -4852,6 +4953,82 @@
     } catch (e) { ош.textContent = e.message; ош.style.display = 'block'; поле.focus(); }
   }
 
+  // ===== ССЫЛКА-ПРИГЛАШЕНИЕ =====
+  // Раньше позвать человека было нельзя: приходилось диктовать адрес, он
+  // заводил аккаунт, придумывал ник и сообщал обратно. Первое, что он видел, —
+  // анкета. Теперь ссылка: открыл и уже переписывается.
+  //
+  // Основа адреса вынесена отдельно: если однажды появится короткий домен,
+  // менять придётся одну строку.
+  const ОСНОВА_ССЫЛКИ = location.origin;
+
+  async function showInviteModal() {
+    if (!myRawPass) { showToast('Нет связи с сервером'); return; }
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'invite-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">ПОЗВАТЬ ЧЕЛОВЕКА</div>
+        <div id="invite-body" style="font-size:13px;color:var(--text2);line-height:1.6;">Готовлю ссылку...</div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+
+    let д;
+    try {
+      const r = await fetch(API + '/api/invite/new', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass })
+      });
+      д = await r.json();
+      if (!r.ok) throw new Error(д.error || 'Не получилось');
+    } catch (e) {
+      const б = document.getElementById('invite-body');
+      if (б) б.innerHTML = esc(e.message === 'Failed to fetch' ? 'Нет связи с сервером' : e.message);
+      return;
+    }
+
+    const ссылка = ОСНОВА_ССЫЛКИ + '/i/' + д.code;
+    const тело = document.getElementById('invite-body');
+    if (!тело) return;
+    тело.innerHTML = `
+      Отправь эту ссылку кому угодно. Он откроет её — и вы уже переписываетесь.
+      Ставить ничего не нужно, номер телефона тоже не спросят.
+      <div id="invite-link" onclick="copyInviteLink()" title="Нажми, чтобы скопировать"
+           style="font-family:'Space Mono',monospace;font-size:11.5px;word-break:break-all;cursor:pointer;
+                  background:var(--bg3);padding:11px;border-radius:12px;color:var(--text2);margin:12px 0 8px;
+                  display:flex;align-items:center;gap:8px;">
+        <span style="flex:1;">${esc(ссылка)}</span>
+        <span id="invite-copy-ico" style="flex-shrink:0;color:var(--text3);">${ico('copy', 15)}</span>
+      </div>
+      <div style="font-size:11px;color:var(--text3);line-height:1.5;">
+        Ссылка одноразовая и живёт неделю. Кто перешёл — попадает сразу в
+        переписку с тобой, остальным она уже не откроется.
+      </div>
+      <div class="modal-btns">
+        <button class="btn-primary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Готово</button>
+      </div>`;
+  }
+
+  function copyInviteLink() {
+    const блок = document.getElementById('invite-link');
+    const значок = document.getElementById('invite-copy-ico');
+    if (!блок || !значок) return;
+    const ссылка = блок.firstElementChild.textContent.trim();
+    const получилось = () => {
+      значок.innerHTML = ico('check', 15);
+      значок.style.color = 'var(--online)';
+      showToast('Ссылка скопирована');
+      setTimeout(() => { значок.innerHTML = ico('copy', 15); значок.style.color = 'var(--text3)'; }, 2000);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(ссылка).then(получилось).catch(() => fallbackCopy(ссылка, получилось));
+    } else {
+      fallbackCopy(ссылка, получилось);
+    }
+  }
+
   function showChangePassModal() {
     closeSidebar();
     if (authMode === 'anon') {
@@ -7949,6 +8126,12 @@
   }
   fixHeight();
   window.addEventListener('resize', fixHeight);
+
+  // Пришли по ссылке-приглашению — показываем, кто зовёт, вместо анкеты
+  {
+    const код = кодПриглашения();
+    if (код) setTimeout(() => показатьПриглашение(код), 300);
+  }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })

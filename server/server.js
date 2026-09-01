@@ -121,6 +121,12 @@ db.exec(`
   -- Чёрный список. owner решил не получать ничего от target.
   -- Хранится на сервере, а не на устройстве, потому что отсекать сообщения
   -- надо до доставки — иначе они всё равно приходили бы и будили телефон.
+  CREATE TABLE IF NOT EXISTS invites (
+    code TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_invites_owner ON invites(owner);
   CREATE TABLE IF NOT EXISTS blocks (
     owner TEXT NOT NULL,
     target TEXT NOT NULL,
@@ -271,6 +277,20 @@ function принятьКод(nick, deviceId, code) {
   }
   return true;
 }
+
+// Приглашение живёт неделю: за это время им либо воспользуются, либо оно
+// потеряется в переписке, и пусть лучше протухнет само.
+const TTL_INVITE   = 7 * 86400000;
+const qPutInvite   = db.prepare('INSERT INTO invites (code, owner, created_at) VALUES (?, ?, ?)');
+const qGetInvite   = db.prepare('SELECT owner, created_at FROM invites WHERE code = ?');
+const qDropInvite  = db.prepare('DELETE FROM invites WHERE code = ?');
+// Оставляем человеку не больше десяти живых приглашений: старые вытесняются
+const qDropOldInvites = db.prepare(`
+  DELETE FROM invites WHERE owner = ? AND code NOT IN (
+    SELECT code FROM invites WHERE owner = ? ORDER BY created_at DESC LIMIT 9
+  )
+`);
+const qDropInvitesOf  = db.prepare('DELETE FROM invites WHERE owner = ?');
 
 const qListDevices = db.prepare('SELECT device_id, name, created_at, last_seen FROM devices WHERE nick = ? ORDER BY last_seen DESC');
 const qDropDevice  = db.prepare('DELETE FROM devices WHERE nick = ? AND device_id = ?');
@@ -1119,6 +1139,71 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ===== ССЫЛКИ-ПРИГЛАШЕНИЯ =====
+  // Позвать человека в Void было нельзя никак: приходилось диктовать адрес,
+  // он заводил аккаунт, придумывал ник и сообщал его обратно. Четыре шага и
+  // анкета вместо разговора. Теперь — одна ссылка: открыл и уже переписываешься.
+  //
+  // Опознаватель случайный и длинный: по ссылке переходят, её не набирают
+  // руками, поэтому короткой её делать нельзя — короткую подберут.
+  if (req.method === 'POST' && url.pathname === '/api/invite/new') {
+    if (!rateLimit('invnew:' + clientIp(req), 30, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      // Больше десятка живых приглашений одному человеку незачем
+      try { qDropOldInvites.run(u.nick, u.nick); } catch (e) {}
+      const код = crypto.randomBytes(16).toString('hex');
+      qPutInvite.run(код, u.nick, Date.now());
+      json(200, { ok: true, code: код, ttl: TTL_INVITE });
+    });
+    return;
+  }
+
+  // Открыли ссылку: говорим, кто зовёт. Приглашение при этом не тратится —
+  // человек ещё ничего не решил, а показать имя надо до всякого согласия.
+  if (req.method === 'POST' && url.pathname === '/api/invite/peek') {
+    if (!rateLimit('invpeek:' + clientIp(req), 60, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const код = typeof body.code === 'string' ? body.code : '';
+      if (!/^[0-9a-f]{32}$/.test(код)) return json(400, { error: 'Неверная ссылка' });
+      const пр = qGetInvite.get(код);
+      if (!пр || Date.now() - пр.created_at > TTL_INVITE) {
+        return json(404, { error: 'Ссылка не действует — попроси новую' });
+      }
+      const кто = qUserByNick.get(пр.owner);
+      if (!кто || кто.banned) return json(404, { error: 'Ссылка не действует' });
+      json(200, { ok: true, from: кто.nick });
+    });
+    return;
+  }
+
+  // Согласился: приглашение гасится, чтобы по одной ссылке не заходила толпа
+  if (req.method === 'POST' && url.pathname === '/api/invite/take') {
+    if (!rateLimit('invtake:' + clientIp(req), 30, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const код = typeof body.code === 'string' ? body.code : '';
+      if (!/^[0-9a-f]{32}$/.test(код)) return json(400, { error: 'Неверная ссылка' });
+      const пр = qGetInvite.get(код);
+      if (!пр || Date.now() - пр.created_at > TTL_INVITE) {
+        return json(404, { error: 'Ссылка не действует — попроси новую' });
+      }
+      const кто = qUserByNick.get(пр.owner);
+      if (!кто || кто.banned) return json(404, { error: 'Ссылка не действует' });
+      qDropInvite.run(код);
+      console.log('[invite] Приглашение от', кто.nick, 'принято');
+      json(200, { ok: true, from: кто.nick });
+    });
+    return;
+  }
+
   // ===== ПЕРЕВОД СТАРОГО ПАРОЛЯ НА ПРОПУСК =====
   // Раньше клиент присылал сам пароль, и им же был зашифрован закрытый ключ,
   // лежащий тут в базе. Сервер, записавший присланное, мог расшифровать всё.
@@ -1332,6 +1417,7 @@ const server = http.createServer((req, res) => {
       qDropPushAll.run(u.nick);
       dropBlobFiles(qBlobIdsOf.all(u.nick));
       qDropBlobsOf.run(u.nick);
+      try { qDropInvitesOf.run(u.nick); } catch (e) {}
       qBlockWipe.run(u.nick, u.nick);
       qDeleteUser.run(u.nick);
       kickUser(u.nick, 'deleted');
@@ -2108,6 +2194,7 @@ function подмести() {
     const now = Date.now();
     const a = db.prepare('DELETE FROM messages WHERE delivered = 1 AND timestamp < ?').run(now - TTL_DELIVERED);
     const b = db.prepare('DELETE FROM messages WHERE delivered = 0 AND timestamp < ?').run(now - TTL_PENDING);
+    try { db.prepare('DELETE FROM invites WHERE created_at < ?').run(now - TTL_INVITE); } catch (e) {}
     dropBlobFiles(qBlobIdsOld.all(now - TTL_BLOB));
     const c = db.prepare('DELETE FROM blobs WHERE created_at < ?').run(now - TTL_BLOB);
     if (a.changes || b.changes) console.log('[cleanup] Удалено сообщений:', a.changes + b.changes);
