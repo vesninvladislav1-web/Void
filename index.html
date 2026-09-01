@@ -2189,7 +2189,7 @@
       '<div style="font-size:19px;font-weight:700;color:var(--text);">' +
         (deleted ? 'Аккаунт удалён' : 'Аккаунт заблокирован') + '</div>' +
       '<div style="font-size:13px;color:var(--text2);line-height:1.6;max-width:300px;">' +
-        (deleted ? 'Этот аккаунт был удалён администратором.' : 'Доступ к этому аккаунту закрыт администратором.') +
+        (deleted ? 'Этот аккаунт удалён. Переписка на сервере тоже стёрта.' : 'Этот аккаунт закрыт. Так решил тот, у кого стоит сервер.') +
       '</div>' +
       noteHtml +
       '<button class="reg-btn" style="max-width:240px;" onclick="doLogout();document.getElementById(\'banned-overlay\')?.remove();">ВЫЙТИ</button>';
@@ -4392,7 +4392,7 @@
     try {
       await adminCall('totp-enable', { setupCode: code });
       document.getElementById('totp-overlay')?.remove();
-      showToast('Двухфакторная защита включена');
+      showToast('Вход по коду включён');
       refreshTotpBtn();
     } catch (e) {
       err.textContent = e.message;
@@ -4574,7 +4574,25 @@
     overlay.innerHTML=`
       <div class="modal">
         <div class="modal-title">О VOID</div>
-        <div style="font-size:13px;color:var(--text2);line-height:1.8;">Void — анонимный мессенджер без регистрации по email или телефону.<br><br>Идентификация только через сид-фразу. Потерял фразу — потерял аккаунт.<br><br><span style="color:var(--text3);font-size:11px;font-family:'Space Mono',monospace;">Версия 1.0</span></div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.75;">
+          Мессенджер без номера телефона и без почты. Ник и пароль — или
+          двадцать четыре слова, если не хочешь и пароля.
+          <br><br>
+          <b style="color:var(--text);">Что защищено.</b> Сообщения шифруются
+          прямо здесь, на устройстве. На сервер уходят байты, которые он
+          прочитать не может. Пароль ему тоже не достаётся — уходит только
+          производное от него.
+          <br><br>
+          <b style="color:var(--text);">Что не защищено, и об этом честнее
+          сказать.</b> Сервер видит, кто кому и когда написал, — двое суток,
+          потом стирает. И он же отдаёт эту самую страницу: значит теоретически
+          может отдать другую. От этого шифрование не спасает никого и нигде.
+          <br><br>
+          Поэтому сверь ключи с собеседником при встрече — в меню переписки.
+          После этого верить на слово не придётся уже никому.
+          <br><br>
+          <span style="color:var(--text3);font-size:11px;font-family:'Space Mono',monospace;">Версия 1.0</span>
+        </div>
         <div class="modal-btns"><button class="btn-primary" onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
       </div>`;
     document.body.appendChild(overlay);
@@ -6045,7 +6063,7 @@
     const meta = parseFileMeta(stripFwd(await decryptText(msg.enc)).body);
     if (!meta) return;
     const buf = await loadBlob(currentChat, meta);
-    if (!buf) { showToast('Не удалось открыть'); return; }
+    if (!buf) { showToast('Не открылось. Вложения живут 30 дней — возможно, срок вышел'); return; }
 
     closeMediaViewer();
     viewerUrl = URL.createObjectURL(new Blob([buf], { type: meta.mime || 'image/jpeg' }));
@@ -6098,7 +6116,7 @@
     if (!meta) return;
     showToast('Готовлю файл...');
     const buf = await loadBlob(currentChat, meta);
-    if (!buf) { showToast('Не удалось загрузить'); return; }
+    if (!buf) { showToast('Не загрузилось. Вложения живут 30 дней — возможно, срок вышел'); return; }
 
     const name = meta.name || 'file';
     const type = meta.mime || 'application/octet-stream';
@@ -6666,9 +6684,12 @@
     const verified = !!chats[peer]?.verified;
     body.innerHTML = `
       <div style="line-height:1.6;">
-        Это число одинаково у вас и у <b style="color:var(--text);">@${esc(peer)}</b>.
-        Продиктуйте его друг другу голосом или сравните при встрече.
-        Совпало — переписку никто не подменяет.
+        Это число одинаково у тебя и у <b style="color:var(--text);">@${esc(peer)}</b>.
+        Продиктуй его голосом или сравни при встрече — только не перепиской,
+        её и проверяем.
+        <br><br>
+        Пока не сверили, остаётся верить серверу на слово: ключи вы получили
+        через него. Совпало — верить больше никому не надо.
       </div>
       <div id="safety-digits" style="font-family:'Space Mono',monospace;font-size:15px;letter-spacing:1px;
            line-height:1.9;text-align:center;background:var(--bg3);border:1px solid var(--border);
@@ -6889,7 +6910,7 @@
     if (meta) {
       showToast('Пересылаю вложение...');
       const buf = await loadBlob(target, meta);
-      if (!buf) { showToast('Не удалось открыть вложение'); return; }
+      if (!buf) { showToast('Вложение не открылось — возможно, вышел срок хранения'); return; }
       const enc = await encryptBytes(to, new Uint8Array(buf));
       if (!enc) { showToast('Собеседник ещё ни разу не заходил — отправить нельзя'); return; }
       try {
