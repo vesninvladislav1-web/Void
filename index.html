@@ -203,9 +203,14 @@
   .chats-list::-webkit-scrollbar { width:3px; }
   .chats-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 
-  .empty-chats { display:flex; flex-direction:column; align-items:center; justify-content:center; height:200px; gap:10px; color:var(--text3); padding:20px; text-align:center; cursor:pointer; }
+  .empty-chats { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:200px; gap:10px; color:var(--text3); padding:20px; text-align:center; }
   .empty-chats .empty-icon { font-size:30px; opacity:0.4; }
   .empty-chats p { font-size:12px; line-height:1.6; }
+  /* Позвать человека раньше пряталось в меню «⋯». Теперь это первое, что
+     видно на пустом экране: до ссылки одно нажатие вместо трёх. */
+  .empty-actions { display:flex; flex-direction:column; gap:8px; width:100%; max-width:260px; margin-top:6px; }
+  .empty-actions .reg-btn { display:flex; align-items:center; justify-content:center; gap:9px; padding:12px; font-size:13px; letter-spacing:1.5px; }
+  .empty-actions .reg-btn .ico { flex-shrink:0; }
 
   .chat-item { display:flex; align-items:center; gap:12px; padding:12px 18px; cursor:pointer; transition:background 0.15s; position:relative; border-radius:var(--radius-lg); margin:4px 12px; background:var(--glass); border:1px solid var(--glass-border); overflow:hidden; }
   .chat-item:hover { background:var(--glass2); }
@@ -1067,9 +1072,13 @@
       </div>
 
       <div class="chats-list" id="chat-list">
-        <div class="empty-chats" id="empty-chats" onclick="showNewChatModal()">
+        <div class="empty-chats" id="empty-chats">
           <div class="empty-icon" data-ico="smile" data-ico-size="40"></div>
-          <p>Нет активных чатов.<br>Нажми чтобы начать переписку</p>
+          <p>Здесь пока пусто.<br>Позови кого-нибудь — это одна ссылка</p>
+          <div class="empty-actions">
+            <button class="reg-btn" onclick="showInviteModal()"><i data-ico="person"></i>Позвать по ссылке</button>
+            <button class="reg-btn near-secondary" onclick="showNewChatModal()"><i data-ico="search"></i>Найти по нику</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1275,8 +1284,8 @@
 
   // ===== ПЕРЕВОДЫ =====
   const LANGS = {
-    ru: { messages:'Сообщения', search:'Поиск чатов...', noChats:'Нет активных чатов.\nНажми чтобы начать переписку', noMessages:'Напиши первое сообщение', writeMsg:'Написать сообщение...', newChat:'НОВЫЙ ЧАТ', newChatPh:'Ник собеседника...', cancel:'Отмена', start:'Начать', online:'● В сети', langName:'Русский' },
-    en: { messages:'Messages', search:'Search chats...', noChats:'No active chats.\nTap to start a conversation', noMessages:'Send the first message', writeMsg:'Write a message...', newChat:'NEW CHAT', newChatPh:'Enter username...', cancel:'Cancel', start:'Start', online:'● Online', langName:'English' }
+    ru: { messages:'Сообщения', search:'Поиск чатов...', noChats:'Здесь пока пусто.\nПозови кого-нибудь — это одна ссылка', noMessages:'Напиши первое сообщение', writeMsg:'Написать сообщение...', newChat:'НОВЫЙ ЧАТ', newChatPh:'Ник собеседника...', cancel:'Отмена', start:'Начать', online:'● В сети', langName:'Русский' },
+    en: { messages:'Messages', search:'Search chats...', noChats:'Nothing here yet.\nInvite someone — it takes one link', noMessages:'Send the first message', writeMsg:'Write a message...', newChat:'NEW CHAT', newChatPh:'Enter username...', cancel:'Cancel', start:'Start', online:'● Online', langName:'English' }
   };
   let lang = 'ru';
   function t(k) { return LANGS[lang][k] || k; }
@@ -3280,6 +3289,11 @@
           <input class="modal-input" id="nick-input" placeholder="${t('newChatPh')}" autocomplete="off" style="width:100%;">
           <div id="nick-search-results" style="position:absolute;left:0;right:0;top:calc(100% + 4px);background:var(--bg3);border:1px solid var(--border);border-radius:12px;overflow:hidden;z-index:10;display:none;"></div>
         </div>
+        <div style="font-size:11.5px;color:var(--text3);margin-top:10px;line-height:1.5;">
+          Не знаешь ник?
+          <a href="#" onclick="this.closest('.modal-overlay').remove();showInviteModal();return false;"
+             style="color:var(--accent);text-decoration:none;">Позвать по ссылке</a>
+        </div>
         <div class="modal-btns">
           <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">${t('cancel')}</button>
           <button class="btn-primary" onclick="createChat()">${t('start')}</button>
@@ -4992,23 +5006,65 @@
     const ссылка = ОСНОВА_ССЫЛКИ + '/i/' + д.code;
     const тело = document.getElementById('invite-body');
     if (!тело) return;
+    // Телефон умеет отдать ссылку прямо в мессенджер одним нажатием. На
+    // ноутбуке такого нет, там остаётся буфер обмена — поэтому две подписи.
+    const делится = !!navigator.share;
     тело.innerHTML = `
       Отправь эту ссылку кому угодно. Он откроет её — и вы уже переписываетесь.
       Ставить ничего не нужно, номер телефона тоже не спросят.
       <div id="invite-link" onclick="copyInviteLink()" title="Нажми, чтобы скопировать"
            style="font-family:'Space Mono',monospace;font-size:11.5px;word-break:break-all;cursor:pointer;
-                  background:var(--bg3);padding:11px;border-radius:12px;color:var(--text2);margin:12px 0 8px;
+                  background:var(--bg3);padding:11px;border-radius:12px;color:var(--text2);margin:12px 0 6px;
                   display:flex;align-items:center;gap:8px;">
         <span style="flex:1;">${esc(ссылка)}</span>
         <span id="invite-copy-ico" style="flex-shrink:0;color:var(--text3);">${ico('copy', 15)}</span>
+      </div>
+      <div id="invite-hint" style="font-size:11px;color:var(--text3);line-height:1.5;margin-bottom:10px;">
+        Уже в буфере обмена — можно просто вставить.
       </div>
       <div style="font-size:11px;color:var(--text3);line-height:1.5;">
         Ссылка одноразовая и живёт неделю. Кто перешёл — попадает сразу в
         переписку с тобой, остальным она уже не откроется.
       </div>
-      <div class="modal-btns">
-        <button class="btn-primary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Готово</button>
+      <div class="modal-btns" style="flex-direction:column;gap:8px;">
+        <button class="btn-primary" style="width:100%;" onclick="отдатьПриглашение(this)">
+          ${делится ? 'Отправить' : 'Скопировать ещё раз'}
+        </button>
+        <button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
       </div>`;
+
+    // Кладём в буфер сразу: почти всегда следующим действием было именно это.
+    // Тихо — без всплывающей подсказки, чтобы не спорить с подписью выше.
+    копироватьТихо(ссылка).then(вышло => {
+      const подпись = document.getElementById('invite-hint');
+      if (подпись && !вышло) подпись.textContent = 'Нажми на ссылку, чтобы скопировать.';
+    });
+  }
+
+  // Одно нажатие вместо четырёх: системное окно «Поделиться» отдаёт ссылку
+  // прямо в WhatsApp, Telegram или SMS. Где его нет — просто копируем.
+  async function отдатьПриглашение(кнопка) {
+    const блок = document.getElementById('invite-link');
+    if (!блок) return;
+    const ссылка = блок.firstElementChild.textContent.trim();
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Void', text: 'Заходи в Void — тут можно писать без номера телефона', url: ссылка });
+        кнопка.closest('.modal-overlay')?.remove();
+        return;
+      } catch (e) {
+        // Человек передумал в системном окне — это не ошибка, молчим
+        if (e && e.name === 'AbortError') return;
+      }
+    }
+    copyInviteLink();
+  }
+
+  async function копироватьТихо(текст) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(текст); return true; } catch (e) {}
+    }
+    return new Promise(готово => { fallbackCopy(текст, () => готово(true)); setTimeout(() => готово(false), 300); });
   }
 
   function copyInviteLink() {
@@ -7981,10 +8037,12 @@
 
   // ===== ОНБОРДИНГ =====
   const OB_SLIDES = {
+    // Экранов было три, и один из них учил нажимать кнопку внизу справа —
+    // совет устарел вместе с появлением ссылок-приглашений. Осталось два:
+    // кто мы и единственное, что человеку правда важно запомнить.
     simple: [
       { ico:'shield', title:'ДОБРО ПОЖАЛОВАТЬ', text:'VOID — мессенджер без телефона,\nпочты и слежки.' },
-      { ico:'smile', title:'КАК ПИСАТЬ', text:'Нажми кнопку внизу справа, введи ник собеседника и начни переписку.' },
-      { ico:'lock', title:'БЕЗОПАСНОСТЬ', text:'Не забудь пароль.\nВосстановить аккаунт без него невозможно.' }
+      { ico:'lock', title:'НЕ ЗАБУДЬ ПАРОЛЬ', text:'Восстановить аккаунт без него невозможно.\nПозвать человека можно ссылкой — кнопка ждёт на главном экране.' }
     ],
     anon: [
       { ico:'shield', title:'ДОБРО ПОЖАЛОВАТЬ', text:'VOID — анонимный мессенджер.\nНикакой почты, телефона или имени.' },
