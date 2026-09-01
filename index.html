@@ -778,6 +778,10 @@
     <input type="text" class="reg-input" id="slogin-nick" placeholder="твой ник" maxlength="16" autocomplete="off">
     <div class="reg-label" style="margin-top:4px;">Пароль</div>
     <input type="password" class="reg-input" id="slogin-pass" placeholder="твой пароль">
+    <!-- Поле появляется, только когда сервер сообщил, что на этом устройстве
+         нужен код. Показывать его всем незачем: у большинства он выключен. -->
+    <input type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
+           class="reg-input" id="slogin-code" placeholder="код из приложения" style="display:none;">
     <div id="slogin-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Неверный ник или пароль</div>
     <label class="remember-row"><input type="checkbox" id="slogin-remember" checked><span>Запомнить на этом устройстве</span></label>
     <div style="display:flex;gap:10px;width:100%;">
@@ -935,6 +939,15 @@
           <div class="settings-item-sub" id="sender-sub">Только «Неизвестное сообщение»</div>
         </div>
         <div class="settings-item-arrow" id="sender-mark" data-ico="check" data-ico-size="16"></div>
+      </div>
+
+      <div class="settings-item" id="totp-item" onclick="showTotpModal()">
+        <div class="settings-item-icon" data-ico="key"></div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Вход по коду</div>
+          <div class="settings-item-sub" id="totp-sub">Выключен</div>
+        </div>
+        <div class="settings-item-arrow" id="totp-mark">›</div>
       </div>
 
       <div class="settings-item" id="change-pass-item" onclick="showChangePassModal()">
@@ -2452,6 +2465,7 @@
           ensureKeyPair();           // без ключей отправлять будет нечем
           setupPush();               // чтобы достучались и при закрытом приложении
           loadPresenceSetting();
+          loadTotpSetting();       // состояние «вход по коду» в настройках
           loadBlocked();             // чтобы чёрный список работал сразу
           loadSos().then(sosFlush);  // связь появилась — накопленные точки уходят
           clearTimeout(dmWsWatchdog); dmWsWatchdog = null;
@@ -2477,6 +2491,19 @@
           if (msg.error === 'no-such-user') showToast('Пользователь ' + (msg.to || '') + ' не найден');
           else if (msg.error === 'too-long') showToast('Сообщение слишком длинное');
           else if (msg.error === 'rate-limit') showToast('Слишком часто — подожди немного');
+          return;
+        }
+
+        // Устройству больше не доверяют — например, его отозвали в настройках.
+        // Переподключаться без кода бессмысленно: выходим и просим войти заново.
+        if (msg.type === 'auth-fail' && msg.error === 'totp') {
+          dmWsAuthOk = false;
+          dmWsGen++;
+          clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
+          dropDmWs();
+          updateDmStatus('off');
+          showToast('Нужен код из приложения — войди заново');
+          setTimeout(() => doLogout(), 1500);
           return;
         }
 
@@ -2651,18 +2678,33 @@
     err.style.display='none';
     if (!nick || !pass) { err.style.display='block'; return; }
     // Проверка на сервере
+    const полеКода = document.getElementById('slogin-code');
     try {
       const r = await fetch(API + '/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nick, password: pass })
+        body: JSON.stringify({ nick, password: pass, deviceId: deviceId(),
+                               code: полеКода.value.trim() || undefined })
       });
       if (r.status === 403) {
         const d = await r.json().catch(() => ({}));
         err.textContent = d.reason ? 'Аккаунт заблокирован: ' + d.reason : 'Аккаунт заблокирован';
         err.style.display='block'; return;
       }
-      if (!r.ok) { err.textContent = 'Неверный ник или пароль'; err.style.display='block'; return; }
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        if (d.needCode) {
+          // Пароль верный — не пугаем «неверный ник или пароль»
+          полеКода.style.display = '';
+          полеКода.value = '';
+          полеКода.focus();
+          err.textContent = d.error || 'Нужен код из приложения';
+          err.style.display = 'block';
+          return;
+        }
+        err.textContent = 'Неверный ник или пароль'; err.style.display='block'; return;
+      }
+      полеКода.style.display = 'none'; полеКода.value = '';
     } catch(e) {
       // Если нет связи — пробуем локальный вход по этому же аккаунту
       let stored = null;
@@ -4527,6 +4569,124 @@
   // Из пароля выводится ключ, которым зашифрована переписка и закрытый ключ.
   // Поэтому мало поменять пароль на сервере — надо ещё перешифровать всё,
   // что было закрыто старым ключом, иначе история станет нечитаемой.
+  // ===== ВХОД ПО КОДУ =====
+  // Шестизначный код из приложения-аутентификатора. Номер телефона для этого
+  // не нужен: код считается на устройстве по общему секрету и времени, без
+  // сети и без оператора. Спрашивается один раз на устройство — иначе его
+  // требовали бы при каждом обрыве связи.
+  let totpOn = false;
+
+  function renderTotpSetting() {
+    const sub = document.getElementById('totp-sub');
+    if (sub) sub.textContent = totpOn ? 'Включён' : 'Выключен';
+  }
+
+  async function totpApi(действие, доп = {}) {
+    const r = await fetch(API + '/api/totp/' + действие, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nick: myName, password: myRawPass, deviceId: deviceId(), ...доп })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || 'Не удалось');
+    return d;
+  }
+
+  async function loadTotpSetting() {
+    if (!myRawPass) return;
+    try { totpOn = !!(await totpApi('status')).enabled; renderTotpSetting(); } catch (e) {}
+  }
+
+  function showTotpModal() {
+    if (authMode === 'anon') { showToast('У аккаунта по сид-фразе пароля нет'); return; }
+    if (!myRawPass) { showToast('Нет связи с сервером'); return; }
+    totpOn ? totpOffModal() : totpOnModal();
+  }
+
+  async function totpOnModal() {
+    let данные;
+    try { данные = await totpApi('setup'); }
+    catch (e) { showToast(e.message); return; }
+
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'totp-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">ВХОД ПО КОДУ</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.6;">
+          Открой приложение для кодов — подойдёт любое, например Google
+          Authenticator или Aegis, — и добавь Void по ссылке ниже. Дальше при
+          входе с нового устройства Void будет спрашивать шестизначный код.
+        </div>
+        <a class="reg-btn" style="text-decoration:none;text-align:center;" href="${esc(данные.uri)}">ДОБАВИТЬ В ПРИЛОЖЕНИЕ</a>
+        <div class="reg-label">Или введи ключ вручную</div>
+        <div style="font-family:'Space Mono',monospace;font-size:12px;word-break:break-all;
+                    background:var(--bg3);padding:10px;border-radius:10px;color:var(--text2);">${esc(данные.secret)}</div>
+        <div class="reg-label">Код из приложения</div>
+        <input type="text" inputmode="numeric" maxlength="6" class="adm-search" id="totp-code" placeholder="000000">
+        <div id="totp-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+        <div style="font-size:11px;color:var(--text3);line-height:1.5;">
+          Пока код не подтверждён, вход остаётся прежним — ошибка при настройке
+          не запрёт тебя снаружи.
+        </div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+          <button class="btn-primary" onclick="totpEnable()">Включить</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    paintIcons(ov);
+    setTimeout(() => document.getElementById('totp-code')?.focus(), 50);
+  }
+
+  async function totpEnable() {
+    const поле = document.getElementById('totp-code');
+    const ош = document.getElementById('totp-err');
+    ош.style.display = 'none';
+    try {
+      await totpApi('enable', { code: (поле.value || '').trim() });
+      totpOn = true; renderTotpSetting();
+      document.getElementById('totp-overlay')?.remove();
+      showToast('Вход по коду включён');
+    } catch (e) { ош.textContent = e.message; ош.style.display = 'block'; поле.focus(); }
+  }
+
+  function totpOffModal() {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'totp-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:320px;">
+        <div class="modal-title">ВЫКЛЮЧИТЬ ВХОД ПО КОДУ</div>
+        <div style="font-size:12px;color:var(--text2);line-height:1.6;">
+          Введи код из приложения. Без него выключить нельзя: иначе укравший
+          пароль просто снял бы вторую дверь.
+        </div>
+        <input type="text" inputmode="numeric" maxlength="6" class="adm-search" id="totp-code" placeholder="000000">
+        <div id="totp-err" style="color:#ef4444;font-size:12px;display:none;"></div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+          <button class="btn-primary" onclick="totpDisable()">Выключить</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    setTimeout(() => document.getElementById('totp-code')?.focus(), 50);
+  }
+
+  async function totpDisable() {
+    const поле = document.getElementById('totp-code');
+    const ош = document.getElementById('totp-err');
+    ош.style.display = 'none';
+    try {
+      await totpApi('disable', { code: (поле.value || '').trim() });
+      totpOn = false; renderTotpSetting();
+      document.getElementById('totp-overlay')?.remove();
+      showToast('Вход по коду выключен');
+    } catch (e) { ош.textContent = e.message; ош.style.display = 'block'; поле.focus(); }
+  }
+
   function showChangePassModal() {
     closeSidebar();
     if (authMode === 'anon') {

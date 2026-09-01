@@ -239,6 +239,39 @@ const qUpsertDevice = db.prepare(`
   INSERT INTO devices (nick, device_id, name, created_at, last_seen) VALUES (?, ?, ?, ?, ?)
   ON CONFLICT(nick, device_id) DO UPDATE SET last_seen = excluded.last_seen, name = excluded.name
 `);
+// Устройство, однажды подтверждённое кодом, больше его не спрашивает. Иначе
+// код требовался бы при каждом обрыве связи: сокет переподключается сам.
+// Отозвать доверие можно там же, где и устройство, — оно исчезает вместе с ним.
+try { db.exec('ALTER TABLE devices ADD COLUMN totp_ok INTEGER NOT NULL DEFAULT 0'); } catch (e) {}
+const qTrustDevice = db.prepare('UPDATE devices SET totp_ok = 1 WHERE nick = ? AND device_id = ?');
+const qDeviceTrust = db.prepare('SELECT totp_ok FROM devices WHERE nick = ? AND device_id = ?');
+const qUntrustAll  = db.prepare('UPDATE devices SET totp_ok = 0 WHERE nick = ?');
+
+// Нужен ли этому устройству код прямо сейчас
+function нуженКод(nick, deviceId) {
+  const row = qGetTotp.get(nick);
+  if (!row || !row.totp_secret) return false;          // двухфакторка выключена
+  if (!deviceId) return true;                          // устройство не назвалось
+  const d = qDeviceTrust.get(nick, deviceId);
+  return !(d && d.totp_ok);
+}
+
+// Проверяет код и, если он верный, запоминает устройство как доверенное
+function принятьКод(nick, deviceId, code) {
+  const row = qGetTotp.get(nick);
+  if (!row || !row.totp_secret) return true;
+  const step = totpVerify(row.totp_secret, code, row.totp_last);
+  if (step === null) return false;
+  qTotpLast.run(step, nick);
+  if (deviceId) {
+    // Строки устройства может ещё не быть: при входе она появляется позже,
+    // уже на сокете. Заводим сразу, чтобы доверие было куда записать.
+    try { qUpsertDevice.run(nick, deviceId, 'Устройство', Date.now(), Date.now()); } catch (e) {}
+    qTrustDevice.run(nick, deviceId);
+  }
+  return true;
+}
+
 const qListDevices = db.prepare('SELECT device_id, name, created_at, last_seen FROM devices WHERE nick = ? ORDER BY last_seen DESC');
 const qDropDevice  = db.prepare('DELETE FROM devices WHERE nick = ? AND device_id = ?');
 const qDropDevices = db.prepare('DELETE FROM devices WHERE nick = ?');
@@ -864,6 +897,16 @@ const server = http.createServer((req, res) => {
       const u = await verifyUser(body.nick, body.password);
       if (!u) return json(401, { error: 'Неверный ник или пароль' });
       if (u.banned) return json(403, { error: 'Аккаунт заблокирован', reason: u.ban_reason });
+
+      const dev = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : '';
+      if (нуженКод(u.nick, dev)) {
+        // Пароль верный, но этого устройства сервер ещё не знает.
+        // Просим код отдельным ответом, чтобы клиент показал поле.
+        if (!body.code) return json(401, { error: 'Нужен код из приложения', needCode: true });
+        if (!принятьКод(u.nick, dev, body.code)) {
+          return json(401, { error: 'Код не подходит', needCode: true });
+        }
+      }
       json(200, { ok: true, nick: u.nick, admin: u.is_admin });
     });
     return;
@@ -913,6 +956,17 @@ const server = http.createServer((req, res) => {
         return json(401, { error: 'Неверная сид-фраза' });
       }
       if (row.banned) return json(403, { error: 'Аккаунт заблокирован', reason: row.ban_reason || null });
+
+      // Тот же барьер, что и на входе по паролю. Через интерфейс код на такой
+      // аккаунт не включить, но дверь всё равно должна быть заперта на оба
+      // замка: иначе включивший код через API вошёл бы мимо него по фразе.
+      const dev = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : '';
+      if (нуженКод(row.nick, dev)) {
+        if (!body.code) return json(401, { error: 'Нужен код из приложения', needCode: true });
+        if (!принятьКод(row.nick, dev, body.code)) {
+          return json(401, { error: 'Код не подходит', needCode: true });
+        }
+      }
       json(200, { ok: true, nick: row.nick });
     });
     return;
@@ -1061,6 +1115,70 @@ const server = http.createServer((req, res) => {
       const row = qGetBlob.get(id);
       if (!row) return json(404, { error: 'Вложение не найдено' });
       json(200, { ok: true, data: Buffer.from(row.data).toString('base64'), size: row.size });
+    });
+    return;
+  }
+
+  // ===== ВХОД ПО КОДУ (двухфакторная защита) =====
+  // Тот же RFC 6238, что и у администратора, только теперь доступен всем.
+  // Номер телефона для этого не нужен: код считает приложение на устройстве,
+  // ему не нужны ни сеть, ни оператор, ни наша база с чьими-то номерами.
+  if (req.method === 'POST' && url.pathname.startsWith('/api/totp/')) {
+    if (!rateLimit('totp:' + clientIp(req), 30, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    const действие = url.pathname.slice('/api/totp/'.length);
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      const dev = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : '';
+      const row = qGetTotp.get(u.nick) || {};
+
+      if (действие === 'status') {
+        return json(200, { ok: true, enabled: !!row.totp_secret });
+      }
+
+      // Секрет живёт в pending, пока человек не докажет, что читает коды.
+      // До этого вход остаётся прежним — ошибка при настройке не запирает.
+      if (действие === 'setup') {
+        if (row.totp_secret) return json(400, { error: 'Уже включено' });
+        const secret = base32Encode(crypto.randomBytes(20));
+        qSetPending.run(secret, u.nick);
+        const uri = 'otpauth://totp/' + encodeURIComponent('Void:' + u.nick) +
+                    '?secret=' + secret + '&issuer=Void&algorithm=SHA1&digits=6&period=30';
+        return json(200, { ok: true, secret, uri });
+      }
+
+      if (действие === 'enable') {
+        if (!row.totp_pending) return json(400, { error: 'Сначала запроси настройку' });
+        const step = totpVerify(row.totp_pending, body.code, null);
+        if (step === null) return json(400, { error: 'Код не подходит' });
+        qEnableTotp.run(row.totp_pending, step, u.nick);
+        // Устройство, с которого включили, доверяем сразу — иначе человек
+        // тут же оказался бы заперт снаружи собственной настройкой.
+        if (dev) {
+          try { qUpsertDevice.run(u.nick, dev, 'Устройство', Date.now(), Date.now()); } catch (e) {}
+          qTrustDevice.run(u.nick, dev);
+        }
+        console.log('[totp] Включена для', u.nick);
+        return json(200, { ok: true, enabled: true });
+      }
+
+      // Выключить можно только с кодом на руках: иначе укравший пароль
+      // просто снял бы вторую дверь и вошёл.
+      if (действие === 'disable') {
+        if (!row.totp_secret) return json(200, { ok: true, enabled: false });
+        const step = totpVerify(row.totp_secret, body.code, row.totp_last);
+        if (step === null) return json(400, { error: 'Код не подходит' });
+        qTotpLast.run(step, u.nick);
+        qDisableTotp.run(u.nick);
+        qUntrustAll.run(u.nick);
+        console.log('[totp] Выключена для', u.nick);
+        return json(200, { ok: true, enabled: false });
+      }
+
+      return json(404, { error: 'Неизвестное действие' });
     });
     return;
   }
@@ -1621,6 +1739,18 @@ wss.on('connection', (ws, req) => {
           return;
         }
         const canon = u.nick;
+
+        // Двухфакторка проверяется и здесь, а не только на входе по HTTP:
+        // иначе её обходили бы, подключаясь к сокету напрямую с одним паролем.
+        {
+          const dev0 = msg.device && typeof msg.device === 'object' ? msg.device : {};
+          const devId = typeof dev0.id === 'string' ? dev0.id.slice(0, 64) : '';
+          if (нуженКод(canon, devId) && !принятьКод(canon, devId, msg.code)) {
+            console.log('[auth] Нужен код:', canon);
+            send({ type: 'auth-fail', error: 'totp' });
+            return;
+          }
+        }
 
         goOffline();                      // сбрасываем прошлую личность этого сокета
         nick = canon;
