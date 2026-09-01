@@ -327,6 +327,18 @@
   .adm-search { width:100%; padding:10px 14px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; outline:none; }
   .adm-search:focus { border-color:var(--accent); }
   .adm-list { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; min-height:120px; margin:0 -4px; padding:0 4px; }
+  /* Состояние сервера. Раньше это выяснялось через ssh — теперь видно отсюда. */
+  .adm-health { display:grid; grid-template-columns:1fr 1fr; gap:6px 12px; font-size:11.5px;
+    background:var(--bg3); border-radius:12px; padding:11px 13px; flex-shrink:0; }
+  .adm-health div { display:flex; justify-content:space-between; gap:8px; min-width:0; }
+  /* Подпись может ужаться, но не исчезнуть: без нижней границы длинное
+     значение сжимало её до нуля, и строка теряла смысл. */
+  .adm-health span:first-child { color:var(--text3); white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; min-width:3.2em; }
+  .adm-health span:last-child { color:var(--text); font-family:'Space Mono',monospace;
+    white-space:nowrap; flex-shrink:0; }
+  .adm-health .трево span:last-child { color:var(--sos-text); }
+  .adm-health .во-всю { grid-column:1 / -1; }
   .adm-row { background:var(--bg3); border:1px solid var(--border); border-radius:12px; padding:11px 13px; display:flex; flex-direction:column; gap:9px; }
   .adm-row.banned { border-color:rgba(239,68,68,0.4); background:rgba(239,68,68,0.06); }
   .adm-row.admin  { border-color:rgba(245,158,11,0.4); background:rgba(245,158,11,0.06); }
@@ -4129,10 +4141,11 @@
         <div class="modal-title">АДМИН-ПАНЕЛЬ</div>
         <input class="adm-search" id="adm-search" placeholder="Поиск по нику..." autocomplete="off">
         <div class="adm-list" id="adm-list"><div class="adm-empty">Загрузка...</div></div>
+        <div class="adm-health" id="adm-health"></div>
         <button class="adm-btn" style="width:100%;" id="adm-totp-btn" onclick="showTotpModal()"><i data-ico="verify"></i>Двухфакторная защита</button>
         <button class="adm-btn danger" style="width:100%;" onclick="adminPurgeMessages()"><i data-ico="trash"></i>Очистить все сообщения на сервере</button>
         <div class="modal-btns">
-          <button class="btn-secondary" onclick="loadAdminUsers()">Обновить</button>
+          <button class="btn-secondary" onclick="loadAdminUsers();loadAdminHealth()">Обновить</button>
           <button class="btn-primary" onclick="document.getElementById('admin-overlay')?.remove()">Закрыть</button>
         </div>
       </div>`;
@@ -4140,6 +4153,7 @@
     overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
     document.getElementById('adm-search').addEventListener('input', renderAdminUsers);
     loadAdminUsers();
+    loadAdminHealth();
     refreshTotpBtn();
   }
 
@@ -4154,6 +4168,58 @@
     } catch (e) {
       list.innerHTML = '<div class="adm-empty">Ошибка: ' + esc(e.message) + '</div>';
     }
+  }
+
+  // ===== СОСТОЯНИЕ СЕРВЕРА =====
+  // Сводка о самой машине: место, размер базы, вложения, последняя копия.
+  // Про людей здесь ничего нет — только цифры, которые раньше приходилось
+  // выяснять через ssh, а в дороге и вовсе никак.
+  async function loadAdminHealth() {
+    const блок = document.getElementById('adm-health');
+    if (!блок) return;
+    let з;
+    try { з = (await adminCall('health', {})).health; }
+    catch (e) { блок.innerHTML = '<div class="во-всю"><span>Состояние</span><span>' + esc(e.message) + '</span></div>'; return; }
+
+    const мб = б => б >= 1073741824 ? (б / 1073741824).toFixed(2) + ' ГБ'
+              : б >= 1048576 ? (б / 1048576).toFixed(1) + ' МБ' : Math.round(б / 1024) + ' КБ';
+    const срок = с => {
+      const ч = Math.floor(с / 3600), д = Math.floor(ч / 24);
+      return д ? д + ' д ' + (ч % 24) + ' ч' : ч ? ч + ' ч ' + Math.floor(с % 3600 / 60) + ' мин' : Math.round(с / 60) + ' мин';
+    };
+    const давно = мс => {
+      const ч = (Date.now() - мс) / 3600000;
+      return ч < 1 ? Math.round(ч * 60) + ' мин назад' : ч < 48 ? Math.round(ч) + ' ч назад' : Math.round(ч / 24) + ' д назад';
+    };
+
+    const строки = [];
+    const строка = (имя, знач, тревога) =>
+      строки.push('<div' + (тревога ? ' class="трево"' : '') + '><span>' + имя + '</span><span>' + esc(String(знач)) + '</span></div>');
+
+    if (з.диск) {
+      const занято = 1 - з.диск.свободно / з.диск.всего;
+      строки.push('<div class="во-всю' + (занято > 0.85 ? ' трево' : '') + '"><span>Диск</span><span>' +
+        esc(мб(з.диск.свободно)) + ' из ' + esc(мб(з.диск.всего)) +
+        ' · занято ' + Math.round(занято * 100) + '%</span></div>');
+    }
+    строка('База', мб(з.базаБайт), з.базаБайт > 500 * 1048576);
+    строка('Вложения', з.вложения.штук + ' · ' + мб(з.вложения.байт));
+    строка('Писем ждут', з.письма.ждут, з.письма.ждут > 500);
+    строка('Доставлено', з.письма.доставленных);
+    строка('Аккаунтов', з.аккаунтов);
+    строка('На связи', з.наСвязи);
+    строка('Память', мб(з.память), з.память > 400 * 1048576);
+    строка('Аптайм', срок(з.аптайм));
+    // Копия — самое важное здесь: если её нет или она старая, об этом надо
+    // узнать до того, как что-то потеряется, а не после
+    if (з.копия) {
+      const старая = Date.now() - з.копия.когда > 36 * 3600000;
+      строки.push('<div class="во-всю' + (старая ? ' трево' : '') + '"><span>Последняя копия</span><span>' +
+        esc(давно(з.копия.когда)) + ' · хранится ' + з.копия.сколько + '</span></div>');
+    } else {
+      строки.push('<div class="во-всю трево"><span>Последняя копия</span><span>не найдена</span></div>');
+    }
+    блок.innerHTML = строки.join('');
   }
 
   function renderAdminUsers() {

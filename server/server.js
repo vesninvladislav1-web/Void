@@ -1524,6 +1524,55 @@ const server = http.createServer((req, res) => {
 
       if (action === 'users') return withSession(200, { ok: true, users: listUsers() });
 
+      // Состояние сервера. Всё это раньше выяснялось через ssh: сколько места
+      // на диске, не распухла ли база, прошла ли ночная копия. Данных о людях
+      // здесь намеренно нет — только цифры о самой машине.
+      if (action === 'health') {
+        const б = п => { try { return fs.statSync(п).size; } catch (e) { return 0; } };
+        const базаБайт = б(path.join(__dirname, 'void.db')) +
+                         б(path.join(__dirname, 'void.db-wal')) +
+                         б(path.join(__dirname, 'void.db-shm'));
+
+        let диск = null;
+        try {
+          const s = fs.statfsSync(__dirname);
+          диск = { всего: s.blocks * s.bsize, свободно: s.bavail * s.bsize };
+        } catch (e) {}
+
+        // Последняя резервная копия. Каталог задаётся при запуске скрипта,
+        // поэтому проверяем и переменную окружения, и привычные места.
+        let копия = null;
+        const где = [process.env.VOID_BACKUP_DIR, '/var/backups/void',
+                     path.join(__dirname, 'backups')].filter(Boolean);
+        for (const каталог of где) {
+          try {
+            const папки = fs.readdirSync(каталог)
+              .filter(и => /^\d{4}-\d{2}-\d{2}-\d{6}$/.test(и)).sort();
+            if (!папки.length) continue;
+            const п = path.join(каталог, папки[папки.length - 1]);
+            копия = { когда: fs.statSync(п).mtimeMs, сколько: папки.length, где: каталог };
+            break;
+          } catch (e) {}
+        }
+
+        const счёт = зпр => { try { return db.prepare(зпр).get().c; } catch (e) { return null; } };
+        return withSession(200, { ok: true, health: {
+          аптайм: Math.round(process.uptime()),
+          память: process.memoryUsage().rss,
+          узел: process.version,
+          диск,
+          базаБайт,
+          вложения: { штук: счёт('SELECT COUNT(*) c FROM blobs'),
+                      байт: (() => { try { return db.prepare('SELECT COALESCE(SUM(size),0) c FROM blobs').get().c; } catch (e) { return 0; } })() },
+          письма: { доставленных: счёт('SELECT COUNT(*) c FROM messages WHERE delivered = 1'),
+                    ждут:        счёт('SELECT COUNT(*) c FROM messages WHERE delivered = 0') },
+          аккаунтов: счёт('SELECT COUNT(*) c FROM users'),
+          наСвязи: Object.values(online).reduce((s, набор) => s + набор.size, 0),
+          копия,
+          сроки: { доставленные: TTL_DELIVERED, недоставленные: TTL_PENDING, вложения: TTL_BLOB }
+        } });
+      }
+
       // --- Двухфакторная защита ---
       if (action === 'totp-status') {
         const row = qGetTotp.get(admin.nick) || {};
