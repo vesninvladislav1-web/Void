@@ -50,9 +50,21 @@ const TTL_DELIVERED = 2 * 86400000;     // доставленные — двое
 // Недоставленное трогать нельзя: его ещё никто не получил, и удалить значит
 // потерять письмо. Здесь срок остаётся длинным намеренно.
 const TTL_PENDING   = 90 * 86400000;    // недоставленные — 90 дней
+// Переписка без следа. Комната без аккаунтов: двое, ключ в самой ссылке.
+// Ничего из этого не попадает ни в базу, ни на диск — только оперативная
+// память, и та ненадолго. Перезапуск сервера стирает всё начисто: это не
+// недоделка, а ровно то, что обещано словом «без следа».
+const MAX_SLED         = 2000;          // одновременных комнат
+const SLED_PEERS       = 2;             // ровно двое, третьего не пустим
+const SLED_QUEUE       = 100;           // сколько сообщений подождёт ушедшего
+const SLED_QUEUE_BYTES = 512 * 1024;
+const TTL_SLED_IDLE    = 3600000;       // час, если внутри никого
+const TTL_SLED_MAX     = 24 * 3600000;  // и сутки в любом случае
 
 // ===== СОСТОЯНИЕ =====
 const rooms  = {};   // LAN сигналинг: roomId -> { peerId: ws }
+// код -> { создан, тишинаС, участники: Map(пир -> ws|null), очередь: [], байт }
+const следы  = new Map();
 // Раньше здесь был один сокет на аккаунт, и вход со второго устройства
 // выбивал первое. Теперь у ника набор подключений — по одному на устройство.
 const online = {};   // nick -> Set(ws)
@@ -1204,6 +1216,22 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ===== ПЕРЕПИСКА БЕЗ СЛЕДА =====
+  // Аккаунт не нужен вовсе. Заводим пустую комнату и отдаём код; ключ
+  // шифрования сюда не приходит и прийти не может — он живёт в ссылке после
+  // решётки, а эту часть браузер серверу не отправляет никогда.
+  if (req.method === 'POST' && url.pathname === '/api/sled/new') {
+    // Без аккаунта проверить некого, поэтому единственная защита — частота.
+    if (!rateLimit('slednew:' + clientIp(req), 20, 3600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    if (следы.size >= MAX_SLED) return json(503, { error: 'Сервер занят, попробуй позже' });
+    const код = crypto.randomBytes(16).toString('hex');
+    следы.set(код, { создан: Date.now(), тишинаС: Date.now(), участники: new Map(), очередь: [], байт: 0 });
+    console.log('[след] Заведена комната, всего:', следы.size);
+    return json(200, { ok: true, code: код, ttl: TTL_SLED_MAX });
+  }
+
   // ===== ПЕРЕВОД СТАРОГО ПАРОЛЯ НА ПРОПУСК =====
   // Раньше клиент присылал сам пароль, и им же был зашифрован закрытый ключ,
   // лежащий тут в базе. Сервер, записавший присланное, мог расшифровать всё.
@@ -1811,6 +1839,7 @@ const server = http.createServer((req, res) => {
       ok: true,
       online: Object.keys(online).length,
       rooms: Object.keys(rooms).length,
+      sled: следы.size,
       uptime: Math.round(process.uptime())
     };
     if (ADMIN_KEY && url.searchParams.get('key') === ADMIN_KEY) {
@@ -1843,6 +1872,7 @@ wss.on('connection', (ws, req) => {
 
   const ip = clientIp(req);
   let roomId = null, peerId = null, nick = null;
+  let след = null, следПир = null;    // комната «без следа» и место в ней
 
   const send = obj => {
     if (ws.readyState === 1) {
@@ -1860,6 +1890,32 @@ wss.on('connection', (ws, req) => {
     }
     roomId = null;
     peerId = null;
+  };
+
+  // Сказать второму участнику комнаты «без следа», что у нас изменилось
+  const следСообщить = (кому, объект) => {
+    if (кому && кому.readyState === 1) {
+      try { кому.send(JSON.stringify(объект)); } catch (e) {}
+    }
+  };
+  const следСосед = (к, свой) => {
+    for (const [п, с] of к.участники) if (п !== свой) return [п, с];
+    return null;
+  };
+
+  const покинутьСлед = () => {
+    if (!след) { следПир = null; return; }
+    const к = следы.get(след);
+    if (к) {
+      // Сверка сокета обязательна: место мог уже занять новый вход с тем же
+      // опознавателем — например, человек перезагрузил страницу.
+      if (к.участники.get(следПир) === ws) к.участники.set(следПир, null);
+      const сосед = следСосед(к, следПир);
+      if (сосед) следСообщить(сосед[1], { type: 'sled-peer', здесь: false });
+      if (![...к.участники.values()].some(с => с && с.readyState === 1)) к.тишинаС = Date.now();
+    }
+    след = null;
+    следПир = null;
   };
 
   const goOffline = () => {
@@ -2127,6 +2183,86 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
+      // --- ПЕРЕПИСКА БЕЗ СЛЕДА ---
+      // Здесь нет ни ника, ни пароля: комнату опознаёт только код из ссылки.
+      // Сервер видит шифротекст и больше ничего — расшифровать ему нечем.
+      if (msg.type === 'sled-join') {
+        const код = typeof msg.code === 'string' && /^[0-9a-f]{32}$/.test(msg.code) ? msg.code : '';
+        if (!код) { send({ type: 'sled-fail', error: 'bad-code' }); return; }
+        const к = следы.get(код);
+        if (!к) { send({ type: 'sled-fail', error: 'gone' }); return; }
+        if (след) покинутьСлед();
+
+        let пир = typeof msg.peer === 'string' && /^[0-9a-f]{16}$/.test(msg.peer) ? msg.peer : '';
+        if (пир && к.участники.has(пир)) {
+          const старый = к.участники.get(пир);
+          if (старый && старый !== ws) { try { старый.close(4002, 'peer replaced'); } catch (e) {} }
+        } else {
+          // Мест ровно два. Третий, даже со ссылкой, не войдёт — и это
+          // единственная защита от того, что ссылку кто-то подсмотрел.
+          if (к.участники.size >= SLED_PEERS) { send({ type: 'sled-fail', error: 'full' }); return; }
+          пир = crypto.randomBytes(8).toString('hex');
+        }
+
+        след = код; следПир = пир;
+        к.участники.set(пир, ws);
+        к.тишинаС = 0;
+
+        const сосед = следСосед(к, пир);
+        send({ type: 'sled-joined', peer: пир, здесь: !!(сосед && сосед[1] && сосед[1].readyState === 1) });
+
+        // Всё, что написали, пока нас не было. Отдаём и тут же забываем.
+        const мои = к.очередь.filter(м => м.от !== пир);
+        if (мои.length) {
+          к.очередь = к.очередь.filter(м => м.от === пир);
+          к.байт = к.очередь.reduce((с, м) => с + м.ct.length, 0);
+          send({ type: 'sled-batch', items: мои.map(м => ({ mid: м.mid, ct: м.ct, ts: м.ts })) });
+        }
+        if (сосед) следСообщить(сосед[1], { type: 'sled-peer', здесь: true });
+        return;
+      }
+
+      if (msg.type === 'sled-msg') {
+        if (!след || !следПир) return;
+        const к = следы.get(след);
+        if (!к) { send({ type: 'sled-fail', error: 'gone' }); return; }
+        const ct = typeof msg.ct === 'string' ? msg.ct : '';
+        if (!ct || ct.length > MAX_E2E) return;
+        const mid = typeof msg.mid === 'string' && msg.mid ? msg.mid.slice(0, 40) : crypto.randomUUID();
+        const ts = Date.now();
+        const сосед = следСосед(к, следПир);
+        send({ type: 'sled-ok', mid, ts });
+
+        if (сосед && сосед[1] && сосед[1].readyState === 1) {
+          следСообщить(сосед[1], { type: 'sled-msg', mid, ct, ts });
+          return;   // доставлено — и в ту же секунду забыто
+        }
+        // Собеседника нет на связи. Подержим в памяти, но недолго и немного:
+        // это очередь, а не хранилище.
+        if (к.очередь.length >= SLED_QUEUE || к.байт + ct.length > SLED_QUEUE_BYTES) {
+          send({ type: 'sled-fail', error: 'queue-full' });
+          return;
+        }
+        к.очередь.push({ от: следПир, mid, ct, ts });
+        к.байт += ct.length;
+        return;
+      }
+
+      // Кнопка «Стереть»: комнаты не станет для обоих сразу
+      if (msg.type === 'sled-burn') {
+        if (!след) return;
+        const к = следы.get(след);
+        if (к) {
+          for (const [, с] of к.участники) следСообщить(с, { type: 'sled-gone' });
+          следы.delete(след);
+          console.log('[след] Комната стёрта, осталось:', следы.size);
+        }
+        след = null; следПир = null;
+        return;
+      }
+
+      if (msg.type === 'sled-leave') { покинутьСлед(); return; }
+
       // --- LAN сигналинг ---
       if (msg.type === 'join') {
         const room = typeof msg.room === 'string' ? msg.room.trim().slice(0, 64) : '';
@@ -2174,7 +2310,7 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('error', e => console.error('[ws] Socket error:', e.message));
-  ws.on('close', () => { leaveRoom(); goOffline(); });
+  ws.on('close', () => { leaveRoom(); покинутьСлед(); goOffline(); });
 });
 
 function broadcast(roomId, fromPeer, msg) {
@@ -2186,6 +2322,26 @@ function broadcast(roomId, fromPeer, msg) {
     }
   });
 }
+
+// ===== ГАШЕНИЕ КОМНАТ «БЕЗ СЛЕДА» =====
+// Комната живёт, пока в ней кто-то есть, плюс час на «сейчас вернусь». И не
+// дольше суток в любом случае: иначе «без следа» превратилось бы в хранилище
+// с красивым названием.
+function погаситьСледы() {
+  const now = Date.now();
+  let снято = 0;
+  for (const [код, к] of следы) {
+    const живые = [...к.участники.values()].some(с => с && с.readyState === 1);
+    к.тишинаС = живые ? 0 : (к.тишинаС || now);
+    if (now - к.создан > TTL_SLED_MAX || (к.тишинаС && now - к.тишинаС > TTL_SLED_IDLE)) {
+      следы.delete(код);
+      снято++;
+    }
+  }
+  if (снято) console.log('[след] Погашено комнат:', снято, '| осталось:', следы.size);
+}
+const следСметание = setInterval(погаситьСледы, 60000);
+следСметание.unref();
 
 // ===== ОЧИСТКА СТАРЫХ СООБЩЕНИЙ =====
 // Без неё void.db растёт бесконечно.
@@ -2230,6 +2386,7 @@ function shutdown(signal) {
   clearInterval(heartbeat);
   clearInterval(cleanup);
   clearInterval(sessionSweep);
+  clearInterval(следСметание);
   wss.clients.forEach(c => { try { c.close(1001, 'server restart'); } catch (e) {} });
   const closeDb = () => { try { if (db.open) db.close(); } catch (e) {} };
   server.close(() => { closeDb(); process.exit(0); });

@@ -89,6 +89,9 @@
   /* Стартовый экран */
   .start-screen { display:flex; flex-direction:column; gap:12px; width:300px; opacity:0; animation:fadeInUp 0.6s ease 1.2s forwards; }
 
+  .start-cherta { display:flex; align-items:center; gap:10px; color:var(--text3); font-size:11px; margin:2px 0; }
+  .start-cherta::before, .start-cherta::after { content:''; flex:1; height:1px; background:var(--border); }
+  .start-poyasnenie { font-size:11px; color:var(--text3); text-align:center; line-height:1.5; margin-top:-4px; }
   .start-btn { width:100%; padding:15px; border-radius:14px; font-size:15px; font-family:'Space Mono',monospace; font-weight:700; letter-spacing:2px; cursor:pointer; transition:opacity 0.2s,transform 0.2s; }
   .start-btn:hover { transform:scale(1.02); opacity:0.9; }
   .start-btn:active { transform:scale(0.97); }
@@ -580,6 +583,35 @@
   .ob-copy-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; }
   .ob-copy-btn:hover { border-color:var(--accent); color:var(--accent); }
 
+  /* ПЕРЕПИСКА БЕЗ СЛЕДА
+     Отдельный экран, а не обычный чат, и это намеренно: здесь другие правила,
+     и человек должен видеть это сразу, а не помнить. Ничего из написанного
+     не попадает ни в localStorage, ни в базу на сервере. */
+  .sled { position:fixed; inset:0; z-index:620; background:var(--bg); display:flex; flex-direction:column; }
+  .sled-top { display:flex; align-items:center; gap:12px; padding:14px 16px; border-bottom:1px solid var(--border); flex-shrink:0; }
+  .sled-top .sled-nav { background:none; border:none; color:var(--text2); font-size:20px; cursor:pointer; padding:4px 8px; border-radius:10px; }
+  .sled-top .sled-nav:hover { background:var(--bg3); }
+  .sled-heading { flex:1; min-width:0; }
+  .sled-title { font-family:'Space Mono',monospace; font-size:13px; font-weight:700; letter-spacing:3px; color:var(--text); }
+  .sled-sub { font-size:11.5px; color:var(--text3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .sled-sub.zhivoy { color:var(--online); }
+  .sled-body { flex:1; overflow-y:auto; padding:16px; display:flex; flex-direction:column; gap:8px; }
+  .sled-line { max-width:78%; padding:9px 13px; border-radius:16px; font-size:14px; line-height:1.45; word-break:break-word; white-space:pre-wrap; }
+  .sled-line.moya { align-self:flex-end; background:var(--accent); color:#fff; border-bottom-right-radius:5px; }
+  .sled-line.ego { align-self:flex-start; background:var(--bg3); color:var(--text); border-bottom-left-radius:5px; }
+  .sled-time { font-size:10px; opacity:0.55; margin-top:3px; text-align:right; }
+  .sled-note { align-self:center; font-size:11.5px; color:var(--text3); text-align:center; line-height:1.6; padding:6px 10px; max-width:280px; }
+  .sled-bar { display:flex; gap:8px; padding:12px 14px; border-top:1px solid var(--border); flex-shrink:0; align-items:flex-end; }
+  .sled-bar textarea { flex:1; resize:none; max-height:110px; background:var(--bg3); border:1px solid var(--border); border-radius:16px; padding:11px 14px; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; line-height:1.4; }
+  .sled-bar textarea:focus { outline:none; border-color:var(--accent); }
+  .sled-send { flex-shrink:0; width:42px; height:42px; border-radius:14px; background:var(--accent); border:none; color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+  .sled-send:disabled { opacity:0.4; cursor:default; }
+  .sled-card { align-self:center; width:100%; max-width:320px; background:var(--bg2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:16px; margin-top:8px; }
+  .sled-card h4 { font-family:'Space Mono',monospace; font-size:12px; letter-spacing:2px; color:var(--text); margin:0 0 8px; }
+  .sled-card p { font-size:12.5px; color:var(--text2); line-height:1.6; margin:0 0 10px; }
+  .sled-ssylka { font-family:'Space Mono',monospace; font-size:11px; word-break:break-all; background:var(--bg3); padding:10px; border-radius:12px; color:var(--text2); cursor:pointer; display:flex; gap:8px; align-items:center; }
+  .sled-card .reg-btn { padding:12px; font-size:13px; letter-spacing:1.5px; margin-top:10px; display:flex; align-items:center; justify-content:center; gap:8px; }
+
   /* LAN ЧАТ */
   .lan-overlay { position:fixed; inset:0; background:var(--bg); z-index:600; display:flex; flex-direction:column; align-items:center; padding:20px 24px 40px; gap:14px; overflow-y:auto; }
   .lan-back { align-self:flex-start; background:none; border:none; color:var(--text2); font-size:22px; cursor:pointer; padding:4px 8px; }
@@ -752,6 +784,11 @@
     <button class="start-btn primary-btn" onclick="showSimpleRegForm()">Регистрация</button>
     <button class="start-btn secondary-btn" onclick="showLoginSelect()">Уже есть аккаунт</button>
     <button class="start-btn secondary-btn" onclick="showAnonRegForm()">Анонимно</button>
+    <!-- Единственное, что работает вообще без аккаунта. Поэтому и стоит
+         отдельно, за чертой: это не четвёртый способ зарегистрироваться. -->
+    <div class="start-cherta"><span>или</span></div>
+    <button class="start-btn secondary-btn" onclick="начатьБезСледа()">Написать без следа</button>
+    <div class="start-poyasnenie">Без ника и пароля. Закрыл вкладку — не осталось ничего.</div>
   </div>
 
   <!-- Простая регистрация (ник + пароль) -->
@@ -1060,6 +1097,7 @@
           <button class="icon-btn" onclick="toggleChatsMenu()" id="chats-menu-btn" data-ico="dots" aria-label="Ещё"></button>
           <div class="chat-menu" id="chats-menu">
             <button class="chat-menu-item" onclick="showInviteModal();closeChatsMenu()"><i data-ico="person"></i>Позвать человека</button>
+            <button class="chat-menu-item" onclick="начатьБезСледа()"><i data-ico="trash"></i>Написать без следа</button>
             <button class="chat-menu-item" onclick="showNewGroupModal()"><i data-ico="group"></i>Новая группа</button>
             <button class="chat-menu-item" onclick="showLanModal();closeChatsMenu()"><i data-ico="lan"></i>LAN чат</button>
           </div>
@@ -1202,6 +1240,23 @@
   </button>
 </nav>
 <button class="fab" id="fab" onclick="showNewChatModal()" data-ico="plus" aria-label="Новый чат"></button>
+
+<!-- ПЕРЕПИСКА БЕЗ СЛЕДА -->
+<div class="sled" id="sled" style="display:none;" role="dialog" aria-label="Переписка без следа">
+  <div class="sled-top">
+    <button class="sled-nav" onclick="следЗакрыть()" aria-label="Выйти">←</button>
+    <div class="sled-heading">
+      <div class="sled-title">БЕЗ СЛЕДА</div>
+      <div class="sled-sub" id="sled-sub">Соединяю…</div>
+    </div>
+    <button class="sled-nav" onclick="следСпроситьСтереть()" aria-label="Стереть переписку" data-ico="trash"></button>
+  </div>
+  <div class="sled-body" id="sled-body"></div>
+  <div class="sled-bar" id="sled-bar" style="display:none;">
+    <textarea id="sled-input" rows="1" placeholder="Написать…" maxlength="4000"></textarea>
+    <button class="sled-send" id="sled-send" onclick="следОтправить()" aria-label="Отправить" data-ico="send"></button>
+  </div>
+</div>
 
 <script>
   // ===== ЗНАЧКИ ИНТЕРФЕЙСА =====
@@ -5067,6 +5122,336 @@
     return new Promise(готово => { fallbackCopy(текст, () => готово(true)); setTimeout(() => готово(false), 300); });
   }
 
+  // ===== ПЕРЕПИСКА БЕЗ СЛЕДА =====
+  // Обещание простое: написать человеку, которого нет у тебя в контактах, и
+  // чтобы после этого не осталось ничего. Ни аккаунта, ни ника, ни записи в
+  // базе, ни строчки в памяти телефона.
+  //
+  // Как это устроено. Ключ шифрования выдумывается прямо здесь, в браузере, и
+  // кладётся в ссылку после решётки. Эту часть адреса браузер серверу не
+  // отправляет — так устроен HTTP, а не так мы попросили. Поэтому на сервер
+  // попадает только код комнаты и шифротекст: расшифровать ему нечем.
+  //
+  // Чего это НЕ защищает, и врать тут нельзя: у кого оказалась ссылка целиком,
+  // тот прочтёт переписку. Ссылка идёт через чужой мессенджер, и его хозяин
+  // ссылку видит. Единственная преграда — мест в комнате ровно два: кто
+  // пришёл вторым, тот и собеседник, третьего не пустят.
+  let след = null;   // { код, ключ, пир, ws, сообщения, соседЗдесь, живая }
+
+  function следИзАдреса() {
+    const m = /^\/t\/([0-9a-f]{32})$/.exec(location.pathname || '');
+    if (!m) return null;
+    const ключ = (location.hash || '').replace(/^#/, '');
+    if (!/^[A-Za-z0-9_-]{43}$/.test(ключ)) return null;
+    return { код: m[1], ключ };
+  }
+
+  const вБайты64 = б64 => {
+    const s = б64.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = atob(s + '='.repeat((4 - s.length % 4) % 4));
+    return Uint8Array.from(bin, c => c.charCodeAt(0));
+  };
+  const в64 = байты => btoa(String.fromCharCode(...байты));
+  const в64url = байты => в64(байты).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+  async function следВзятьКлюч(сырой) {
+    return crypto.subtle.importKey('raw', сырой, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  }
+
+  async function следЗашифровать(текст) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv }, след.ключ, new TextEncoder().encode(текст)));
+    const вместе = new Uint8Array(iv.length + ct.length);
+    вместе.set(iv); вместе.set(ct, iv.length);
+    return в64(вместе);
+  }
+
+  async function следРасшифровать(б64) {
+    const всё = вБайты64(б64);
+    const открытое = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: всё.slice(0, 12) }, след.ключ, всё.slice(12));
+    return new TextDecoder().decode(открытое);
+  }
+
+  // --- Завести новую переписку ---
+  async function начатьБезСледа() {
+    closeChatsMenu?.();
+    следПоказатьЭкран();
+    следПодпись('Готовлю комнату…');
+    let д;
+    try {
+      const r = await fetch(API + '/api/sled/new', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      д = await r.json();
+      if (!r.ok) throw new Error(д.error || 'Не получилось');
+    } catch (e) {
+      следЗаметка(e.message === 'Failed to fetch' ? 'Нет связи с сервером' : e.message);
+      следПодпись('Не вышло');
+      return;
+    }
+    const сырой = crypto.getRandomValues(new Uint8Array(32));
+    след = {
+      код: д.code, ключ: await следВзятьКлюч(сырой), пир: null, ws: null,
+      сообщения: [], соседЗдесь: false, живая: true,
+      ссылка: ОСНОВА_ССЫЛКИ + '/t/' + д.code + '#' + в64url(сырой)
+    };
+    следНарисовать();
+    следПодключиться();
+  }
+
+  // --- Открыть по ссылке ---
+  async function открытьБезСледа(код, ключ64) {
+    следПоказатьЭкран();
+    следПодпись('Соединяю…');
+    let ключ;
+    try { ключ = await следВзятьКлюч(вБайты64(ключ64)); }
+    catch (e) { следЗаметка('Ссылка испорчена — попроси новую'); следПодпись('Не вышло'); return; }
+    след = { код, ключ, пир: null, ws: null, сообщения: [], соседЗдесь: false, живая: true, ссылка: null };
+    // Адрес чистим сразу: ключ не должен остаться в истории браузера и в
+    // заголовке вкладки, которую могут показать кому-то через плечо.
+    try { history.replaceState(null, '', '/'); } catch (e) {}
+    следНарисовать();
+    следПодключиться();
+  }
+
+  // --- Связь ---
+  // Свой сокет, отдельно от общего: переписка без следа работает и тогда,
+  // когда аккаунта нет вовсе, а значит и обычной авторизации нет.
+  function следПодключиться() {
+    if (!след) return;
+    let с;
+    try { с = new WebSocket(WS_URL); }
+    catch (e) { следПодпись('Нет связи'); return; }
+    след.ws = с;
+
+    с.onopen = () => {
+      if (!след || след.ws !== с) return;
+      с.send(JSON.stringify({ type: 'sled-join', code: след.код, peer: след.пир || undefined }));
+    };
+    с.onclose = () => {
+      if (!след || след.ws !== с || !след.живая) return;
+      следПодпись('Связь потеряна');
+      // Одна попытка вернуться: комната живёт час без людей, этого хватает,
+      // чтобы пережить лифт или переход между вышками.
+      setTimeout(() => { if (след && след.ws === с && след.живая) следПодключиться(); }, 3000);
+    };
+    с.onerror = () => {};
+    с.onmessage = async e => {
+      if (!след || след.ws !== с) return;
+      let м; try { м = JSON.parse(e.data); } catch (err) { return; }
+
+      if (м.type === 'sled-joined') {
+        след.пир = м.peer;
+        след.соседЗдесь = !!м.здесь;
+        следНарисовать();
+        return;
+      }
+      if (м.type === 'sled-peer') {
+        след.соседЗдесь = !!м.здесь;
+        if (м.здесь) следДобавитьЗаметку('Собеседник подключился');
+        следОбновитьПодпись();
+        return;
+      }
+      if (м.type === 'sled-msg') { await следПринять(м); return; }
+      if (м.type === 'sled-batch') {
+        for (const п of (м.items || [])) await следПринять(п, true);
+        следНарисовать();
+        return;
+      }
+      if (м.type === 'sled-ok') {
+        const с2 = след.сообщения.find(x => x.mid === м.mid);
+        if (с2) { с2.дошло = true; следНарисовать(); }
+        return;
+      }
+      if (м.type === 'sled-gone') { следКонец('Переписки больше нет'); return; }
+      if (м.type === 'sled-fail') {
+        if (м.error === 'gone')  return следКонец('Переписки больше нет');
+        if (м.error === 'full')  return следКонец('В этой переписке уже двое');
+        if (м.error === 'queue-full') return следДобавитьЗаметку('Слишком много неотправленного — подожди собеседника');
+        следПодпись('Не вышло');
+      }
+    };
+  }
+
+  async function следПринять(м, тихо) {
+    let текст;
+    try { текст = await следРасшифровать(м.ct); }
+    catch (e) { текст = null; }
+    // Не расшифровалось — значит ссылка была не от этой комнаты. Молчать об
+    // этом нельзя: человек должен понимать, что видит не всё.
+    след.сообщения.push(текст === null
+      ? { своё: false, ошибка: true, ts: м.ts }
+      : { своё: false, текст, ts: м.ts, mid: м.mid });
+    if (!тихо) следНарисовать();
+  }
+
+  async function следОтправить() {
+    const поле = document.getElementById('sled-input');
+    const текст = (поле?.value || '').trim();
+    if (!текст || !след || !след.живая) return;
+    if (!след.ws || след.ws.readyState !== 1) { showToast('Нет связи'); return; }
+    поле.value = ''; поле.style.height = 'auto';
+    const mid = crypto.randomUUID();
+    след.сообщения.push({ своё: true, текст, ts: Date.now(), mid, дошло: false });
+    следНарисовать();
+    try {
+      след.ws.send(JSON.stringify({ type: 'sled-msg', mid, ct: await следЗашифровать(текст) }));
+    } catch (e) { showToast('Не отправилось'); }
+  }
+
+  // --- Экран ---
+  function следПоказатьЭкран() {
+    const э = document.getElementById('sled');
+    э.style.display = 'flex';
+    document.getElementById('sled-body').innerHTML = '';
+    document.getElementById('sled-bar').style.display = 'none';
+    const поле = document.getElementById('sled-input');
+    if (поле && !поле.dataset.готово) {
+      поле.dataset.готово = '1';
+      поле.addEventListener('input', () => {
+        поле.style.height = 'auto';
+        поле.style.height = Math.min(поле.scrollHeight, 110) + 'px';
+      });
+      поле.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); следОтправить(); }
+      });
+    }
+  }
+
+  function следПодпись(текст, живая) {
+    const э = document.getElementById('sled-sub');
+    if (!э) return;
+    э.textContent = текст;
+    э.classList.toggle('zhivoy', !!живая);
+  }
+
+  function следОбновитьПодпись() {
+    if (!след || !след.живая) return;
+    следПодпись(след.соседЗдесь ? 'Собеседник здесь' : 'Ждём собеседника', след.соседЗдесь);
+  }
+
+  function следЗаметка(текст) {
+    document.getElementById('sled-body').innerHTML = `<div class="sled-note">${esc(текст)}</div>`;
+  }
+
+  function следДобавитьЗаметку(текст) {
+    if (!след) return;
+    след.сообщения.push({ заметка: текст, ts: Date.now() });
+    следНарисовать();
+  }
+
+  function следВремя(ts) {
+    const д = new Date(ts);
+    return String(д.getHours()).padStart(2, '0') + ':' + String(д.getMinutes()).padStart(2, '0');
+  }
+
+  function следНарисовать() {
+    if (!след) return;
+    const тело = document.getElementById('sled-body');
+    const строки = след.сообщения.map(м => {
+      if (м.заметка) return `<div class="sled-note">${esc(м.заметка)}</div>`;
+      if (м.ошибка)  return `<div class="sled-note">Сообщение не читается: оно не от этой ссылки</div>`;
+      return `<div class="sled-line ${м.своё ? 'moya' : 'ego'}">${esc(м.текст)}` +
+             `<div class="sled-time">${следВремя(м.ts)}${м.своё ? (м.дошло ? ' ✓' : ' ·') : ''}</div></div>`;
+    }).join('');
+
+    // Пока второго нет — на экране ссылка, а не пустота
+    const карточка = (!след.соседЗдесь && след.ссылка) ? `
+      <div class="sled-card">
+        <h4>ОТПРАВЬ ССЫЛКУ</h4>
+        <p>Кто откроет её первым — тот и собеседник. Второй раз она никого
+           не впустит. Переписка живёт, пока открыта эта вкладка, и стирается
+           у обоих без остатка.</p>
+        <div class="sled-ssylka" onclick="следКопировать()">
+          <span style="flex:1;">${esc(след.ссылка)}</span>
+          <span style="flex-shrink:0;color:var(--text3);">${ico('copy', 14)}</span>
+        </div>
+        <button class="reg-btn" onclick="следОтдать(this)">
+          ${navigator.share ? 'Отправить' : 'Скопировать'}
+        </button>
+      </div>` : '';
+
+    тело.innerHTML = строки + карточка;
+    тело.scrollTop = тело.scrollHeight;
+    document.getElementById('sled-bar').style.display = след.живая ? 'flex' : 'none';
+    следОбновитьПодпись();
+  }
+
+  async function следОтдать(кнопка) {
+    if (!след || !след.ссылка) return;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Void', text: 'Напиши мне сюда — после разговора не останется ничего', url: след.ссылка }); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; }
+    }
+    следКопировать();
+  }
+
+  function следКопировать() {
+    if (!след || !след.ссылка) return;
+    копироватьТихо(след.ссылка).then(вышло => showToast(вышло ? 'Ссылка скопирована' : 'Скопируй ссылку вручную'));
+  }
+
+  // Спросить один раз, прежде чем делать необратимое
+  function спроситьДа(заголовок, текст, действие, подписьДа) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    // Обычные окна лежат на 200, а экран «без следа» — на 620: без этой
+    // строки вопрос о стирании оказался бы под ним и остался невидимым.
+    ov.style.zIndex = '700';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:320px;">
+        <div class="modal-title">${esc(заголовок)}</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6;">${esc(текст)}</div>
+        <div class="modal-btns">
+          <button class="btn-secondary">Отмена</button>
+          <button class="btn-primary" style="background:#ef4444;">${esc(подписьДа || 'Стереть')}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    ov.querySelector('.btn-secondary').onclick = () => ov.remove();
+    ov.querySelector('.btn-primary').onclick = () => { ov.remove(); действие(); };
+  }
+
+  function следСпроситьСтереть() {
+    if (!след) return следЗакрыть();
+    спроситьДа('Стереть переписку?', 'Она исчезнет у обоих сразу и насовсем. Восстанавливать нечего и негде.', () => {
+      try { след.ws?.send(JSON.stringify({ type: 'sled-burn' })); } catch (e) {}
+      следКонец('Стёрто');
+      setTimeout(следЗакрыть, 900);
+    });
+  }
+
+  function следКонец(почему) {
+    if (!след) return;
+    след.живая = false;
+    след.сообщения = [];
+    следЗаметка(почему);
+    следПодпись(почему);
+    document.getElementById('sled-bar').style.display = 'none';
+    try { след.ws?.close(); } catch (e) {}
+    след.ws = null;
+  }
+
+  function следЗакрыть() {
+    if (след) {
+      try { след.ws?.send(JSON.stringify({ type: 'sled-leave' })); } catch (e) {}
+      try { след.ws?.close(); } catch (e) {}
+    }
+    след = null;
+    document.getElementById('sled').style.display = 'none';
+    document.getElementById('sled-body').innerHTML = '';
+    // Пришли по ссылке без аккаунта — возвращать некуда, кроме начала
+    if (!myName) location.replace('/');
+  }
+
+  // Вкладку закрыли — уходим по-человечески, чтобы собеседник сразу увидел
+  window.addEventListener('beforeunload', () => {
+    if (след?.ws?.readyState === 1) {
+      try { след.ws.send(JSON.stringify({ type: 'sled-leave' })); } catch (e) {}
+    }
+  });
+
   function copyInviteLink() {
     const блок = document.getElementById('invite-link');
     const значок = document.getElementById('invite-copy-ico');
@@ -8185,10 +8570,16 @@
   fixHeight();
   window.addEventListener('resize', fixHeight);
 
-  // Пришли по ссылке-приглашению — показываем, кто зовёт, вместо анкеты
+  // Пришли по ссылке — показываем нужное вместо анкеты. Переписка без следа
+  // идёт первой: она не требует аккаунта вовсе, и всё остальное ей помешает.
   {
-    const код = кодПриглашения();
-    if (код) setTimeout(() => показатьПриглашение(код), 300);
+    const сл = следИзАдреса();
+    if (сл) {
+      setTimeout(() => открытьБезСледа(сл.код, сл.ключ), 200);
+    } else {
+      const код = кодПриглашения();
+      if (код) setTimeout(() => показатьПриглашение(код), 300);
+    }
   }
 
   if ('serviceWorker' in navigator) {
