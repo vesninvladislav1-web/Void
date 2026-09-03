@@ -972,6 +972,15 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
+      <div class="settings-item" id="hide-item" onclick="спрятатьАккаунт()">
+        <div class="settings-item-icon" data-ico="eye"></div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Спрятать аккаунт</div>
+          <div class="settings-item-sub" id="hide-sub">Виден в списке на этом устройстве</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
       <div class="settings-item" id="wills-item" onclick="показатьПисьма()">
         <div class="settings-item-icon" data-ico="clock"></div>
         <div class="settings-item-info">
@@ -1735,6 +1744,13 @@
   // ===== LOCALSTORAGE =====
   function saveState() {
     if (!myName) return;
+    // Скрытый аккаунт не оставляет обычных следов: ни записи в списке, ни
+    // void_acct, ни void_chats. Всё уходит в одну непрозрачную запись.
+    if (скрытое) {
+      try { localStorage.setItem('void_prefs', JSON.stringify({ isDark, currentAccent, lang, showSender })); } catch (e) {}
+      записатьСкрытое();
+      return;
+    }
     const id = acctId(myName);
     try {
       // Тема, акцент и язык — настройки устройства, а не аккаунта:
@@ -1877,6 +1893,7 @@
     syncAvatars();
     // Число писем в настройках — чтобы не открывать окно ради проверки
     setTimeout(подтянутьЧислоПисем, 2500);
+    обновитьПунктСкрытия();
     const reg = document.getElementById('register-screen');
     reg.classList.add('hide');
     setTimeout(() => {
@@ -2401,6 +2418,10 @@
   async function setupPush() {
     if (pushReady || !pushSupported() || !myName || !myRawPass) return;
     if (Notification.permission === 'denied') return;
+    // Скрытый аккаунт не подписывается на уведомления. Иначе на экране
+    // блокировки всплыло бы «Неизвестное сообщение» в тот момент, когда
+    // открыта обманка, — и стало бы видно, что есть что-то ещё.
+    if (скрытое) return;
 
     try {
       const reg = await navigator.serviceWorker.ready;
@@ -2897,6 +2918,9 @@
     const err = document.getElementById('slogin-error');
     err.style.display='none';
     if (!nick || !pass) { err.style.display='block'; return; }
+    // Спрятанный аккаунт проверяем первым: он живёт целиком на устройстве,
+    // и если пара подошла, дёргать сервер незачем.
+    if (await войтиВСкрытый(nick, pass)) return;
     // Проверка на сервере
     const полеКода = document.getElementById('slogin-code');
     try {
@@ -4827,6 +4851,16 @@
   function doLogout(wipeChats) {
     document.querySelector('.modal-overlay')?.remove();
     teardownPush(myName, myRawPass);   // до того, как забудем пароль
+    // Скрытый аккаунт лежит не там, где обычные, и forgetAccount до него не
+    // достаёт. Без этого «стереть переписку» оставило бы её нетронутой —
+    // ровно в том случае, когда человек больше всего рассчитывает, что стёр.
+    if (скрытое) {
+      if (wipeChats === true) { try { localStorage.removeItem('void_x:' + скрытое.метка); } catch (e) {} }
+      скрытое = null;
+      resetSessionState();
+      showAuthScreen();
+      return;
+    }
     const leaving = acctId(myName);
     if (leaving) forgetAccount(leaving, wipeChats === true);
     resetSessionState();
@@ -5150,6 +5184,159 @@
       try { await navigator.clipboard.writeText(текст); return true; } catch (e) {}
     }
     return new Promise(готово => { fallbackCopy(текст, () => готово(true)); setTimeout(() => готово(false), 300); });
+  }
+
+  // ===== СКРЫТЫЙ АККАУНТ (ПАРОЛЬ-ОБМАНКА) =====
+  // Два аккаунта на устройстве. Один обычный: он в списке, он открывается,
+  // он выглядит как весь Void. Второй спрятан — его не видно нигде, и войти
+  // в него можно, только набрав ник и пароль руками.
+  //
+  // Что здесь по-настоящему сделано:
+  //   — аккаунт убран из списка;
+  //   — его данные лежат под именем, которое считается из ника и пароля,
+  //     поэтому без пароля непонятно даже, чьё это и что это;
+  //   — сами данные зашифрованы, в памяти браузера они непрозрачны;
+  //   — пароль скрытого аккаунта не запоминается никогда: иначе спрятанность
+  //     не стоила бы ничего.
+  //
+  // Чего здесь НЕ сделано, и об этом сказано прямо в интерфейсе. Это защита
+  // от человека, который взял телефон и смотрит. Не от того, кто снимет с
+  // него образ и разберёт хранилище программой: непрозрачная запись там
+  // видна, и по ней понятно, что что-то спрятано. И пустоватый Void сам по
+  // себе бывает подозрительнее полного — поэтому обманка должна быть живой,
+  // с настоящей перепиской, иначе она не обманка, а красный флаг.
+  let скрытое = null;   // { метка, ключ } — пока открыт скрытый аккаунт
+
+  async function скрытаяМетка(ник, пароль) {
+    const данные = new TextEncoder().encode('VOID_hidden|' + acctId(ник) + '|' + пароль);
+    const h = new Uint8Array(await crypto.subtle.digest('SHA-256', данные));
+    return [...h.slice(0, 16)].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function скрытыйКлюч(ник, пароль) {
+    const материал = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(acctId(ник) + ' ' + пароль), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: new TextEncoder().encode('VOID_hidden_v1'), iterations: 200000, hash: 'SHA-256' },
+      материал, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+
+  // Записи идут одна за другой: saveState зовут часто, и параллельные
+  // шифрования перегоняли бы друг друга, оставляя в хранилище не последнее.
+  let очередьСкрытого = Promise.resolve();
+  function записатьСкрытое() {
+    if (!скрытое) return;
+    const слепок = JSON.stringify({
+      acct: { name: myName, avatar: myAvatar, seed: currentSeed, authMode, passwordHash, myStatus, isAdmin },
+      chats
+    });
+    очередьСкрытого = очередьСкрытого.then(async () => {
+      try {
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = new Uint8Array(await crypto.subtle.encrypt(
+          { name: 'AES-GCM', iv }, скрытое.ключ, new TextEncoder().encode(слепок)));
+        const вместе = new Uint8Array(iv.length + ct.length);
+        вместе.set(iv); вместе.set(ct, iv.length);
+        localStorage.setItem('void_x:' + скрытое.метка, btoa(String.fromCharCode(...вместе)));
+      } catch (e) {}
+    }).catch(() => {});
+  }
+
+  async function прочитатьСкрытое(метка, ключ) {
+    const сырое = localStorage.getItem('void_x:' + метка);
+    if (!сырое) return null;
+    try {
+      const всё = Uint8Array.from(atob(сырое), c => c.charCodeAt(0));
+      const открытое = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: всё.slice(0, 12) }, ключ, всё.slice(12));
+      return JSON.parse(new TextDecoder().decode(открытое));
+    } catch (e) { return null; }
+  }
+
+  // Вход в спрятанный аккаунт. Возвращает true, если такой нашёлся: тогда
+  // обычный вход даже не начинается, и на сервер ничего не уходит зря.
+  async function войтиВСкрытый(ник, пароль) {
+    const метка = await скрытаяМетка(ник, пароль);
+    if (!localStorage.getItem('void_x:' + метка)) return false;
+    const ключ = await скрытыйКлюч(ник, пароль);
+    const данные = await прочитатьСкрытое(метка, ключ);
+    if (!данные) return false;
+
+    скрытое = { метка, ключ };
+    myName = данные.acct.name || ник;
+    myAvatar = данные.acct.avatar || '';
+    currentSeed = данные.acct.seed || [];
+    authMode = данные.acct.authMode || 'simple';
+    passwordHash = данные.acct.passwordHash || '';
+    myStatus = данные.acct.myStatus || '';
+    isAdmin = !!данные.acct.isAdmin;
+    chats = данные.chats || {};
+    myPassword = пароль;
+    myRawPass = await authSecret(myName, пароль);
+    cryptoKey = await deriveKey([myName, пароль]);
+    currentChat = null;
+    // Ни sessionStorage, ни localStorage: спрятанный аккаунт не запоминается
+    applyPrefs();
+    finishAuth(false, authMode);
+    setTimeout(() => showToast('Скрытый аккаунт'), 900);
+    return true;
+  }
+
+  function спрятатьАккаунт() {
+    closeSidebar();
+    if (!myName || !myPassword) {
+      showToast('Спрятать можно только аккаунт с паролем');
+      return;
+    }
+    if (скрытое) {
+      спроситьДа('Показывать снова?',
+        'Аккаунт вернётся в список на этом устройстве, и его будет видно всякому, кто откроет Void.',
+        () => показыватьСнова(), 'Показывать');
+      return;
+    }
+    спроситьДа('Спрятать этот аккаунт?',
+      'Он исчезнет из списка. Войти можно будет, только набрав ник и пароль руками — ' +
+      'ни одна кнопка на него больше не укажет. Пароль перестанет запоминаться: ' +
+      'вводить придётся каждый раз. Уведомления отключатся — иначе они бы его выдали. ' +
+      'Забудешь ник или пароль — вернуть будет нечем. От человека, который смотрит ' +
+      'в телефон, это защищает. От того, кто разберёт его память программой, — нет.',
+      () => спрятатьНасовсем(), 'Спрятать');
+  }
+
+  async function спрятатьНасовсем() {
+    const ник = myName, пароль = myPassword;
+    const id = acctId(ник);
+    // Отписываемся от уведомлений до того, как спрячем: подписка на сервере
+    // жива сама по себе и выдала бы аккаунт всплывающим окном.
+    try { await teardownPush(ник, myRawPass); } catch (e) {}
+    скрытое = { метка: await скрытаяМетка(ник, пароль), ключ: await скрытыйКлюч(ник, пароль) };
+    записатьСкрытое();
+    await очередьСкрытого;
+    // Сначала убедились, что спрятанная копия записалась, и только потом
+    // сносим открытую: наоборот было бы способом потерять переписку.
+    if (!localStorage.getItem('void_x:' + скрытое.метка)) {
+      скрытое = null;
+      showToast('Не получилось спрятать');
+      return;
+    }
+    forgetAccount(id, true);
+    showToast('Аккаунт спрятан');
+    setTimeout(() => location.reload(), 1200);
+  }
+
+  function показыватьСнова() {
+    if (!скрытое) return;
+    const метка = скрытое.метка;
+    скрытое = null;
+    saveState();                       // теперь пишется обычным способом
+    try { localStorage.removeItem('void_x:' + метка); } catch (e) {}
+    showToast('Аккаунт снова виден');
+    обновитьПунктСкрытия();
+  }
+
+  function обновитьПунктСкрытия() {
+    const п = document.getElementById('hide-sub');
+    if (п) п.textContent = скрытое ? 'Спрятан — виден только по паролю' : 'Виден в списке на этом устройстве';
   }
 
   // ===== ПИСЬМО, КОТОРОЕ УЙДЁТ, ЕСЛИ Я ЗАМОЛЧУ =====
