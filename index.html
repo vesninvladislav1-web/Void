@@ -3956,6 +3956,25 @@
     container.scrollTop = container.scrollHeight;
   }
 
+  // Кадр крупнее этого сервер не принимает: соединение обрывается молча, и
+  // человек решает, что «просто не отправилось». Лучше сказать честно и до
+  // того, как связь оборвётся. Предел кадра на сервере — 512 КБ, здесь запас.
+  const ПРЕДЕЛ_КАДРА = 480 * 1024;
+  function послатьВСокет(сокет, объект, чтоЭто) {
+    const строка = JSON.stringify(объект);
+    // Считаем байты, а не знаки: в UTF-8 кириллица занимает два байта, и по
+    // длине строки предел можно проскочить незаметно. Для коротких сообщений
+    // пересчёт не нужен — они не дотягивают до предела ни при каком счёте.
+    const байт = строка.length < 120000 ? строка.length : new TextEncoder().encode(строка).length;
+    if (байт > ПРЕДЕЛ_КАДРА) {
+      console.warn('[ws] Кадр не отправлен:', Math.round(байт / 1024), 'КБ');
+      showToast((чтоЭто || 'Сообщение') + ' слишком большое — не отправилось');
+      return false;
+    }
+    сокет.send(строка);
+    return true;
+  }
+
   // Отправка не в открытый чат, а любому собеседнику. Нужна пересылке:
   // раньше вся отправка была намертво привязана к currentChat.
   // opts.silent — служебное сообщение: у себя его не сохраняем, оно не письмо
@@ -3971,7 +3990,7 @@
     const payload = await e2eEncrypt(peer, wire);
     if (!payload) { showToast('Собеседник ещё ни разу не заходил — написать ему пока нельзя'); return false; }
     const mid = newMid();
-    dmWs.send(JSON.stringify({ type: 'dm', to: peer, text: payload, mid }));
+    if (!послатьВСокет(dmWs, { type: 'dm', to: peer, text: payload, mid }, 'Сообщение')) return false;
     if (opts.silent) return true;
     if (!chats[peer]) chats[peer] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
     const enc = await encryptText(text);
@@ -4030,7 +4049,7 @@
         return;
       }
       console.log('[DM] Sending dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
-      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: payload, mid: outMid }));
+      if (!послатьВСокет(dmWs, { type: 'dm', to: currentChat, text: payload, mid: outMid }, 'Сообщение')) return;
     } else if (myRawPass) {
       // Раньше сообщение просто оседало локально, а собеседник его не получал
       // и об этом никто не сообщал. Теперь честно говорим и жмём переподключение.
@@ -5295,7 +5314,7 @@
     след.сообщения.push({ своё: true, текст, ts: Date.now(), mid, дошло: false });
     следНарисовать();
     try {
-      след.ws.send(JSON.stringify({ type: 'sled-msg', mid, ct: await следЗашифровать(текст) }));
+      послатьВСокет(след.ws, { type: 'sled-msg', mid, ct: await следЗашифровать(текст) }, 'Сообщение');
     } catch (e) { showToast('Не отправилось'); }
   }
 
@@ -6610,7 +6629,7 @@
 
     const cipher = await e2eEncrypt(currentChat, withTtl(currentChat, payloadText));
     if (!cipher) { showToast('Не удалось зашифровать'); return; }
-    dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: cipher, mid }));
+    if (!послатьВСокет(dmWs, { type: 'dm', to: currentChat, text: cipher, mid }, 'Вложение')) return;
 
     // Своё вложение уже расшифровано — кладём в память, чтобы не качать назад
     blobCache[blobId] = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
@@ -6829,7 +6848,7 @@
     for (const member of others) {
       const payload = await e2eEncrypt(member, wire);
       if (!payload) { noKey.push(member); continue; }
-      dmWs.send(JSON.stringify({ type: 'dm', to: member, text: payload, mid: newMid() }));
+      послатьВСокет(dmWs, { type: 'dm', to: member, text: payload, mid: newMid() }, 'Сообщение');
       delivered++;
     }
     if (!delivered && others.length) {
@@ -7932,7 +7951,7 @@
         return;
       }
       console.log('[DM] Sending sticker dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
-      dmWs.send(JSON.stringify({ type: 'dm', to: currentChat, text: payload, mid: stickerMid }));
+      if (!послатьВСокет(dmWs, { type: 'dm', to: currentChat, text: payload, mid: stickerMid }, 'Стикер')) return;
     } else if (myRawPass) {
       showToast('Нет связи с сервером — стикер не отправлен');
       dmWakeCheck();
