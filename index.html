@@ -972,6 +972,15 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
+      <div class="settings-item" id="wills-item" onclick="показатьПисьма()">
+        <div class="settings-item-icon" data-ico="clock"></div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Письма на случай молчания</div>
+          <div class="settings-item-sub" id="wills-sub">Ни одного</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
       <div class="settings-item" id="sos-item" onclick="showSosSettings()">
         <div class="settings-item-icon" style="background:rgba(239,68,68,0.15);" data-ico="sos"></div>
         <div class="settings-item-info">
@@ -1866,6 +1875,8 @@
     if (myRawPass) { updateDmStatus('wait'); connectDmWs(); }
     else { const dmEl = document.getElementById('dm-conn-el'); if(dmEl) dmEl.style.display='none'; }
     syncAvatars();
+    // Число писем в настройках — чтобы не открывать окно ради проверки
+    setTimeout(подтянутьЧислоПисем, 2500);
     const reg = document.getElementById('register-screen');
     reg.classList.add('hide');
     setTimeout(() => {
@@ -5139,6 +5150,181 @@
       try { await navigator.clipboard.writeText(текст); return true; } catch (e) {}
     }
     return new Promise(готово => { fallbackCopy(текст, () => готово(true)); setTimeout(() => готово(false), 300); });
+  }
+
+  // ===== ПИСЬМО, КОТОРОЕ УЙДЁТ, ЕСЛИ Я ЗАМОЛЧУ =====
+  // Пока заходишь в Void — письмо лежит. Перестал заходить на весь срок —
+  // уходит адресату. Пароли от всего, что нужно родным; «если читаешь это,
+  // значит я не вернулся»; то, что вслух не говорят.
+  //
+  // Сервер письма не читает: оно зашифровано ключом получателя, тем же
+  // способом, что и обычная переписка. Сервер умеет только считать дни
+  // с последнего входа и в свой срок положить письмо в обычную почту.
+  const СРОКИ_ПИСЬМА = [
+    { дней: 7,   как: 'неделю' },
+    { дней: 30,  как: 'месяц' },
+    { дней: 90,  как: 'три месяца' },
+    { дней: 180, как: 'полгода' },
+    { дней: 365, как: 'год' }
+  ];
+
+  function дниСловом(мс) {
+    const д = Math.ceil(мс / 86400000);
+    if (д <= 0) return 'сегодня';
+    const сотня = д % 100, десяток = д % 10;
+    const слово = (сотня >= 11 && сотня <= 14) ? 'дней'
+                : десяток === 1 ? 'день'
+                : (десяток >= 2 && десяток <= 4) ? 'дня' : 'дней';
+    return д + ' ' + слово;
+  }
+
+  async function письмаСпросить(куда, тело) {
+    const r = await fetch(API + куда, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nick: myName, password: myRawPass, ...(тело || {}) })
+    });
+    const д = await r.json();
+    if (!r.ok) throw new Error(д.error || 'Не получилось');
+    return д;
+  }
+
+  async function показатьПисьма() {
+    closeSidebar();
+    if (authMode === 'anon' && !myRawPass) { showToast('Нужен аккаунт'); return; }
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'wills-overlay';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">ЕСЛИ Я ЗАМОЛЧУ</div>
+        <div id="wills-body" style="font-size:13px;color:var(--text2);line-height:1.6;">Смотрю...</div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    await перерисоватьПисьма();
+  }
+
+  async function перерисоватьПисьма() {
+    const тело = document.getElementById('wills-body');
+    if (!тело) return;
+    let д;
+    try { д = await письмаСпросить('/api/will/list'); }
+    catch (e) {
+      тело.innerHTML = esc(e.message === 'Failed to fetch' ? 'Нет связи с сервером' : e.message);
+      return;
+    }
+    обновитьПодписьПисем(д.wills.length);
+
+    const список = д.wills.length ? д.wills.map(п => `
+      <div style="display:flex;align-items:center;gap:10px;background:var(--bg3);border-radius:12px;
+           padding:10px 12px;margin-bottom:8px;">
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:13.5px;color:var(--text);">@${esc(п.to)}</div>
+          <div style="font-size:11.5px;color:var(--text3);margin-top:2px;">
+            уйдёт, если молчать ${esc(дниСловом(п.days * 86400000))} · осталось ${esc(дниСловом(п.left))}
+          </div>
+        </div>
+        <button class="btn-secondary" style="padding:7px 11px;font-size:12px;flex-shrink:0;"
+                onclick="отозватьПисьмо('${esc(п.id)}')">Отозвать</button>
+      </div>`).join('')
+      : '<div style="color:var(--text3);font-size:12.5px;padding:4px 0 10px;">Писем нет.</div>';
+
+    тело.innerHTML = `
+      <div style="line-height:1.6;margin-bottom:12px;">
+        Письмо лежит и ничего не делает, пока ты заходишь в Void. Перестал
+        заходить на весь срок — оно уйдёт тому, кому написано.
+      </div>
+      ${список}
+      <div style="font-size:11.5px;color:var(--text3);line-height:1.55;margin:10px 0;">
+        Отсчёт начинается заново при каждом заходе. За три дня до отправки
+        придёт уведомление — если телефон при тебе, письмо не уйдёт случайно.
+        Прочесть письмо можем не мы: оно зашифровано ключом получателя.
+      </div>
+      <div class="modal-btns" style="flex-direction:column;gap:8px;">
+        <button class="btn-primary" style="width:100%;" onclick="написатьПисьмо()">Написать письмо</button>
+        <button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
+      </div>`;
+  }
+
+  function обновитьПодписьПисем(сколько) {
+    const э = document.getElementById('wills-sub');
+    if (!э) return;
+    э.textContent = сколько
+      ? (сколько === 1 ? 'Одно письмо ждёт' : сколько + ' письма ждут')
+      : 'Ни одного';
+  }
+
+  function написатьПисьмо() {
+    // Кому писать — только тем, с кем уже есть переписка: письмо шифруется
+    // ключом получателя, а ключ появляется, лишь когда человек заходил.
+    const кому = Object.keys(chats).filter(к => !isRoom(к));
+    const тело = document.getElementById('wills-body');
+    if (!тело) return;
+    if (!кому.length) {
+      тело.innerHTML = `
+        <div style="line-height:1.6;">Некому: письмо шифруется ключом получателя,
+        а ключ берётся из переписки. Напиши человеку хоть раз обычным способом —
+        и он появится в этом списке.</div>
+        <div class="modal-btns"><button class="btn-primary" style="width:100%;"
+          onclick="перерисоватьПисьма()">Назад</button></div>`;
+      return;
+    }
+    тело.innerHTML = `
+      <div style="line-height:1.6;margin-bottom:10px;">Кому и что сказать.</div>
+      <select class="modal-input" id="will-to" style="width:100%;margin-bottom:8px;">
+        ${кому.map(к => `<option value="${esc(к)}">@${esc(к)}</option>`).join('')}
+      </select>
+      <textarea class="modal-input" id="will-text" rows="5" maxlength="3000"
+        placeholder="Что он должен прочитать, если ты замолчишь"
+        style="width:100%;resize:vertical;line-height:1.5;"></textarea>
+      <div style="font-size:12px;color:var(--text2);margin:10px 0 6px;">Уйдёт, если я молчу</div>
+      <select class="modal-input" id="will-days" style="width:100%;">
+        ${СРОКИ_ПИСЬМА.map(с => `<option value="${с.дней}"${с.дней === 30 ? ' selected' : ''}>${с.как}</option>`).join('')}
+      </select>
+      <div id="will-err" style="color:var(--accent2);font-size:12px;margin-top:8px;display:none;"></div>
+      <div class="modal-btns" style="flex-direction:column;gap:8px;margin-top:12px;">
+        <button class="btn-primary" style="width:100%;" onclick="отложитьПисьмо(this)">Отложить письмо</button>
+        <button class="btn-secondary" style="width:100%;" onclick="перерисоватьПисьма()">Назад</button>
+      </div>`;
+  }
+
+  async function отложитьПисьмо(кнопка) {
+    const кому = document.getElementById('will-to')?.value || '';
+    const текст = (document.getElementById('will-text')?.value || '').trim();
+    const дней = Number(document.getElementById('will-days')?.value || 30);
+    const ошибка = document.getElementById('will-err');
+    const сказать = т => { if (ошибка) { ошибка.textContent = т; ошибка.style.display = 'block'; } };
+    if (!текст) return сказать('Письмо пустое');
+    кнопка.disabled = true;
+    try {
+      const ct = await e2eEncrypt(кому, текст);
+      if (!ct) throw new Error('Нет ключа собеседника — он ещё ни разу не заходил');
+      await письмаСпросить('/api/will/new', { to: кому, ct, days: дней });
+      showToast('Письмо отложено');
+      await перерисоватьПисьма();
+    } catch (e) {
+      кнопка.disabled = false;
+      сказать(e.message === 'Failed to fetch' ? 'Нет связи с сервером' : e.message);
+    }
+  }
+
+  function отозватьПисьмо(id) {
+    спроситьДа('Отозвать письмо?', 'Оно не уйдёт никогда и нигде не сохранится.', async () => {
+      try {
+        await письмаСпросить('/api/will/drop', { id });
+        showToast('Письмо отозвано');
+        await перерисоватьПисьма();
+      } catch (e) { showToast(e.message); }
+    }, 'Отозвать');
+  }
+
+  // Сколько писем ждёт — видно в настройках, не открывая окна
+  async function подтянутьЧислоПисем() {
+    if (!myName || !myRawPass) return;
+    try {
+      const д = await письмаСпросить('/api/will/list');
+      обновитьПодписьПисем(д.wills.length);
+    } catch (e) {}
   }
 
   // ===== ПЕРЕПИСКА БЕЗ СЛЕДА =====

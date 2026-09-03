@@ -139,6 +139,19 @@ db.exec(`
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_invites_owner ON invites(owner);
+  -- Письмо, которое уйдёт, если человек замолчит. Сервер не читает его —
+  -- в ct лежит шифротекст для получателя, — а только считает дни с
+  -- последнего входа автора и в свой срок кладёт письмо в обычную почту.
+  CREATE TABLE IF NOT EXISTS wills (
+    id TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
+    to_nick TEXT NOT NULL,
+    ct TEXT NOT NULL,
+    days INTEGER NOT NULL,
+    created_at INTEGER NOT NULL,
+    warned_at INTEGER
+  );
+  CREATE INDEX IF NOT EXISTS idx_wills_owner ON wills(owner);
   CREATE TABLE IF NOT EXISTS blocks (
     owner TEXT NOT NULL,
     target TEXT NOT NULL,
@@ -206,6 +219,16 @@ const qUserBySeed  = db.prepare('SELECT nick, password_hash, banned, is_admin, b
 const qUpdateHash  = db.prepare('UPDATE users SET password_hash = ? WHERE nick = ?');
 const qSearchUsers = db.prepare("SELECT nick FROM users WHERE nick LIKE ? ESCAPE '\\' ORDER BY nick LIMIT 10");
 const qInsertMsg   = db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered, mid) VALUES (?, ?, ?, ?, ?, ?)');
+// Письма «если я замолчу»
+const qPutWill     = db.prepare('INSERT INTO wills (id, owner, to_nick, ct, days, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+const qWillsOf     = db.prepare('SELECT id, to_nick, days, created_at, warned_at FROM wills WHERE owner = ? ORDER BY created_at');
+const qCountWills  = db.prepare('SELECT COUNT(*) AS n FROM wills WHERE owner = ?');
+const qDropWill    = db.prepare('DELETE FROM wills WHERE id = ? AND owner = ?');
+const qDropWillsOf = db.prepare('DELETE FROM wills WHERE owner = ?');
+const qAllWills    = db.prepare('SELECT id, owner, to_nick, ct, days, created_at, warned_at FROM wills');
+const qMarkWarned  = db.prepare('UPDATE wills SET warned_at = ? WHERE id = ?');
+const qClearWarned = db.prepare('UPDATE wills SET warned_at = NULL WHERE owner = ?');
+const qLastSeen    = db.prepare('SELECT last_seen FROM users WHERE nick = ?');
 // Править и удалять может только автор — отсюда условие по from_nick
 // Сверяем и отправителя, и получателя: иначе запросом «изменить письмо для Kim»
 // можно было испортить своё же неотправленное письмо Тому
@@ -747,6 +770,7 @@ function ensureAdmin() {
     if (existing) {
       qDeleteMsgs.run(existing.nick, existing.nick);
       qBlockWipe.run(existing.nick, existing.nick);
+      try { qDropWillsOf.run(existing.nick); } catch (e) {}
       qDeleteUser.run(existing.nick);
       kickUser(existing.nick, 'admin-reset');
       console.log('[admin] Ник', existing.nick, 'был занят обычным аккаунтом — освобождён');
@@ -1216,6 +1240,73 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ===== ПИСЬМО, КОТОРОЕ УЙДЁТ, ЕСЛИ Я ЗАМОЛЧУ =====
+  // Единственная причина открывать Void, когда тебе никто не пишет: пока
+  // заходишь — письмо лежит, перестал — уходит. Пароли от всего, что нужно
+  // родным; «если читаешь это, значит я не вернулся»; то, что вслух не
+  // говорят. Сервер письма не читает: в ct шифротекст для получателя,
+  // ключ у него. Сервер умеет только считать дни и вовремя отдать.
+  if (req.method === 'POST' && url.pathname === '/api/will/new') {
+    if (!rateLimit('willnew:' + clientIp(req), 20, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+
+      const кому = typeof body.to === 'string' ? body.to.trim() : '';
+      const ct   = typeof body.ct === 'string' ? body.ct : '';
+      const дней = Math.round(Number(body.days));
+      if (!ct || ct.length > MAX_E2E) return json(400, { error: 'Письмо слишком длинное' });
+      // Меньше недели — почти наверняка недоразумение: столько можно не
+      // заходить из-за отпуска. Больше года сервер обещать не берётся.
+      if (!Number.isFinite(дней) || дней < 7 || дней > 365) {
+        return json(400, { error: 'Срок — от 7 до 365 дней' });
+      }
+      const цель = qNickExists.get(кому);
+      if (!цель) return json(404, { error: 'Такого ника нет' });
+      if (цель.nick === u.nick) return json(400, { error: 'Себе такое письмо не пишут' });
+      if (qCountWills.get(u.nick).n >= 10) {
+        return json(409, { error: 'Больше десяти писем разом держать нельзя' });
+      }
+      const id = crypto.randomBytes(12).toString('hex');
+      qPutWill.run(id, u.nick, цель.nick, ct, дней, Date.now());
+      console.log('[письмо] Отложено:', u.nick, '->', цель.nick, '| срок молчания:', дней, 'дн.');
+      json(200, { ok: true, id });
+    }, MAX_KEY_BODY);
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/will/list') {
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      const видели = (qLastSeen.get(u.nick) || {}).last_seen || Date.now();
+      const письма = qWillsOf.all(u.nick).map(п => ({
+        id: п.id, to: п.to_nick, days: п.days, created_at: п.created_at,
+        // Сколько осталось молчать, чтобы письмо ушло. Считаем от последнего
+        // входа, а не от создания: каждый заход отодвигает срок.
+        left: Math.max(0, п.days * 86400000 - (Date.now() - видели))
+      }));
+      json(200, { ok: true, wills: письма, last_seen: видели });
+    });
+    return;
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/will/drop') {
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      const id = typeof body.id === 'string' ? body.id : '';
+      const r = qDropWill.run(id, u.nick);
+      if (!r.changes) return json(404, { error: 'Письма нет' });
+      console.log('[письмо] Отозвано:', u.nick);
+      json(200, { ok: true });
+    });
+    return;
+  }
+
   // ===== ПЕРЕПИСКА БЕЗ СЛЕДА =====
   // Аккаунт не нужен вовсе. Заводим пустую комнату и отдаём код; ключ
   // шифрования сюда не приходит и прийти не может — он живёт в ссылке после
@@ -1446,6 +1537,9 @@ const server = http.createServer((req, res) => {
       dropBlobFiles(qBlobIdsOf.all(u.nick));
       qDropBlobsOf.run(u.nick);
       try { qDropInvitesOf.run(u.nick); } catch (e) {}
+      // Письма «если я замолчу» уходят вместе с аккаунтом: молчание
+      // удалённого вечно, и без этого они разошлись бы все разом.
+      try { qDropWillsOf.run(u.nick); } catch (e) {}
       qBlockWipe.run(u.nick, u.nick);
       qDeleteUser.run(u.nick);
       kickUser(u.nick, 'deleted');
@@ -1810,6 +1904,7 @@ const server = http.createServer((req, res) => {
         dropBlobFiles(qBlobIdsOf.all(target.nick));
         qDropBlobsOf.run(target.nick);
         qBlockWipe.run(target.nick, target.nick);
+        try { qDropWillsOf.run(target.nick); } catch (e) {}
         qDeleteUser.run(target.nick);
         const kicked = kickUser(target.nick, 'deleted', reason);
         console.log('[admin] DELETE', target.nick, reason ? '(' + reason + ')' : '', '| сообщений удалено:', msgs);
@@ -1840,6 +1935,7 @@ const server = http.createServer((req, res) => {
       online: Object.keys(online).length,
       rooms: Object.keys(rooms).length,
       sled: следы.size,
+      wills: (() => { try { return db.prepare('SELECT COUNT(*) AS n FROM wills').get().n; } catch (e) { return 0; } })(),
       uptime: Math.round(process.uptime())
     };
     if (ADMIN_KEY && url.searchParams.get('key') === ADMIN_KEY) {
@@ -2342,6 +2438,71 @@ function broadcast(roomId, fromPeer, msg) {
   });
 }
 
+// ===== ПИСЬМА «ЕСЛИ Я ЗАМОЛЧУ» =====
+// Раз в час смотрим, кто молчит дольше своего срока. Заход в Void обновляет
+// last_seen, поэтому отсчёт начинается заново при каждом появлении.
+const ПРЕДУПРЕДИТЬ_ЗА = 3 * 86400000;
+
+async function разнестиПисьма() {
+  let письма = [];
+  try { письма = qAllWills.all(); } catch (e) { return; }
+  if (!письма.length) return;
+  const сейчас = Date.now();
+
+  for (const п of письма) {
+    const строка = qLastSeen.get(п.owner);
+    // Автора нет в базе — письмо осиротело, держать его незачем
+    if (!строка) { try { qDropWill.run(п.id, п.owner); } catch (e) {} continue; }
+    const видели = строка.last_seen || п.created_at;
+    const молчит = сейчас - видели;
+    const срок = п.days * 86400000;
+
+    if (молчит < срок) {
+      // Вернулся — снимаем прошлое предупреждение, чтобы в следующий раз
+      // оно пришло заново, а не считалось уже сказанным
+      if (п.warned_at && молчит < срок - ПРЕДУПРЕДИТЬ_ЗА) {
+        try { qClearWarned.run(п.owner); } catch (e) {}
+        continue;
+      }
+      // Осталось меньше трёх дней — надо успеть сказать человеку. Это и есть
+      // разница между «страховкой» и «письмом, ушедшим по недоразумению».
+      if (!п.warned_at && молчит >= срок - ПРЕДУПРЕДИТЬ_ЗА) {
+        try { qMarkWarned.run(сейчас, п.id); } catch (e) {}
+        const дней = Math.max(1, Math.ceil((срок - молчит) / 86400000));
+        console.log('[письмо] Предупреждение:', п.owner, '| осталось дней:', дней);
+        await notifyOffline(п.owner, JSON.stringify({ will: true, days: дней }));
+      }
+      continue;
+    }
+
+    // Срок вышел. Кладём письмо в обычную почту получателя — дальше оно
+    // ничем не отличается от написанного руками, и сервер по-прежнему не
+    // знает, что в нём.
+    const цель = qNickExists.get(п.to_nick);
+    if (!цель || цель.banned) { try { qDropWill.run(п.id, п.owner); } catch (e) {} continue; }
+    const mid = crypto.randomUUID();
+    const ts = Date.now();
+    let живых = 0;
+    const payload = JSON.stringify({ type: 'dm', from: п.owner, text: п.ct, timestamp: ts, mid });
+    for (const rws of socketsOf(цель.nick)) {
+      if (rws.readyState !== 1) continue;
+      try { rws.send(payload); живых++; } catch (e) {}
+    }
+    try { qInsertMsg.run(п.owner, цель.nick, п.ct, ts, живых ? 1 : 0, mid); } catch (e) {
+      console.error('[письмо] Не удалось сохранить:', e.message);
+      continue;   // не удаляем: попробуем через час
+    }
+    try { qDropWill.run(п.id, п.owner); } catch (e) {}
+    console.log('[письмо] Ушло:', п.owner, '->', цель.nick, '| молчание:', Math.round(молчит / 86400000), 'дн.');
+    if (!живых) {
+      await notifyOffline(цель.nick, JSON.stringify({ from: п.owner }));
+    }
+  }
+}
+
+const разносПисем = setInterval(() => { разнестиПисьма().catch(e => console.error('[письмо]', e.message)); }, 3600000);
+разносПисем.unref();
+
 // ===== ГАШЕНИЕ КОМНАТ «БЕЗ СЛЕДА» =====
 // Комната живёт, пока в ней кто-то есть, плюс час на «сейчас вернусь». И не
 // дольше суток в любом случае: иначе «без следа» превратилось бы в хранилище
@@ -2383,6 +2544,9 @@ function подмести() {
 // перезапуска просроченные записи ещё полсмены лежат в базе.
 подмести();
 const cleanup = setInterval(подмести, 6 * 3600000);
+// Письма разносим и при запуске: сервер мог простоять выключенным дольше,
+// чем чей-то срок молчания, и ждать ещё час было бы неправильно.
+разнестиПисьма().catch(e => console.error('[письмо]', e.message));
 cleanup.unref();
 
 // ===== УСТОЙЧИВОСТЬ =====
@@ -2406,6 +2570,7 @@ function shutdown(signal) {
   clearInterval(cleanup);
   clearInterval(sessionSweep);
   clearInterval(следСметание);
+  clearInterval(разносПисем);
   wss.clients.forEach(c => { try { c.close(1001, 'server restart'); } catch (e) {} });
   const closeDb = () => { try { if (db.open) db.close(); } catch (e) {} };
   server.close(() => { closeDb(); process.exit(0); });
