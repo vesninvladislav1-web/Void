@@ -2295,7 +2295,8 @@
   let replyTo = null;
   let editingMid = null;    // опознаватель правящегося сообщения
   let editingIdx = -1;
-  let isAdmin = false;      // подтверждается сервером при auth-ok
+  let isAdmin = false;      // владелец — подтверждается сервером при auth-ok
+  let isMod   = false;      // модератор: тот же вход в панель, меньше прав
   let adminUsers = [];
 
   // ===== СЕРВЕР =====
@@ -2700,6 +2701,7 @@
           dmWsAuthOk = true;
           dmWsAttempt = 0;
           isAdmin = !!msg.admin;     // права подтверждает только сервер
+          isMod   = !!msg.mod;
           updateAdminMenuVisibility();
           saveState();
           ensureKeyPair();           // без ключей отправлять будет нечем
@@ -4370,7 +4372,11 @@
   // ===== АДМИН-ПАНЕЛЬ =====
   function updateAdminMenuVisibility() {
     const el = document.getElementById('admin-menu-item');
-    if (el) el.style.display = isAdmin ? 'flex' : 'none';
+    // Модератор входит в ту же панель. Что ему в ней нельзя — решает сервер,
+    // а здесь мы просто не рисуем кнопок, которые всё равно откажут.
+    if (el) el.style.display = (isAdmin || isMod) ? 'flex' : 'none';
+    const п = document.getElementById('admin-menu-sub');
+    if (п) п.textContent = isAdmin ? 'Владелец' : 'Модератор';
   }
 
   let adminSession = null;   // пропуск на полчаса, выдаётся после ввода кода
@@ -4379,7 +4385,7 @@
   // Если включена двухфакторная защита, сервер попросит код — спрашиваем
   // его один раз и дальше ходим с пропуском.
   async function adminCall(action, extra) {
-    if (!isAdmin || !myRawPass) throw new Error('Нет прав администратора');
+    if ((!isAdmin && !isMod) || !myRawPass) throw new Error('Нет прав администратора');
 
     const attempt = async (code) => {
       const r = await fetch(API + '/api/admin/' + action, {
@@ -4412,11 +4418,16 @@
     overlay.innerHTML = `
       <div class="modal adm-modal">
         <div class="modal-title">АДМИН-ПАНЕЛЬ</div>
+        <div style="font-size:11.5px;color:var(--text3);margin:-6px 0 4px;">
+          ${isAdmin ? 'Ты владелец: доступно всё, включая необратимое.'
+                    : 'Ты модератор: блокировки и разблокировки. Необратимое — у владельца.'}
+        </div>
         <input class="adm-search" id="adm-search" placeholder="Поиск по нику..." autocomplete="off">
         <div class="adm-list" id="adm-list"><div class="adm-empty">Загрузка...</div></div>
         <div class="adm-health" id="adm-health"></div>
         <button class="adm-btn" style="width:100%;" id="adm-totp-btn" onclick="showTotpModal()"><i data-ico="verify"></i>Двухфакторная защита</button>
-        <button class="adm-btn danger" style="width:100%;" onclick="adminPurgeMessages()"><i data-ico="trash"></i>Очистить все сообщения на сервере</button>
+        <button class="adm-btn" style="width:100%;" onclick="показатьЖурнал()"><i data-ico="clock"></i>Журнал действий</button>
+        ${isAdmin ? '<button class="adm-btn danger" style="width:100%;" onclick="adminPurgeMessages()"><i data-ico="trash"></i>Очистить все сообщения на сервере</button>' : ''}
         <div class="modal-btns">
           <button class="btn-secondary" onclick="loadAdminUsers();loadAdminHealth()">Обновить</button>
           <button class="btn-primary" onclick="document.getElementById('admin-overlay')?.remove()">Закрыть</button>
@@ -4495,6 +4506,71 @@
     блок.innerHTML = строки.join('');
   }
 
+  // Назначить или снять модератора. Доступно только владельцу — и кнопки
+  // модератору не рисуются, и сервер ему откажет.
+  async function adminMod(nick, включить) {
+    const текст = включить
+      ? 'Он сможет блокировать и разблокировать людей, видеть список и состояние сервера. ' +
+        'Удалять аккаунты и стирать сообщения — не сможет. Снять можно в любой момент.'
+      : 'Он перестанет попадать в админ-панель. Аккаунт и переписка останутся на месте.';
+    спроситьДа(включить ? 'Сделать @' + nick + ' модератором?' : 'Снять @' + nick + '?',
+      текст, async () => {
+        try {
+          const r = await adminCall(включить ? 'mod-add' : 'mod-remove', { nick });
+          applyAdminResult(r);
+          showToast(включить ? nick + ' теперь модератор' : 'С ' + nick + ' сняты права');
+        } catch (e) { showToast(e.message); }
+      }, включить ? 'Назначить' : 'Снять');
+  }
+
+  // Журнал действий. Видят оба: модератор должен видеть свои записи —
+  // иначе получается слежка, а не общая работа.
+  async function показатьЖурнал() {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.style.zIndex = '700';
+    ov.innerHTML = `
+      <div class="modal adm-modal">
+        <div class="modal-title">ЖУРНАЛ ДЕЙСТВИЙ</div>
+        <div id="log-body" class="adm-list"><div class="adm-empty">Загрузка...</div></div>
+        <div class="modal-btns"><button class="btn-primary" style="width:100%;"
+          onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+
+    const тело = document.getElementById('log-body');
+    try {
+      const r = await adminCall('log', { limit: 200 });
+      const записи = r.log || [];
+      тело.innerHTML = записи.length ? записи.map(з => `
+        <div class="adm-row">
+          <div class="adm-head">
+            <span class="adm-nick">${esc(з.who)}</span>
+            <span class="adm-tag">${esc(з.what)}</span>
+          </div>
+          <div class="adm-meta">
+            ${з.target ? '@' + esc(з.target) + ' · ' : ''}${esc(новаяДата(з.at))}
+            ${з.reason ? '<br>причина: ' + esc(з.reason) : ''}
+          </div>
+        </div>`).join('')
+        : '<div class="adm-empty">Пока ничего не делали</div>';
+    } catch (e) {
+      тело.innerHTML = '<div class="adm-empty">' + esc(e.message) + '</div>';
+    }
+  }
+
+  // Дата окончания бана в человеческом виде. Сегодня показываем часами:
+  // «до 21:40» понятнее, чем «до 6 сентября», когда это сегодня вечером.
+  function новаяДата(ts) {
+    const д = new Date(ts), сейчас = new Date();
+    const тотЖеДень = д.toDateString() === сейчас.toDateString();
+    return тотЖеДень
+      ? д.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' })
+      : д.toLocaleDateString('ru', { day: 'numeric', month: 'long' }) + ', ' +
+        д.toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+  }
+
   function renderAdminUsers() {
     const list = document.getElementById('adm-list');
     if (!list) return;
@@ -4507,10 +4583,14 @@
     list.innerHTML = rows.map(u => {
       const n = esc(u.nick);
       const tags =
-        (u.admin  ? '<span class="adm-tag adm">АДМИН</span>' : '') +
+        (u.admin  ? '<span class="adm-tag adm">ВЛАДЕЛЕЦ</span>' : '') +
+        (u.mod    ? '<span class="adm-tag adm">МОДЕРАТОР</span>' : '') +
         (u.banned ? '<span class="adm-tag ban">ЗАБЛОКИРОВАН</span>' : '') +
         (u.online ? '<span class="adm-tag on">онлайн</span>' : '');
-      const meta = 'Сообщений: ' + u.messages + (u.banned && u.banReason ? ' · причина: ' + esc(u.banReason) : '');
+      const meta = 'Сообщений: ' + u.messages +
+        (u.banned && u.banReason ? ' · причина: ' + esc(u.banReason) : '') +
+        (u.banned && u.banUntil ? ' · до ' + esc(новаяДата(u.banUntil)) : '') +
+        (u.banned && !u.banUntil ? ' · навсегда' : '');
       const shots = (u.banned && u.evidence)
         ? '<button class="adm-btn" style="width:100%;" onclick="showBanEvidence(\'' + u.nick + '\')"><i data-ico="image"></i>Скриншоты: ' + u.evidence + '</button>'
         : '';
@@ -4518,15 +4598,21 @@
       // безопасный набор символов, а не полагаемся на валидацию в другом месте
       const safe = /^[a-zA-Z0-9_]{1,16}$/.test(u.nick);
       // Админ-аккаунт защищён на сервере — здесь просто не показываем кнопки
+      // Необратимое видно только владельцу. Сервер откажет модератору в любом
+      // случае — здесь мы просто не показываем кнопку, которая всё равно
+      // ответит отказом: обманывать человека кнопкой хуже, чем не дать её.
       const acts = u.admin ? '' : (safe ? `
         <div class="adm-acts">
           ${u.banned
             ? `<button class="adm-btn good" onclick="adminUnban('${u.nick}')">Разблокировать</button>`
             : `<button class="adm-btn warn" onclick="adminBan('${u.nick}')">Заблокировать</button>`}
-          <button class="adm-btn danger" onclick="adminDelete('${u.nick}')">Удалить</button>
+          ${isAdmin ? (u.mod
+            ? `<button class="adm-btn" onclick="adminMod('${u.nick}', false)">Снять модератора</button>`
+            : `<button class="adm-btn" onclick="adminMod('${u.nick}', true)">Сделать модератором</button>`) : ''}
+          ${isAdmin ? `<button class="adm-btn danger" onclick="adminDelete('${u.nick}')">Удалить</button>` : ''}
         </div>`
         : '<div class="adm-meta" style="color:#ef4444;">Недопустимый ник — управляй через admin.js</div>');
-      return `<div class="adm-row ${u.admin ? 'admin' : u.banned ? 'banned' : ''}">
+      return `<div class="adm-row ${u.admin || u.mod ? 'admin' : u.banned ? 'banned' : ''}">
           <div class="adm-head"><span class="adm-nick">${n}</span>${tags}</div>
           <div class="adm-meta">${meta}</div>
           ${shots}
@@ -4681,6 +4767,18 @@
         </div>
         <div class="reg-label">Причина</div>
         <input class="adm-search" id="ban-reason" placeholder="например: спам" autocomplete="off" maxlength="200">
+        <div class="reg-label">Насколько</div>
+        <select class="adm-search" id="ban-hours" style="width:100%;">
+          <option value="1">на час</option>
+          <option value="24" selected>на сутки</option>
+          <option value="168">на неделю</option>
+          <option value="720">на месяц</option>
+          <option value="0">навсегда</option>
+        </select>
+        <div style="font-size:11px;color:var(--text3);line-height:1.5;">
+          Срок снимется сам. Вечный бан за первую грубость — приговор без суда;
+          за сутки человек чаще всего остывает.
+        </div>
         <div class="reg-label">Скриншоты <span style="color:var(--text3);font-weight:400;">— до ${EVIDENCE_MAX}, необязательно</span></div>
         <div class="shot-grid" id="ban-shots"></div>
         <button class="adm-btn" id="ban-add" style="width:100%;" onclick="document.getElementById('ban-file').click()"><i data-ico="clip"></i>Прикрепить картинку</button>
@@ -4738,10 +4836,12 @@
     const label = btn.textContent;
     btn.textContent = 'БЛОКИРУЮ...'; btn.disabled = true;
     try {
-      const r = await adminCall('ban', { nick, reason: reason || null, evidence: banShots });
+      const часов = Number(document.getElementById('ban-hours')?.value || 0);
+      const r = await adminCall('ban', { nick, reason: reason || null, hours: часов, evidence: banShots });
       document.getElementById('ban-overlay')?.remove();
       applyAdminResult(r);
-      showToast(nick + ' заблокирован' + (r.evidence ? ' · скриншотов: ' + r.evidence : ''));
+      showToast(nick + ' заблокирован ' + (r.until ? 'до ' + новаяДата(r.until) : 'навсегда') +
+                (r.evidence ? ' · скриншотов: ' + r.evidence : ''));
       banShots = [];
     } catch (e) {
       btn.textContent = label; btn.disabled = false;
@@ -4883,7 +4983,7 @@
     chats = {}; currentChat = null; myName = ''; myAvatar = null;
     myStatus = ''; currentSeed = []; passwordHash = null;
     authMode = 'anon';
-    isAdmin = false; adminUsers = []; adminSession = null;
+    isAdmin = false; isMod = false; adminUsers = []; adminSession = null;
     updateAdminMenuVisibility();
     myRawPass = null; myPassword = null; cryptoKey = null;
     myKeyPair = null; myPubJwk = null;

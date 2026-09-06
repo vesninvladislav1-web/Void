@@ -152,6 +152,19 @@ db.exec(`
     warned_at INTEGER
   );
   CREATE INDEX IF NOT EXISTS idx_wills_owner ON wills(owner);
+  -- Журнал модерации. Нужен не от недоверия: когда человек говорит «меня
+  -- забанили ни за что», без записи виноватым окажется тот, кто под рукой.
+  -- И если у модератора уведут пароль, это единственный способ понять, когда
+  -- началось и что успели сделать.
+  CREATE TABLE IF NOT EXISTS modlog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    at INTEGER NOT NULL,
+    who TEXT NOT NULL,
+    what TEXT NOT NULL,
+    target TEXT,
+    reason TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_modlog_at ON modlog(at);
   CREATE TABLE IF NOT EXISTS blocks (
     owner TEXT NOT NULL,
     target TEXT NOT NULL,
@@ -180,6 +193,12 @@ db.exec(`
   const cols = db.prepare('PRAGMA table_info(users)').all().map(c => c.name);
   if (!cols.includes('banned'))     db.exec('ALTER TABLE users ADD COLUMN banned INTEGER DEFAULT 0');
   if (!cols.includes('is_admin'))   db.exec('ALTER TABLE users ADD COLUMN is_admin INTEGER DEFAULT 0');
+  // Модератор — не то же самое, что владелец. is_admin оставлен как был:
+  // менять его смысл на живой базе значило бы переписать десяток проверок,
+  // каждая из которых сейчас верна.
+  if (!cols.includes('is_mod'))     db.exec('ALTER TABLE users ADD COLUMN is_mod INTEGER DEFAULT 0');
+  // Срок блокировки. NULL — навсегда, как было раньше.
+  if (!cols.includes('ban_until'))  db.exec('ALTER TABLE users ADD COLUMN ban_until INTEGER');
   if (!cols.includes('banned_at'))  db.exec('ALTER TABLE users ADD COLUMN banned_at INTEGER');
   if (!cols.includes('ban_reason')) db.exec('ALTER TABLE users ADD COLUMN ban_reason TEXT');
   // Скриншоты-доказательства к блокировке. Лежат отдельно от списка аккаунтов
@@ -205,7 +224,7 @@ db.exec(`
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_seed ON users(seed_lookup) WHERE seed_lookup IS NOT NULL');
 }
 
-const qUserByNick  = db.prepare('SELECT nick, password_hash, banned, is_admin, ban_reason FROM users WHERE nick = ? COLLATE NOCASE');
+const qUserByNick  = db.prepare('SELECT nick, password_hash, banned, is_admin, is_mod, ban_reason FROM users WHERE nick = ? COLLATE NOCASE');
 const qNickExists  = db.prepare('SELECT nick, banned FROM users WHERE nick = ? COLLATE NOCASE');
 const qInsertUser  = db.prepare('INSERT INTO users (nick, password_hash) VALUES (?, ?)');
 const qInsertSeed  = db.prepare('INSERT INTO users (nick, password_hash, seed_lookup) VALUES (?, ?, ?)');
@@ -215,7 +234,7 @@ const qGetPubKey   = db.prepare('SELECT nick, public_key FROM users WHERE nick =
 const qGetMyKeys   = db.prepare('SELECT public_key, enc_private_key FROM users WHERE nick = ?');
 const qPurgeMsgs   = db.prepare('DELETE FROM messages');
 const qGetAvatar   = db.prepare('SELECT nick, avatar FROM users WHERE nick = ? COLLATE NOCASE');
-const qUserBySeed  = db.prepare('SELECT nick, password_hash, banned, is_admin, ban_reason FROM users WHERE seed_lookup = ?');
+const qUserBySeed  = db.prepare('SELECT nick, password_hash, banned, is_admin, is_mod, ban_reason FROM users WHERE seed_lookup = ?');
 const qUpdateHash  = db.prepare('UPDATE users SET password_hash = ? WHERE nick = ?');
 const qSearchUsers = db.prepare("SELECT nick FROM users WHERE nick LIKE ? ESCAPE '\\' ORDER BY nick LIMIT 10");
 const qInsertMsg   = db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered, mid) VALUES (?, ?, ?, ?, ?, ?)');
@@ -352,7 +371,8 @@ const qMarkOne     = db.prepare('UPDATE messages SET delivered = 1 WHERE id = ?'
 // коррелированный подзапрос с OR — он сканировал messages целиком для КАЖДОГО
 // пользователя, и на живой базе список открывался несколько секунд.
 const qListUsers   = db.prepare(`
-  SELECT u.nick, u.created_at, u.banned, u.is_admin, u.banned_at, u.ban_reason, u.ban_evidence,
+  SELECT u.nick, u.created_at, u.banned, u.is_admin, u.is_mod, u.ban_until,
+         u.banned_at, u.ban_reason, u.ban_evidence,
          COALESCE(c.cnt, 0) AS messages
   FROM users u
   LEFT JOIN (
@@ -362,9 +382,17 @@ const qListUsers   = db.prepare(`
       SELECT to_nick   AS nick, COUNT(*) AS cnt FROM messages GROUP BY to_nick
     ) GROUP BY nick
   ) c ON c.nick = u.nick
-  ORDER BY u.is_admin DESC, u.nick COLLATE NOCASE
+  ORDER BY u.is_admin DESC, u.is_mod DESC, u.nick COLLATE NOCASE
 `);
 const qSetBan      = db.prepare('UPDATE users SET banned = ?, banned_at = ?, ban_reason = ?, ban_evidence = ? WHERE nick = ?');
+const qSetBanUntil = db.prepare('UPDATE users SET ban_until = ? WHERE nick = ?');
+// Роли и журнал модерации
+const qSetMod      = db.prepare('UPDATE users SET is_mod = ? WHERE nick = ?');
+const qPutLog      = db.prepare('INSERT INTO modlog (at, who, what, target, reason) VALUES (?, ?, ?, ?, ?)');
+const qLogTail     = db.prepare('SELECT at, who, what, target, reason FROM modlog ORDER BY at DESC, id DESC LIMIT ?');
+const qDropOldLog  = db.prepare('DELETE FROM modlog WHERE at < ?');
+// Кого пора разблокировать: срок вышел
+const qBansExpired = db.prepare('SELECT nick FROM users WHERE banned = 1 AND ban_until IS NOT NULL AND ban_until <= ?');
 const qGetEvidence = db.prepare('SELECT ban_evidence FROM users WHERE nick = ?');
 const qDeleteUser  = db.prepare('DELETE FROM users WHERE nick = ?');
 const qDeleteMsgs  = db.prepare('DELETE FROM messages WHERE from_nick = ? OR to_nick = ?');
@@ -443,7 +471,8 @@ async function verifyUser(nick, password) {
     await scryptHash(password).catch(() => {});
     return null;
   }
-  const info = { nick: row.nick, banned: !!row.banned, is_admin: !!row.is_admin, ban_reason: row.ban_reason || null };
+  const info = { nick: row.nick, banned: !!row.banned, is_admin: !!row.is_admin,
+                 is_mod: !!row.is_mod, ban_reason: row.ban_reason || null };
 
   if (LEGACY_HASH_RE.test(row.password_hash)) {
     const a = Buffer.from(legacyHash(row.nick, password), 'hex');
@@ -808,6 +837,8 @@ function listUsers() {
     nick: u.nick,
     banned: !!u.banned,
     admin: !!u.is_admin,
+    mod: !!u.is_mod,
+    banUntil: u.ban_until || null,
     online: isOnline(u.nick),
     devices: deviceCount(u.nick),
     messages: u.messages,
@@ -822,9 +853,19 @@ function listUsers() {
 // Проверка прав администратора для /api/admin/*.
 // Возвращает { ok } либо { reason: 'auth' | 'totp' } — клиенту важно
 // различать «неверный пароль» и «нужен код», иначе он не поймёт, что спросить.
-async function requireAdmin(body) {
+// Что позволено только владельцу. Всё это необратимо: отменить нельзя ни
+// удаление аккаунта, ни стирание сообщений, ни разжалование самого себя.
+// Модератору доступно то, что можно взять назад, — забанил зря, разбанил.
+const ТОЛЬКО_ВЛАДЕЛЬЦУ = new Set(['delete', 'purge-messages', 'mod-add', 'mod-remove']);
+
+async function requireAdmin(body, действие) {
   const u = await verifyUser(body && body.admin, body && body.password);
-  if (!u || !u.is_admin || u.banned) return { reason: 'auth' };
+  // Модератор — тоже вход в панель, просто с меньшими правами
+  if (!u || (!u.is_admin && !u.is_mod) || u.banned) return { reason: 'auth' };
+  if (действие && ТОЛЬКО_ВЛАДЕЛЬЦУ.has(действие) && !u.is_admin) {
+    console.warn('[admin] Модератор', u.nick, 'попытался:', действие);
+    return { reason: 'owner' };
+  }
 
   const row = qGetTotp.get(u.nick);
   if (row && row.totp_secret) {
@@ -963,7 +1004,7 @@ const server = http.createServer((req, res) => {
           return json(401, { error: 'Код не подходит', needCode: true });
         }
       }
-      json(200, { ok: true, nick: u.nick, admin: u.is_admin });
+      json(200, { ok: true, nick: u.nick, admin: u.is_admin, mod: u.is_mod });
     });
     return;
   }
@@ -1746,15 +1787,24 @@ const server = http.createServer((req, res) => {
     const bodyLimit = action === 'ban' ? MAX_BAN_BODY : MAX_BODY;
 
     readBody(async (body) => {
-      const check = await requireAdmin(body);
+      const check = await requireAdmin(body, action);
       if (!check.ok) {
         if (check.reason === 'totp') {
           return json(403, { error: 'Нужен код подтверждения', needCode: true });
+        }
+        if (check.reason === 'owner') {
+          return json(403, { error: 'Это может только владелец' });
         }
         console.warn('[admin] Отказано в доступе с', clientIp(req));
         return json(403, { error: 'Нет прав администратора' });
       }
       const admin = check.user;
+      // Каждое действие, меняющее что-то, попадает в журнал. Чтение — нет:
+      // иначе журнал заполнился бы обновлениями списка и стал бесполезен.
+      const записать = (что, кого, почему) => {
+        try { qPutLog.run(Date.now(), admin.nick, что, кого || null, почему || null); }
+        catch (e) { console.error('[журнал]', e.message); }
+      };
       // Новый пропуск отдаём один раз — при следующем запросе клиент пришлёт его сам
       const issued = check.session || null;
       const withSession = (code, data) => json(code, issued ? { ...data, session: issued } : data);
@@ -1853,8 +1903,16 @@ const server = http.createServer((req, res) => {
         dropBlobFiles(qBlobIdsAll.all());
         const blobs = db.prepare('DELETE FROM blobs').run().changes;
         if (blobs) console.log('[admin] PURGE: удалено вложений:', blobs);
+        записать('стёрты все сообщения', null, 'удалено: ' + removed);
         console.log('[admin] PURGE: удалено сообщений с сервера:', removed);
         return withSession(200, { ok: true, removed, users: listUsers() });
+      }
+
+      // Журнал видят оба: и владелец, и модератор. Модератор должен видеть
+      // свои записи — иначе выходит слежка, а не общая работа.
+      if (action === 'log') {
+        const сколько = Math.min(Math.max(Number(body.limit) || 100, 1), 500);
+        return withSession(200, { ok: true, log: qLogTail.all(сколько) });
       }
 
       const targetNick = typeof body.nick === 'string' ? body.nick.trim() : '';
@@ -1863,6 +1921,22 @@ const server = http.createServer((req, res) => {
       if (!target) return json(404, { error: 'Пользователь не найден' });
       if (target.is_admin) return json(400, { error: 'Нельзя трогать админ-аккаунт' });
 
+      // Назначить и снять модератора может только владелец — это проверено
+      // выше, в requireAdmin. Здесь остаётся сама запись.
+      if (action === 'mod-add' || action === 'mod-remove') {
+        const включить = action === 'mod-add' ? 1 : 0;
+        if (!!target.is_mod === !!включить) {
+          return withSession(200, { ok: true, nick: target.nick, is_mod: !!включить,
+                                    note: включить ? 'Уже модератор' : 'И так не модератор',
+                                    users: listUsers() });
+        }
+        if (включить && target.banned) return json(400, { error: 'Заблокированного нельзя сделать модератором' });
+        qSetMod.run(включить, target.nick);
+        записать(включить ? 'назначен модератор' : 'снят модератор', target.nick, null);
+        console.log('[admin]', включить ? 'MOD+' : 'MOD-', target.nick, '| кем:', admin.nick);
+        return withSession(200, { ok: true, nick: target.nick, is_mod: !!включить, users: listUsers() });
+      }
+
       // Свежий список возвращаем прямо в ответе: иначе клиенту нужен второй
       // запрос, а он снова считает scrypt — действие ощущалось медленным.
       const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 200) || null : null;
@@ -1870,13 +1944,24 @@ const server = http.createServer((req, res) => {
       if (action === 'ban') {
         if (target.banned) return withSession(200, { ok: true, nick: target.nick, banned: true, note: 'Уже заблокирован', users: listUsers() });
         const shots = cleanEvidence(body.evidence);
+        // Часы блокировки. Ноль или отсутствие — навсегда, как было раньше.
+        // Вечный бан за первую грубость — приговор без суда; на день человек
+        // остывает и возвращается, и это чаще всего и есть нужный итог.
+        const часов = Math.round(Number(body.hours));
+        const доКогда = (Number.isFinite(часов) && часов > 0)
+          ? Date.now() + Math.min(часов, 24 * 365) * 3600000
+          : null;
         qSetBan.run(1, Date.now(), reason, shots.length ? JSON.stringify(shots) : null, target.nick);
+        qSetBanUntil.run(доКогда, target.nick);
+        записать(доКогда ? 'бан на ' + часов + ' ч' : 'бан навсегда', target.nick, reason);
         // Доказательства получателю не отправляем: они для журнала модерации,
         // ему достаточно причины
         const kicked = kickUser(target.nick, 'banned', reason);
         console.log('[admin] BAN', target.nick, reason ? '(' + reason + ')' : '',
+                    доКогда ? '| до ' + new Date(доКогда).toISOString() : '| навсегда',
                     shots.length ? '| скриншотов: ' + shots.length : '', kicked ? '| отключён' : '');
-        return withSession(200, { ok: true, nick: target.nick, banned: true, kicked, evidence: shots.length, users: listUsers() });
+        return withSession(200, { ok: true, nick: target.nick, banned: true, kicked,
+                                  until: доКогда, evidence: shots.length, users: listUsers() });
       }
 
       // Картинки отдаём по одному аккаунту — в общий список они не влезают
@@ -1890,6 +1975,8 @@ const server = http.createServer((req, res) => {
       if (action === 'unban') {
         if (!target.banned) return withSession(200, { ok: true, nick: target.nick, banned: false, note: 'Не был заблокирован', users: listUsers() });
         qSetBan.run(0, null, null, null, target.nick);
+        qSetBanUntil.run(null, target.nick);
+        записать('разбан', target.nick, reason);
         console.log('[admin] UNBAN', target.nick);
         return withSession(200, { ok: true, nick: target.nick, banned: false, users: listUsers() });
       }
@@ -1907,6 +1994,7 @@ const server = http.createServer((req, res) => {
         try { qDropWillsOf.run(target.nick); } catch (e) {}
         qDeleteUser.run(target.nick);
         const kicked = kickUser(target.nick, 'deleted', reason);
+        записать('удаление аккаунта', target.nick, reason);
         console.log('[admin] DELETE', target.nick, reason ? '(' + reason + ')' : '', '| сообщений удалено:', msgs);
         return json(200, { ok: true, nick: target.nick, deleted: true, messagesDeleted: msgs, kicked, users: listUsers() });
       }
@@ -2093,7 +2181,7 @@ wss.on('connection', (ws, req) => {
 
         addOnline(nick, ws);
         try { qTouchSeen.run(nowTs, nick); } catch (e) {}
-        send({ type: 'auth-ok', nick, admin: u.is_admin, device: ws.deviceId });
+        send({ type: 'auth-ok', nick, admin: u.is_admin, mod: u.is_mod, device: ws.deviceId });
         console.log('[auth] OK for', nick, '|', devName || 'устройство', '| всего онлайн:', Object.keys(online).length);
 
         // Что из написанного этим человеком уже прочитали, пока его не было
@@ -2503,6 +2591,27 @@ async function разнестиПисьма() {
 const разносПисем = setInterval(() => { разнестиПисьма().catch(e => console.error('[письмо]', e.message)); }, 3600000);
 разносПисем.unref();
 
+// ===== СНЯТИЕ ИСТЁКШИХ БЛОКИРОВОК =====
+// Без этого «бан на сутки» был бы просто вечным баном с обещанием. Проверяем
+// раз в минуту: точность до минуты человеку незаметна, а нагрузки никакой —
+// запрос по индексу возвращает пусто в 99 случаях из 100.
+function снятьИстёкшиеБаны() {
+  try {
+    const кого = qBansExpired.all(Date.now());
+    for (const { nick } of кого) {
+      qSetBan.run(0, null, null, null, nick);
+      qSetBanUntil.run(null, nick);
+      try { qPutLog.run(Date.now(), 'сервер', 'срок бана вышел', nick, null); } catch (e) {}
+      console.log('[admin] Срок блокировки вышел:', nick);
+    }
+  } catch (e) {
+    console.error('[бан]', e.message);
+  }
+}
+снятьИстёкшиеБаны();
+const снятиеБанов = setInterval(снятьИстёкшиеБаны, 60000);
+снятиеБанов.unref();
+
 // ===== ГАШЕНИЕ КОМНАТ «БЕЗ СЛЕДА» =====
 // Комната живёт, пока в ней кто-то есть, плюс час на «сейчас вернусь». И не
 // дольше суток в любом случае: иначе «без следа» превратилось бы в хранилище
@@ -2531,6 +2640,9 @@ function подмести() {
     const a = db.prepare('DELETE FROM messages WHERE delivered = 1 AND timestamp < ?').run(now - TTL_DELIVERED);
     const b = db.prepare('DELETE FROM messages WHERE delivered = 0 AND timestamp < ?').run(now - TTL_PENDING);
     try { db.prepare('DELETE FROM invites WHERE created_at < ?').run(now - TTL_INVITE); } catch (e) {}
+    // Журнал модерации храним год: он нужен, чтобы разобраться в споре,
+    // а не чтобы копиться вечно.
+    try { qDropOldLog.run(now - 365 * 86400000); } catch (e) {}
     dropBlobFiles(qBlobIdsOld.all(now - TTL_BLOB));
     const c = db.prepare('DELETE FROM blobs WHERE created_at < ?').run(now - TTL_BLOB);
     if (a.changes || b.changes) console.log('[cleanup] Удалено сообщений:', a.changes + b.changes);
@@ -2571,6 +2683,7 @@ function shutdown(signal) {
   clearInterval(sessionSweep);
   clearInterval(следСметание);
   clearInterval(разносПисем);
+  clearInterval(снятиеБанов);
   wss.clients.forEach(c => { try { c.close(1001, 'server restart'); } catch (e) {} });
   const closeDb = () => { try { if (db.open) db.close(); } catch (e) {} };
   server.close(() => { closeDb(); process.exit(0); });
