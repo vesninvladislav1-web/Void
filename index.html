@@ -1135,6 +1135,7 @@
           <div class="chat-menu" id="chats-menu">
             <button class="chat-menu-item" onclick="showInviteModal();closeChatsMenu()"><i data-ico="person"></i>Позвать человека</button>
             <button class="chat-menu-item" onclick="начатьБезСледа()"><i data-ico="trash"></i>Написать без следа</button>
+            <button class="chat-menu-item" onclick="впуститьВручную();closeChatsMenu()"><i data-ico="globe"></i>Войти на компьютере</button>
             <button class="chat-menu-item" onclick="showNewGroupModal()"><i data-ico="group"></i>Новая группа</button>
             <button class="chat-menu-item" onclick="showLanModal();closeChatsMenu()"><i data-ico="lan"></i>LAN чат</button>
           </div>
@@ -6013,7 +6014,10 @@
         Код, если понадобится: <b style="color:var(--text2);">${esc(итог.код)}</b>
       </div>
       <div id="stel-err" style="color:var(--accent2);font-size:12px;margin-top:10px;display:none;"></div>
-      <div class="modal-btns" style="margin-top:12px;">
+      <div class="modal-btns" style="flex-direction:column;gap:8px;margin-top:12px;">
+        <button class="btn-secondary" style="width:100%;" onclick="пропищатьЗаявку(this)">
+          Передать звуком
+        </button>
         <button class="btn-secondary" style="width:100%;"
                 onclick="отменитьВход();this.closest('.modal-overlay').remove();">Отмена</button>
       </div>`;
@@ -6029,6 +6033,237 @@
   // Телефон посматривает, не просится ли кто. Раз в пять секунд: заявка живёт
   // две минуты, чаще незачем, а батарею жалко.
   setInterval(() => { посмотретьЗаявки().catch(() => {}); }, 5000);
+
+  // Компьютер пищит кодом, телефон слушает. Звук — третий путь, не основной:
+  // ему нужны колонки, микрофон и не слишком шумная комната. Зато не надо
+  // ни набирать, ни смотреть на второй экран.
+  async function пропищатьЗаявку(кнопка) {
+    if (!входДело) return;
+    кнопка.disabled = true;
+    кнопка.textContent = 'Пищу…';
+    const вышло = await пропищатьКод(входДело.код).catch(() => false);
+    setTimeout(() => {
+      кнопка.disabled = false;
+      кнопка.textContent = вышло ? 'Передать звуком ещё раз' : 'Звук не вышел';
+    }, 3500);
+  }
+
+  // На телефоне: послушать компьютер вместо набора кода
+  async function послушатьКомпьютер(кнопка) {
+    кнопка.disabled = true;
+    кнопка.textContent = 'Слушаю…';
+    try {
+      const код = await послушатьКод(12000);
+      кнопка.textContent = 'Услышал: ' + код;
+      await впуститьПоКоду(код);
+    } catch (e) {
+      кнопка.disabled = false;
+      кнопка.textContent = 'Не услышал — попробовать снова';
+      showToast(e.message);
+    }
+  }
+
+  // Вход по коду, набранному или услышанному
+  async function впуститьПоКоду(код) {
+    try {
+      const r = await fetch(API + '/api/link/pending', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass })
+      });
+      const д = await r.json().catch(() => ({}));
+      const з = (д.requests || []).find(з => з.code === код.toUpperCase());
+      if (!з) { showToast('Такой заявки нет — код устарел или набран с ошибкой'); return; }
+      document.getElementById('link-overlay')?.remove();
+      показатьЗаявку(з);
+    } catch (e) { showToast('Нет связи с сервером'); }
+  }
+
+  // Третий путь: телефон сам ищет компьютер — звуком или по коду. Нужен, когда
+  // сети разные и уведомление не пришло.
+  function впуститьВручную() {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'link-manual';
+    ov.style.zIndex = '780';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:330px;">
+        <div class="modal-title">ВОЙТИ НА КОМПЬЮТЕРЕ</div>
+        <div style="font-size:13px;color:var(--text2);line-height:1.6;">
+          Открой voidm.site на компьютере и нажми там «Войти с телефона».
+          Обычно этого хватает: телефон заметит сам.
+        </div>
+        <button class="reg-btn" style="width:100%;margin-top:12px;padding:12px;font-size:13px;letter-spacing:1.5px;"
+                onclick="послушатьКомпьютер(this)">Послушать компьютер</button>
+        <div style="font-size:11.5px;color:var(--text3);text-align:center;margin-top:6px;line-height:1.5;">
+          Нажми «Передать звуком» на компьютере и поднеси телефон
+        </div>
+        <div class="reg-label" style="margin-top:12px;">Или введи код с экрана</div>
+        <input class="modal-input" id="link-code" style="width:100%;text-transform:uppercase;"
+               maxlength="5" autocomplete="off" placeholder="ABCDE">
+        <div class="modal-btns" style="flex-direction:column;gap:8px;margin-top:12px;">
+          <button class="btn-primary" style="width:100%;"
+                  onclick="впуститьПоКоду((document.getElementById('link-code').value||'').trim().toUpperCase())">
+            Найти компьютер</button>
+          <button class="btn-secondary" style="width:100%;"
+                  onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+
+  // ===== ПЕРЕДАЧА ЗВУКОМ =====
+  // Компьютер пищит, телефон слышит. В писке спрятан код заявки — тот же, что
+  // показан на экране, просто его не надо набирать руками.
+  //
+  // Не выдумка: так работало подтверждение платежей в Google Tez и настройка
+  // Chromecast. В браузере для этого всё есть — Web Audio на одной стороне,
+  // микрофон на другой, никаких библиотек.
+  //
+  // Как устроено. Шестнадцать тонов, по одному на полубайт, плюс отдельный тон
+  // «начало». Полоса 1600–4600 Гц выбрана не наугад: ниже гудят голоса и
+  // техника, выше плохо тянут дешёвые динамики ноутбуков. Шаг 200 Гц — вдесятеро
+  // больше разрешения разбора, так что промахнуться мимо соседнего тона трудно.
+  const ЗВУК_НАЧАЛО = 1400;
+  const ЗВУК_ШАГ    = 200;
+  const ЗВУК_ТОН    = 120;    // мс на символ
+  // Пауза должна быть заметно шире окна разбора, иначе она никогда не выглядит
+  // тишиной: окно всегда захватывает край соседнего тона. При окне в 1024
+  // отсчёта (около 21 мс) шестидесяти миллисекунд хватает с запасом. Первая
+  // версия брала окно 2048 и паузу 40 — то есть окно было ШИРЕ паузы, и
+  // разборщик не слышал ни одного символа.
+  const ЗВУК_ПАУЗА  = 60;
+  const ЗВУК_АЛФАВИТ = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';   // тот же, что у кода
+
+  const частотаСимвола = н => ЗВУК_НАЧАЛО + ЗВУК_ШАГ * (н + 1);
+
+  // Код из пяти знаков — это 25 бит. Пакуем в семь полубайтов и добавляем
+  // сумму: услышанное с ошибкой лучше отбросить, чем принять за верное.
+  function кодВПолубайты(код) {
+    let число = 0n;
+    for (const з of код) {
+      const и = ЗВУК_АЛФАВИТ.indexOf(з);
+      if (и < 0) return null;
+      число = число * 32n + BigInt(и);
+    }
+    const полубайты = [];
+    for (let i = 0; i < 7; i++) { полубайты.unshift(Number(число & 15n)); число >>= 4n; }
+    полубайты.push(полубайты.reduce((с, п) => (с + п) % 16, 0));
+    return полубайты;
+  }
+
+  function полубайтыВКод(полубайты) {
+    if (polubaityПлохи(полубайты)) return null;
+    let число = 0n;
+    for (const п of полубайты.slice(0, 7)) число = число * 16n + BigInt(п);
+    let код = '';
+    for (let i = 0; i < 5; i++) { код = ЗВУК_АЛФАВИТ[Number(число % 32n)] + код; число /= 32n; }
+    return код;
+  }
+  function polubaityПлохи(п) {
+    if (!Array.isArray(п) || п.length !== 8) return true;
+    return п.slice(0, 7).reduce((с, х) => (с + х) % 16, 0) !== п[7];
+  }
+
+  // --- Пищим ---
+  let звукОтменить = null;
+  async function пропищатьКод(код, повторов = 3) {
+    const полубайты = кодВПолубайты(код);
+    if (!полубайты) return false;
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (ctx.state === 'suspended') await ctx.resume();
+    const усиление = ctx.createGain();
+    усиление.gain.value = 0.18;      // громко достаточно, но не режет ухо
+    усиление.connect(ctx.destination);
+
+    let t = ctx.currentTime + 0.15;
+    for (let п = 0; п < повторов; п++) {
+      for (const частота of [ЗВУК_НАЧАЛО, ...полубайты.map(частотаСимвола)]) {
+        const о = ctx.createOscillator();
+        о.frequency.value = частота;
+        о.type = 'sine';
+        const г = ctx.createGain();
+        // Мягкие края: резкий старт даёт щелчок, который слышно как треск и
+        // который размазывает спектр по соседним тонам.
+        г.gain.setValueAtTime(0, t);
+        г.gain.linearRampToValueAtTime(1, t + 0.008);
+        г.gain.setValueAtTime(1, t + ЗВУК_ТОН / 1000 - 0.008);
+        г.gain.linearRampToValueAtTime(0, t + ЗВУК_ТОН / 1000);
+        о.connect(г); г.connect(усиление);
+        о.start(t); о.stop(t + ЗВУК_ТОН / 1000 + 0.01);
+        t += (ЗВУК_ТОН + ЗВУК_ПАУЗА) / 1000;
+      }
+      t += 0.25;   // пауза между повторами
+    }
+    звукОтменить = () => { try { ctx.close(); } catch (e) {} };
+    setTimeout(() => { try { ctx.close(); } catch (e) {} }, (t - ctx.currentTime) * 1000 + 500);
+    return true;
+  }
+
+  // --- Слушаем ---
+  async function послушатьКод(сколькоМс = 12000) {
+    let поток;
+    try {
+      поток = await navigator.mediaDevices.getUserMedia({ audio: {
+        echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
+    } catch (e) { throw new Error('Микрофон не дали'); }
+
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const источник = ctx.createMediaStreamSource(поток);
+    const разбор = ctx.createAnalyser();
+    разбор.fftSize = 1024;      // окно около 21 мс, шаг корзины ~47 Гц
+    разбор.smoothingTimeConstant = 0;
+    источник.connect(разбор);
+    const спектр = new Uint8Array(разбор.frequencyBinCount);
+    const ширинаКорзины = ctx.sampleRate / разбор.fftSize;
+
+    let символы = [], серия = [], собираем = false;
+    const конец = Date.now() + сколькоМс;
+    const прибрать = () => {
+      try { поток.getTracks().forEach(д => д.stop()); } catch (e) {}
+      try { ctx.close(); } catch (e) {}
+    };
+
+    return new Promise((готово, беда) => {
+      // Раньше здесь был requestAnimationFrame. Он привязан к отрисовке и
+      // замирает, когда вкладка не на виду, — а слушать звук как раз и надо,
+      // не глядя на экран.
+      let часы = null;
+      const стоп = () => { if (часы) clearInterval(часы); часы = null; };
+      const шаг = () => {
+        if (Date.now() > конец) { стоп(); прибрать(); return беда(new Error('Ничего не услышал')); }
+        разбор.getByteFrequencyData(спектр);
+
+        // Ищем самый громкий тон в нашей полосе
+        const от = Math.floor((ЗВУК_НАЧАЛО - 100) / ширинаКорзины);
+        const до = Math.ceil((частотаСимвола(15) + 100) / ширинаКорзины);
+        let лучшая = -1, громкость = 0;
+        for (let i = от; i <= до && i < спектр.length; i++) {
+          if (спектр[i] > громкость) { громкость = спектр[i]; лучшая = i; }
+        }
+        const тихо = громкость < 90;
+        const частота = лучшая * ширинаКорзины;
+
+        if (тихо) {
+          // Пауза: если перед ней была устойчивая серия — это символ
+          if (серия.length >= 3) {
+            const середина = серия.slice().sort((a, b) => a - b)[серия.length >> 1];
+            const номер = Math.round((середина - ЗВУК_НАЧАЛО) / ЗВУК_ШАГ) - 1;
+            if (номер === -1) { собираем = true; символы = []; }        // тон «начало»
+            else if (собираем && номер >= 0 && номер <= 15) символы.push(номер);
+            if (символы.length === 8) {
+              const код = полубайтыВКод(символы);
+              собираем = false; символы = [];
+              if (код) { стоп(); прибрать(); return готово(код); }
+            }
+          }
+          серия = [];
+        } else {
+          серия.push(частота);
+        }
+      };
+      часы = setInterval(шаг, 10);
+    });
+  }
 
   // ===== ВХОД НА КОМПЬЮТЕРЕ =====
   // Компьютеру нужен не «логин», а личность: без закрытого ключа он не
