@@ -206,6 +206,12 @@
   .chats-list::-webkit-scrollbar { width:3px; }
   .chats-list::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
 
+  /* Написанное без связи не должно выглядеть потерянным: полоска говорит,
+     что оно стоит в очереди и уйдёт само. */
+  .queue-bar { display:flex; align-items:center; justify-content:center; gap:7px; margin:0 16px 8px;
+               padding:8px 12px; border-radius:12px; background:var(--bg3); border:1px solid var(--border);
+               color:var(--text2); font-size:12px; }
+  .queue-bar .ico { flex-shrink:0; opacity:0.75; }
   .empty-chats { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:200px; gap:10px; color:var(--text3); padding:20px; text-align:center; }
   .empty-chats .empty-icon { font-size:30px; opacity:0.4; }
   .empty-chats p { font-size:12px; line-height:1.6; }
@@ -1122,6 +1128,8 @@
         </div>
       </div>
 
+      <div class="queue-bar" id="queue-bar" style="display:none;"></div>
+
       <div class="chats-search-wrap">
         <span class="chats-search-icon" data-ico="search"></span>
         <input type="text" class="chats-search" id="chats-search" placeholder="Поиск чатов..." oninput="filterChats(this.value)">
@@ -1894,6 +1902,8 @@
     // Число писем в настройках — чтобы не открывать окно ради проверки
     setTimeout(подтянутьЧислоПисем, 2500);
     обновитьПунктСкрытия();
+    // Написанное без связи могло остаться с прошлого запуска
+    setTimeout(() => { обновитьЗначокОчереди(); разгрестиОчередь(); }, 1500);
     const reg = document.getElementById('register-screen');
     reg.classList.add('hide');
     setTimeout(() => {
@@ -2160,6 +2170,17 @@
 
   async function peerPublicKey(nick) {
     const hit = peerKeyCache[nick];
+    // Ключ собеседника хранится и на устройстве: без сети сервер не спросишь,
+    // а зашифровать надо — иначе очередь исходящих не сможет принять письмо.
+    // Ключ открытый, прятать его не от кого; подмену по-прежнему поймает
+    // notePeerKey, когда сервер в следующий раз ответит.
+    if (!hit && chats[nick]?.keyJwk) {
+      try {
+        const key = await impPub(chats[nick].keyJwk);
+        peerKeyCache[nick] = { key, jwk: chats[nick].keyJwk, at: 0 };
+        return key;
+      } catch (e) {}
+    }
     // Найденный ключ держим сколько угодно, а вот «ключа нет» запоминать
     // насовсем нельзя: человек мог зайти секунду назад и ключ уже появился.
     // Раньше отказ кэшировался навсегда, и написать ему можно было только
@@ -2710,6 +2731,7 @@
           loadTotpSetting();       // состояние «вход по коду» в настройках
           loadBlocked();             // чтобы чёрный список работал сразу
           loadSos().then(sosFlush);  // связь появилась — накопленные точки уходят
+          setTimeout(разгрестиОчередь, 800);   // и написанное без связи тоже
           clearTimeout(dmWsWatchdog); dmWsWatchdog = null;
           updateDmStatus('ok');
           console.log('[DM] Auth OK');
@@ -3934,7 +3956,14 @@
       const replyBtn = `<button class="msg-reply-btn" onclick="setReply(${idx})" title="Ответить">${ico('reply', 15)}</button>`;
       const editedMark = msg.edited ? '<span class="msg-edited">изменено</span> ' : '';
       const ttlMark = msg.expiresAt ? `<span class="msg-ttl" title="Исчезнет через ${ttlLeft(msg.expiresAt)}">${ico('fire', 11)}</span> ` : '';
-      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${ttlMark}${editedMark}${msg.time}${msg.own?' <span class="check'+(msg.read?' read':'')+'">'+(msg.read?CHECK2_ICON:CHECK_ICON)+'</span>':''}</span>`;
+      // Ждущее письмо помечаем часами, а не галочкой: галочка означала бы
+      // «ушло», а оно ещё лежит на устройстве.
+      const знакСвой = msg.own
+        ? (msg.pending
+            ? ' <span class="check" title="Ждёт связи">' + ico('clock', 11) + '</span>'
+            : ' <span class="check' + (msg.read ? ' read' : '') + '">' + (msg.read ? CHECK2_ICON : CHECK_ICON) + '</span>')
+        : '';
+      const timeHtml = isSticker ? '' : `<span class="msg-time-inline">${ttlMark}${editedMark}${msg.time}${знакСвой}</span>`;
       const reactionsHtml = (msg.reactions && msg.reactions.length)
         ? `<div class="msg-reactions">${msg.reactions.map(r=>`<button class="msg-reaction mine" onclick="toggleReaction(${idx},'${r}')">${r}</button>`).join('')}</div>` : '';
 
@@ -4012,14 +4041,104 @@
     return true;
   }
 
+  // ===== ОЧЕРЕДЬ ИСХОДЯЩИХ =====
+  // Раньше при обрыве связи Void говорил «сообщение не отправлено» — и всё.
+  // Написанное пропадало, набирать приходилось заново. В метро, в лифте и в
+  // поле это и есть главная поломка, куда более частая, чем что угодно ещё.
+  //
+  // Теперь письмо ложится в очередь и уходит само, как только связь вернулась.
+  // Хранится оно прямо в переписке, с пометкой pending: тогда его видно на
+  // экране, оно переживает перезагрузку и попадает в скрытый аккаунт вместе с
+  // остальным — отдельное хранилище пришлось бы чинить в трёх местах.
+  const ОЧЕРЕДЬ_ПРЕДЕЛ = 200;   // больше держать бессмысленно: это уже не «сейчас вернусь»
+  let очередьИдёт = false;
+
+  function ждущиеПисьма() {
+    const список = [];
+    for (const [кому, чат] of Object.entries(chats)) {
+      if (isRoom(кому) || !chat0(чат)) continue;
+      for (const м of чат.messages) if (м.pending && м.ct) список.push({ кому, м });
+    }
+    return список.sort((a, b) => (a.м.timestamp || 0) - (b.м.timestamp || 0));
+  }
+  const chat0 = ч => ч && Array.isArray(ч.messages);
+
+  function сколькоЖдёт() { return ждущиеПисьма().length; }
+
+  // Положить в очередь. Возвращает false, только если очередь переполнена:
+  // в этом случае честнее отказать сразу, чем копить бесконечно.
+  function вОчередь(мсг) {
+    if (сколькоЖдёт() >= ОЧЕРЕДЬ_ПРЕДЕЛ) return false;
+    мсг.pending = true;
+    return true;
+  }
+
+  async function разгрестиОчередь() {
+    if (очередьИдёт) return;
+    if (!myRawPass || !dmWsAuthOk || dmWs?.readyState !== 1) return;
+    const ждут = ждущиеПисьма();
+    if (!ждут.length) return;
+
+    очередьИдёт = true;
+    let ушло = 0;
+    try {
+      for (const { кому, м } of ждут) {
+        if (dmWs?.readyState !== 1 || !dmWsAuthOk) break;   // связь снова упала
+        if (!послатьВСокет(dmWs, { type: 'dm', to: кому, text: м.ct, mid: м.mid }, 'Сообщение')) {
+          // Не пролезло по размеру — в очереди оно будет мешать вечно
+          delete м.pending; delete м.ct;
+          continue;
+        }
+        delete м.pending;
+        delete м.ct;     // шифротекст больше не нужен, он уже у сервера
+        ушло++;
+        // Между письмами пауза: на плохой связи пачка из полусотни кадров
+        // подряд обрывает соединение вернее, чем каждое из них по отдельности
+        await new Promise(r => setTimeout(r, 120));
+      }
+    } finally {
+      очередьИдёт = false;
+    }
+    if (ушло) {
+      console.log('[очередь] Отправлено:', ушло);
+      saveState();
+      renderMessages();
+      renderChatList();
+      обновитьЗначокОчереди();
+      showToast(ушло === 1 ? 'Сообщение ушло' : 'Ушло сообщений: ' + ушло);
+    }
+  }
+
+  // Полоска «ждут отправки» над списком чатов: человек должен видеть, что
+  // написанное не потерялось, а стоит в очереди.
+  function обновитьЗначокОчереди() {
+    const э = document.getElementById('queue-bar');
+    if (!э) return;
+    const n = сколькоЖдёт();
+    э.style.display = n ? 'flex' : 'none';
+    if (n) {
+      const слово = n === 1 ? 'сообщение ждёт' : (n >= 2 && n <= 4) ? 'сообщения ждут' : 'сообщений ждут';
+      э.innerHTML = ico('clock', 14) + '<span>' + n + ' ' + слово + ' связи</span>';
+    }
+  }
+
+  // Пробуем разгрести и по времени: связь могла вернуться без события online
+  setInterval(() => { if (сколькоЖдёт()) разгрестиОчередь(); }, 15000);
+  window.addEventListener('online', () => setTimeout(разгрестиОчередь, 1200));
+
+  // ===== ОЧЕРЕДЬ ИСХОДЯЩИХ: КОНЕЦ =====
+
   // Отправка не в открытый чат, а любому собеседнику. Нужна пересылке:
   // раньше вся отправка была намертво привязана к currentChat.
   // opts.silent — служебное сообщение: у себя его не сохраняем, оно не письмо
   async function sendTo(peer, text, opts = {}) {
     if (isRoom(peer)) return false;
     if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return false; }
-    if (!myRawPass || !dmWsAuthOk || dmWs?.readyState !== 1) {
-      showToast('Нет связи с сервером — сообщение не отправлено');
+    const наСвязи = myRawPass && dmWsAuthOk && dmWs?.readyState === 1;
+    // Служебные сообщения в очередь не кладём: они про «сейчас» — прочитано,
+    // печатает, ключ сменился. Через час они уже неправда.
+    if (!наСвязи && (opts.silent || !myRawPass)) {
+      if (!opts.silent) showToast('Нет связи с сервером — сообщение не отправлено');
       dmWakeCheck();
       return false;
     }
@@ -4027,7 +4146,13 @@
     const payload = await e2eEncrypt(peer, wire);
     if (!payload) { showToast('Собеседник ещё ни разу не заходил — написать ему пока нельзя'); return false; }
     const mid = newMid();
-    if (!послатьВСокет(dmWs, { type: 'dm', to: peer, text: payload, mid }, 'Сообщение')) return false;
+    let ждёт = false;
+    if (наСвязи) {
+      if (!послатьВСокет(dmWs, { type: 'dm', to: peer, text: payload, mid }, 'Сообщение')) return false;
+    } else {
+      ждёт = true;
+      dmWakeCheck();
+    }
     if (opts.silent) return true;
     if (!chats[peer]) chats[peer] = { messages: [], color: colors[colorIdx++ % colors.length], unread: 0 };
     const enc = await encryptText(text);
@@ -4039,8 +4164,14 @@
                   isFile: !!fwdFile, isVoice: !!(fwdFile && fwdFile.voice),
                   isSos: shown.startsWith('__SOS__') };
     if (sec > 0) out.expiresAt = Date.now() + sec * 1000;
+    if (ждёт) {
+      out.ct = payload;
+      if (!вОчередь(out)) { showToast('Слишком много неотправленного — дождись связи'); return false; }
+    }
     chats[peer].messages.push(out);
     saveState();
+    обновитьЗначокОчереди();
+    if (ждёт) showToast('Нет связи — уйдёт, когда появится');
     return true;
   }
 
@@ -4077,26 +4208,35 @@
     }
     // Без ключа сообщение легло бы в историю открытым текстом — не молчим об этом
     if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
-    // Отправка через сервер если авторизованы
-    if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
-      // Шифруем ключом пары: на сервер уходит только шифротекст
-      const payload = await e2eEncrypt(currentChat, withTtl(currentChat, text));
+    // Шифруем в любом случае, есть связь или нет: без шифротекста письмо
+    // нечего будет положить в очередь.
+    let payload = null, ждёт = false;
+    if (myRawPass) {
+      payload = await e2eEncrypt(currentChat, withTtl(currentChat, text));
       if (!payload) {
         showToast('Собеседник ещё ни разу не заходил — написать ему пока нельзя');
         return;
       }
+    }
+    if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
       console.log('[DM] Sending dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
       if (!послатьВСокет(dmWs, { type: 'dm', to: currentChat, text: payload, mid: outMid }, 'Сообщение')) return;
     } else if (myRawPass) {
-      // Раньше сообщение просто оседало локально, а собеседник его не получал
-      // и об этом никто не сообщал. Теперь честно говорим и жмём переподключение.
-      console.warn('[DM] Not connected, message not relayed');
-      showToast('Нет связи с сервером — сообщение не отправлено');
+      // Связи нет — но письмо не пропадает. Оно остаётся в переписке с
+      // пометкой «ждёт» и уйдёт само, как только связь вернётся.
+      console.warn('[DM] Нет связи — письмо в очередь');
+      ждёт = true;
       dmWakeCheck();
-      return;
     }
     const enc = await encryptText(text);
     const msg = {enc, own:true, time:now(), timestamp:Date.now(), mid:outMid};
+    if (ждёт) {
+      msg.ct = payload;
+      if (!вОчередь(msg)) {
+        showToast('Слишком много неотправленного — дождись связи');
+        return;
+      }
+    }
     const ttlSec = ttlFor(currentChat);
     if (ttlSec > 0) msg.expiresAt = Date.now() + ttlSec * 1000;
     if (pendingCapsuleTime) { msg.unlockAt = pendingCapsuleTime; cancelCapsule(); }
@@ -4106,7 +4246,9 @@
     playSound();
     renderMessages();
     renderChatList();
+    обновитьЗначокОчереди();
     saveState();
+    if (ждёт) showToast('Нет связи — сообщение уйдёт, когда появится');
   }
 
   function deleteCurrentChat() {
@@ -7820,6 +7962,9 @@
       renderChatList();
     }
     chat.keyFp = fp;
+    // Сам ключ тоже кладём на устройство: он открытый, а без него в метро
+    // нечем зашифровать письмо, которое должно дождаться связи.
+    chat.keyJwk = jwk;
     saveState();
   }
 
