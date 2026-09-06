@@ -71,6 +71,10 @@ const TTL_SLED_MAX     = 24 * 3600000;  // и сутки в любом случ�
 // любом VPS. От поломки защищает не доля, а сами байты: SQLite нужно место
 // дописать журнал, и двух гигабайт ему хватит хоть при терабайтном разделе,
 // хоть при сорокагигабайтном.
+// Докачка. Без неё файл, оборвавшийся на 80%, начинается сначала — на
+// телефоне это делает невозможной отправку всего, что крупнее пары сотен
+// мегабайт. Недокачанный кусок живёт сутки: решение владельца.
+const TTL_НЕДОКАЧ = 24 * 3600000;
 const ДИСК_ОТКАЗ_ГБ   = Number(process.env.VOID_DISK_MIN_GB)  || 2;
 const ДИСК_ТРЕВОГА_ГБ = Number(process.env.VOID_DISK_WARN_GB) || 5;
 
@@ -95,7 +99,15 @@ const BLOB_TMP = path.join(BLOB_DIR, 'tmp');
 try { fs.mkdirSync(BLOB_TMP, { recursive: true }); }
 catch (e) { console.error('[blob] Не удалось создать каталог вложений:', e.message); }
 // Недописанные куски от прерванных загрузок пережить перезапуск не должны
-try { for (const f of fs.readdirSync(BLOB_TMP)) fs.unlinkSync(path.join(BLOB_TMP, f)); } catch (e) {}
+// Времянку чистим при запуске, но недокачанные куски (r-...) не трогаем: они
+// для того и существуют, чтобы пережить обрыв — в том числе перезапуск
+// сервера. У них свой срок в сутки, его хватает.
+try {
+  for (const f of fs.readdirSync(BLOB_TMP)) {
+    if (f.startsWith('r-')) continue;
+    fs.unlinkSync(path.join(BLOB_TMP, f));
+  }
+} catch (e) {}
 const blobPath = id => path.join(BLOB_DIR, id);
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -991,7 +1003,11 @@ const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   // x-void-nick / x-void-pass носят учётные данные при потоковой загрузке:
   // тело там занято самим файлом, класть их туда больше некуда
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-void-nick, x-void-pass');
+  // Заголовки докачки обязаны быть здесь. Забыл их — и браузер блокирует
+  // запрос молча, ещё до отправки: в логах сервера пусто, а на странице
+  // «Failed to fetch», неотличимое от пропавшей связи.
+  res.setHeader('Access-Control-Allow-Headers',
+    'Content-Type, x-void-nick, x-void-pass, x-void-upload, x-void-offset, x-void-total');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
 
@@ -1359,6 +1375,113 @@ const server = http.createServer((req, res) => {
       console.log('[invite] Приглашение от', кто.nick, 'принято');
       json(200, { ok: true, from: кто.nick });
     });
+    return;
+  }
+
+  // ===== ДОКАЧКА =====
+  // Загрузка делится на куски. Клиент спрашивает «сколько ты уже принял?» и
+  // досылает остаток с этого места. Кусок лежит во времянке под своим
+  // опознавателем; собирается в настоящее вложение только когда придёт всё.
+  if (req.method === 'POST' && url.pathname === '/api/blob/resume') {
+    if (!rateLimit('resume:' + clientIp(req), 120, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      const дело = typeof body.upload === 'string' && /^[0-9a-f]{32}$/.test(body.upload) ? body.upload : '';
+      if (!дело) return json(400, { error: 'Неверный опознаватель' });
+      const путь = path.join(BLOB_TMP, 'r-' + u.nick.toLowerCase() + '-' + дело);
+      let принято = 0;
+      try { принято = fs.statSync(путь).size; } catch (e) { принято = 0; }
+      json(200, { ok: true, received: принято });
+    });
+    return;
+  }
+
+  // Кусок дописывается в конец времянки. Порядок кусков задаёт клиент: он
+  // присылает смещение, и если оно не совпало с тем, что у нас, — говорим
+  // правду, а не молча пишем не туда.
+  if (req.method === 'POST' && url.pathname === '/api/blob/chunk') {
+    if (!String(req.headers['content-type'] || '').startsWith('application/octet-stream')) {
+      return json(400, { error: 'Нужны сырые байты' });
+    }
+    (async () => {
+      const отказать = (код, текст) => {
+        req.pause();
+        res.setHeader('Connection', 'close');
+        json(код, { error: текст });
+        res.on('finish', () => req.destroy());
+      };
+      const u = await verifyUser(req.headers['x-void-nick'], req.headers['x-void-pass']);
+      if (!u) return отказать(401, 'Неверный ник или пароль');
+      if (u.banned) return отказать(403, 'Аккаунт заблокирован');
+      if (местаМало()) {
+        приглядетьЗаДиском();
+        return отказать(507, 'На сервере кончается место — вложения временно не принимаются. Текст работает.');
+      }
+
+      const дело = String(req.headers['x-void-upload'] || '');
+      if (!/^[0-9a-f]{32}$/.test(дело)) return отказать(400, 'Неверный опознаватель');
+      const смещение = Number(req.headers['x-void-offset']);
+      const всего = Number(req.headers['x-void-total']);
+      if (!Number.isFinite(смещение) || смещение < 0 || !Number.isFinite(всего) || всего <= 0) {
+        return отказать(400, 'Неверные заголовки');
+      }
+      if (всего > MAX_BLOB) return отказать(413, 'Файл слишком большой');
+
+      const занято = qBlobUsage.get(u.nick).total;
+      if (занято + всего > BLOB_QUOTA) return отказать(413, 'Превышен объём вложений');
+
+      const путь = path.join(BLOB_TMP, 'r-' + u.nick.toLowerCase() + '-' + дело);
+      let было = 0;
+      try { было = fs.statSync(путь).size; } catch (e) { было = 0; }
+      if (было !== смещение) {
+        // Клиент отстал или забежал вперёд. Возвращаем истину — он дошлёт
+        // с нужного места, а не испортит файл.
+        return отказать(409, JSON.stringify({ received: было }));
+      }
+
+      const поток = fs.createWriteStream(путь, { flags: 'a' });
+      let принято = было, сорвалось = false;
+      const сдаться = (код, текст) => {
+        if (сорвалось) return;
+        сорвалось = true;
+        поток.destroy();
+        отказать(код, текст);
+      };
+      req.on('data', кусок => {
+        if (сорвалось) return;
+        принято += кусок.length;
+        if (принято > всего) return сдаться(413, 'Прислано больше обещанного');
+        if (!поток.write(кусок)) { req.pause(); поток.once('drain', () => req.resume()); }
+      });
+      req.on('error', () => сдаться(400, 'Загрузка прервалась'));
+      req.on('end', () => {
+        if (сорвалось) return;
+        поток.end(() => {
+          if (принято < всего) {
+            // Ещё не всё — ждём следующий кусок
+            return json(200, { ok: true, received: принято, done: false });
+          }
+          // Пришло всё: превращаем времянку в настоящее вложение
+          const id = crypto.randomBytes(24).toString('hex');
+          try {
+            fs.renameSync(путь, path.join(BLOB_DIR, id));
+            // Именно qPutBlobDisk: файл лежит на диске, а не в базе. С обычным
+            // qPutBlob в базу пошёл бы NULL вместо данных, и вложение потом не
+            // отдалось бы вовсе.
+            qPutBlobDisk.run(id, u.nick, принято, Date.now());
+          } catch (e) {
+            console.error('[докачка]', e.message);
+            return json(500, { error: 'Не удалось сохранить' });
+          }
+          console.log('[докачка] Собрано', Math.round(принято / 1024), 'КБ от', u.nick);
+          json(200, { ok: true, id, size: принято, done: true });
+        });
+      });
+    })().catch(err => { console.error('[докачка]', err.message); json(500, { error: 'Ошибка сервера' }); });
     return;
   }
 
@@ -2840,6 +2963,17 @@ function подмести() {
     // Журнал модерации храним год: он нужен, чтобы разобраться в споре,
     // а не чтобы копиться вечно.
     try { qDropOldLog.run(now - 365 * 86400000); } catch (e) {}
+    // Недокачанные куски: сутки, потом выбрасываем. Они занимают настоящее
+    // место, и сторож диска считает их вместе со всем остальным.
+    try {
+      let выброшено = 0;
+      for (const ф of fs.readdirSync(BLOB_TMP)) {
+        if (!ф.startsWith('r-')) continue;
+        const п = path.join(BLOB_TMP, ф);
+        if (now - fs.statSync(п).mtimeMs > TTL_НЕДОКАЧ) { fs.unlinkSync(п); выброшено++; }
+      }
+      if (выброшено) console.log('[докачка] Выброшено недокачанных:', выброшено);
+    } catch (e) {}
     dropBlobFiles(qBlobIdsOld.all(now - TTL_BLOB));
     const c = db.prepare('DELETE FROM blobs WHERE created_at < ?').run(now - TTL_BLOB);
     if (a.changes || b.changes) console.log('[cleanup] Удалено сообщений:', a.changes + b.changes);

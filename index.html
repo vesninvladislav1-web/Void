@@ -1918,7 +1918,10 @@
     setTimeout(подтянутьЧислоПисем, 2500);
     обновитьПунктСкрытия();
     // Написанное без связи могло остаться с прошлого запуска
-    setTimeout(() => { обновитьЗначокОчереди(); разгрестиОчередь(); }, 1500);
+    setTimeout(() => {
+      обновитьЗначокОчереди(); разгрестиОчередь();
+      подместиФайлы().then(разгрестиФайлы);
+    }, 1500);
     // Двенадцать слов показываем один раз — и новичкам, и тем, кто завёл
     // аккаунт до появления восстановления. Позже, чтобы не спорить с
     // приветственными экранами.
@@ -2786,7 +2789,7 @@
           loadTotpSetting();       // состояние «вход по коду» в настройках
           loadBlocked();             // чтобы чёрный список работал сразу
           loadSos().then(sosFlush);  // связь появилась — накопленные точки уходят
-          setTimeout(разгрестиОчередь, 800);   // и написанное без связи тоже
+          setTimeout(() => { разгрестиОчередь(); разгрестиФайлы(); }, 800);   // и написанное без связи тоже
           clearTimeout(dmWsWatchdog); dmWsWatchdog = null;
           updateDmStatus('ok');
           console.log('[DM] Auth OK');
@@ -4118,7 +4121,19 @@
   }
   const chat0 = ч => ч && Array.isArray(ч.messages);
 
-  function сколькоЖдёт() { return ждущиеПисьма().length; }
+  // Ждущих вложений в этом счёте тоже должно быть видно: для человека это
+  // одно и то же — «написанное ещё не ушло». А вот в разгрузку текста они
+  // попадать не должны, там своя дорога.
+  function ждущиеВложения() {
+    let n = 0;
+    for (const [кому, чат] of Object.entries(chats)) {
+      if (isRoom(кому) || !chat0(чат)) continue;
+      for (const м of чат.messages) if (м.pending && м.файлЖдёт) n++;
+    }
+    return n;
+  }
+
+  function сколькоЖдёт() { return ждущиеПисьма().length + ждущиеВложения(); }
 
   // Положить в очередь. Возвращает false, только если очередь переполнена:
   // в этом случае честнее отказать сразу, чем копить бесконечно.
@@ -4169,6 +4184,8 @@
   function обновитьЗначокОчереди() {
     const э = document.getElementById('queue-bar');
     if (!э) return;
+    // Ждущие вложения считаем по тем же меткам в переписке, что и текст:
+    // спрашивать IndexedDB на каждую перерисовку было бы расточительно.
     const n = сколькоЖдёт();
     э.style.display = n ? 'flex' : 'none';
     if (n) {
@@ -4178,8 +4195,13 @@
   }
 
   // Пробуем разгрести и по времени: связь могла вернуться без события online
-  setInterval(() => { if (сколькоЖдёт()) разгрестиОчередь(); }, 15000);
-  window.addEventListener('online', () => setTimeout(разгрестиОчередь, 1200));
+  setInterval(() => {
+    if (сколькоЖдёт()) разгрестиОчередь();
+    разгрестиФайлы();
+  }, 15000);
+  window.addEventListener('online', () => setTimeout(() => {
+    разгрестиОчередь(); разгрестиФайлы();
+  }, 1200));
 
   // ===== ОЧЕРЕДЬ ИСХОДЯЩИХ: КОНЕЦ =====
 
@@ -5810,6 +5832,137 @@
       обновитьПодписьПисем(д.wills.length);
     } catch (e) {}
   }
+
+  // ===== ВЛОЖЕНИЯ, КОТОРЫЕ ЖДУТ СВЯЗИ =====
+  // Текст уже умеет ждать, а файл — нет: он сперва грузится на сервер, и без
+  // связи поставить его в очередь было некуда. Двадцать пять мегабайт в
+  // обычное хранилище не влезают, поэтому берём IndexedDB — оно для того и
+  // сделано.
+  //
+  // Пределы выбраны владельцем: до 100 МБ и не дольше суток. Дальше это уже
+  // не «сейчас вернусь», а склад на чужом телефоне.
+  const ФАЙЛЫ_ПРЕДЕЛ = 100 * 1024 * 1024;
+  const ФАЙЛЫ_СРОК   = 24 * 3600000;
+  let базаФайлов = null;
+
+  function открытьБазуФайлов() {
+    if (базаФайлов) return Promise.resolve(базаФайлов);
+    return new Promise((готово, беда) => {
+      let зпр;
+      try { зпр = indexedDB.open('void-files', 1); }
+      catch (e) { return беда(e); }
+      зпр.onupgradeneeded = () => {
+        const б = зпр.result;
+        if (!б.objectStoreNames.contains('ждут')) б.createObjectStore('ждут', { keyPath: 'ключ' });
+      };
+      зпр.onsuccess = () => { базаФайлов = зпр.result; готово(базаФайлов); };
+      зпр.onerror = () => беда(зпр.error || new Error('IndexedDB недоступна'));
+    });
+  }
+
+  function действиеСФайлами(режим, что) {
+    return открытьБазуФайлов().then(б => new Promise((готово, беда) => {
+      const сделка = б.transaction('ждут', режим);
+      const хранилище = сделка.objectStore('ждут');
+      const зпр = что(хранилище);
+      сделка.oncomplete = () => готово(зпр ? зпр.result : undefined);
+      сделка.onerror = () => беда(сделка.error);
+    }));
+  }
+
+  const положитьФайл = запись => действиеСФайлами('readwrite', х => х.put(запись));
+  const убратьФайл   = ключ   => действиеСФайлами('readwrite', х => х.delete(ключ));
+  const всеФайлы     = ()     => действиеСФайлами('readonly',  х => х.getAll());
+
+  // Сколько сейчас занято ждущими файлами
+  async function занятоФайлами() {
+    try { return (await всеФайлы()).reduce((с, з) => с + (з.байты?.byteLength || 0), 0); }
+    catch (e) { return 0; }
+  }
+
+  // Просроченные выкидываем: сутки прошли — человек уже не ждёт
+  async function подместиФайлы() {
+    try {
+      const сейчас = Date.now();
+      for (const з of await всеФайлы()) {
+        if (сейчас - з.создан > ФАЙЛЫ_СРОК) {
+          await убратьФайл(з.ключ);
+          // И сообщение в переписке помечаем как несостоявшееся, иначе оно
+          // будет вечно висеть с часами и врать, что вот-вот уйдёт.
+          for (const чат of Object.values(chats)) {
+            const м = (чат.messages || []).find(м => м.файлЖдёт === з.ключ);
+            if (м) { delete м.pending; delete м.файлЖдёт; м.неУшло = true; }
+          }
+          console.log('[файлы] Просрочен и выброшен:', з.имя);
+        }
+      }
+      saveState();
+    } catch (e) {}
+  }
+
+  // Разгрести ждущие файлы: загрузить и отправить как обычное вложение
+  let файлыИдут = false;
+  async function разгрестиФайлы() {
+    if (файлыИдут) return;
+    if (!myRawPass || !dmWsAuthOk || dmWs?.readyState !== 1) return;
+    let ждут = [];
+    try { ждут = await всеФайлы(); } catch (e) { return; }
+    if (!ждут.length) return;
+
+    файлыИдут = true;
+    let ушло = 0;
+    try {
+      for (const з of ждут.sort((a, b) => a.создан - b.создан)) {
+        if (dmWs?.readyState !== 1 || !dmWsAuthOk) break;
+        let blobId;
+        try {
+          blobId = await uploadBlob(new Uint8Array(з.байты));
+        } catch (e) {
+          // Сервер отказал по существу (место кончилось, файл велик) — держать
+          // такое в очереди бессмысленно, оно не уйдёт и завтра.
+          if (/место|слишком большой|Превышен/i.test(e.message)) {
+            await убратьФайл(з.ключ);
+            пометитьНеУшло(з.ключ, e.message);
+            continue;
+          }
+          break;   // связь опять пропала — попробуем в следующий раз
+        }
+        const meta = { id: blobId, iv: з.iv, name: з.имя, mime: з.mime, size: з.размер, ...(з.лишнее || {}) };
+        const текст = '__FILE__' + JSON.stringify(meta);
+        const шифр = await e2eEncrypt(з.кому, withTtl(з.кому, текст));
+        if (!шифр || !послатьВСокет(dmWs, { type: 'dm', to: з.кому, text: шифр, mid: з.mid }, 'Вложение')) {
+          break;
+        }
+        // Дошло: подменяем в переписке заглушку настоящим вложением
+        const чат = chats[з.кому];
+        const м = (чат?.messages || []).find(м => м.файлЖдёт === з.ключ);
+        if (м) {
+          м.enc = await encryptText(текст);
+          delete м.pending; delete м.файлЖдёт;
+        }
+        blobCache[blobId] = з.байты;
+        await убратьФайл(з.ключ);
+        ушло++;
+        await new Promise(r => setTimeout(r, 200));
+      }
+    } finally { файлыИдут = false; }
+
+    if (ушло) {
+      console.log('[файлы] Отправлено:', ушло);
+      saveState(); renderMessages(); renderChatList(); обновитьЗначокОчереди();
+      showToast(ушло === 1 ? 'Вложение ушло' : 'Ушло вложений: ' + ушло);
+    }
+  }
+
+  function пометитьНеУшло(ключ, почему) {
+    for (const чат of Object.values(chats)) {
+      const м = (чат.messages || []).find(м => м.файлЖдёт === ключ);
+      if (м) { delete м.pending; delete м.файлЖдёт; м.неУшло = почему || true; }
+    }
+    saveState(); renderMessages();
+  }
+
+  // ===== ВЛОЖЕНИЯ, КОТОРЫЕ ЖДУТ СВЯЗИ: КОНЕЦ =====
 
   // ===== ВОССТАНОВЛЕНИЕ ПО ДВЕНАДЦАТИ СЛОВАМ =====
   // Забыл пароль — раньше аккаунт пропадал навсегда. Теперь есть вторая
@@ -7679,8 +7832,69 @@
   // Отправка вложения на сервер. Байты уходят как есть, без base64 и без JSON:
   // так файл не удваивается в памяти ни здесь, ни на сервере, и предел размера
   // перестаёт зависеть от оперативной памяти.
-  async function uploadBlob(ct) {
+  // Заливка кусками с продолжением. Крупный файл одним куском на плохой связи
+  // не доходит почти никогда: оборвалось на 80% — и всё сначала. Здесь обрыв
+  // стоит только последнего куска.
+  //
+  // Порог не случайный: мелкие файлы быстрее отправить целиком, чем городить
+  // три запроса вместо одного.
+  const КУСКАМИ_ОТ = 2 * 1024 * 1024;
+  const КУСОК      = 512 * 1024;
+
+  async function uploadBlobКусками(ct, приПродвижении) {
+    const байты = ct instanceof Uint8Array ? ct : new Uint8Array(ct);
+    const всего = байты.byteLength;
+    const дело = [...crypto.getRandomValues(new Uint8Array(16))]
+      .map(б => б.toString(16).padStart(2, '0')).join('');
+
+    let смещение = 0, подряд = 0;
+    while (смещение < всего) {
+      const кусок = байты.subarray(смещение, Math.min(смещение + КУСОК, всего));
+      let r;
+      try {
+        r = await fetch(API + '/api/blob/chunk', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'x-void-nick': myName, 'x-void-pass': myRawPass,
+            'x-void-upload': дело,
+            'x-void-offset': String(смещение),
+            'x-void-total': String(всего)
+          },
+          body: кусок
+        });
+      } catch (e) {
+        // Обрыв. Спрашиваем сервер, сколько он успел принять, и продолжаем
+        // оттуда. Больше пяти подряд — значит связи нет по-настоящему.
+        if (++подряд > 5) throw new Error('Связь обрывается, файл не долетел');
+        await new Promise(r2 => setTimeout(r2, 1500 * подряд));
+        const узнать = await fetch(API + '/api/blob/resume', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nick: myName, password: myRawPass, upload: дело })
+        }).then(о => о.json()).catch(() => null);
+        if (узнать && Number.isFinite(узнать.received)) смещение = узнать.received;
+        continue;
+      }
+      const д = await r.json().catch(() => ({}));
+      if (r.status === 409) {
+        // Сервер знает лучше, сколько у него есть — верим ему
+        let сколько = 0;
+        try { сколько = JSON.parse(д.error).received; } catch (e) {}
+        смещение = сколько;
+        continue;
+      }
+      if (!r.ok) throw new Error(д.error || 'Сервер отказал, код ' + r.status);
+      подряд = 0;
+      смещение = д.received ?? (смещение + кусок.byteLength);
+      if (приПродвижении) приПродвижении(смещение, всего);
+      if (д.done) return д.id;
+    }
+    throw new Error('Файл ушёл не полностью');
+  }
+
+  async function uploadBlob(ct, приПродвижении) {
     const размер = ct.byteLength ?? ct.length ?? 0;
+    if (размер >= КУСКАМИ_ОТ) return uploadBlobКусками(ct, приПродвижении);
     let r;
     try {
       r = await fetch(API + '/api/blob/put', {
@@ -7733,7 +7947,10 @@
     if (!file || !currentChat) return;
     if (isRoom(currentChat)) { showToast(isGroup(currentChat) ? 'В группе вложения пока не работают' : 'В LAN-чате вложения пока не работают'); return; }
     if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
-    if (!(myRawPass && dmWsAuthOk && dmWs?.readyState === 1)) {
+    // Связи нет — файл больше не пропадает: он подождёт её на устройстве.
+    // Ключ собеседника при этом всё равно нужен, иначе шифровать нечем.
+    const наСвязиФайл = myRawPass && dmWsAuthOk && dmWs?.readyState === 1;
+    if (!наСвязиФайл && !myRawPass) {
       showToast('Нет связи с сервером — файл не отправлен');
       dmWakeCheck();
       return;
@@ -7772,13 +7989,45 @@
     const enc = await encryptBytes(currentChat, bytes);
     if (!enc) { showToast('Собеседник ещё ни разу не заходил — отправить нельзя'); return; }
 
+    const mid = newMid();
+    const кому = currentChat;
+
+    // --- Без связи: кладём зашифрованные байты на устройство и ждём ---
+    if (!наСвязиФайл) {
+      const занято = await занятоФайлами();
+      if (занято + enc.ct.byteLength > ФАЙЛЫ_ПРЕДЕЛ) {
+        showToast('Слишком много неотправленных вложений — дождись связи');
+        return;
+      }
+      const ключ = mid;
+      try {
+        await положитьФайл({ ключ, кому, mid, iv: enc.iv, имя: name.slice(0, 80), mime,
+                             размер: bytes.length, лишнее: extra || null,
+                             байты: enc.ct.buffer ? enc.ct.buffer.slice(0) : enc.ct,
+                             создан: Date.now() });
+      } catch (e) {
+        showToast('Не получилось отложить файл: ' + e.message);
+        return;
+      }
+      const заглушка = { enc: await encryptText('__FILE__' + JSON.stringify(
+                           { id: null, iv: enc.iv, name: name.slice(0, 80), mime, size: bytes.length })),
+                         own: true, time: now(), timestamp: Date.now(), mid,
+                         isFile: true, isVoice: !!(extra && extra.voice),
+                         pending: true, файлЖдёт: ключ };
+      chats[кому].messages.push(заглушка);
+      playSound(); renderMessages(); renderChatList(); saveState();
+      обновитьЗначокОчереди();
+      showToast('Нет связи — вложение уйдёт, когда появится');
+      dmWakeCheck();
+      return;
+    }
+
     let blobId;
     try { blobId = await uploadBlob(enc.ct); }
     catch (err) { showToast(err.message); return; }
 
     const meta = { id: blobId, iv: enc.iv, name: name.slice(0, 80), mime, size: bytes.length, ...(extra || {}) };
     const payloadText = '__FILE__' + JSON.stringify(meta);
-    const mid = newMid();
 
     const cipher = await e2eEncrypt(currentChat, withTtl(currentChat, payloadText));
     if (!cipher) { showToast('Не удалось зашифровать'); return; }
