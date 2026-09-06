@@ -212,6 +212,15 @@ db.exec(`
   if (!cols.includes('is_mod'))     db.exec('ALTER TABLE users ADD COLUMN is_mod INTEGER DEFAULT 0');
   // Срок блокировки. NULL — навсегда, как было раньше.
   if (!cols.includes('ban_until'))  db.exec('ALTER TABLE users ADD COLUMN ban_until INTEGER');
+  // Мастер-ключ в двух обёртках: под паролем и под двенадцатью словами. Сервер
+  // хранит непрозрачные байты и открыть их не может ни одной, ни другой —
+  // секретов у него нет. recovery_lookup ищет аккаунт по фразе, recovery_hash
+  // доказывает, что фразу действительно знают. Оба односторонние: из дампа
+  // базы фразу не вывести.
+  if (!cols.includes('master_pass'))     db.exec('ALTER TABLE users ADD COLUMN master_pass TEXT');
+  if (!cols.includes('master_recov'))    db.exec('ALTER TABLE users ADD COLUMN master_recov TEXT');
+  if (!cols.includes('recovery_lookup')) db.exec('ALTER TABLE users ADD COLUMN recovery_lookup TEXT');
+  if (!cols.includes('recovery_hash'))   db.exec('ALTER TABLE users ADD COLUMN recovery_hash TEXT');
   if (!cols.includes('banned_at'))  db.exec('ALTER TABLE users ADD COLUMN banned_at INTEGER');
   if (!cols.includes('ban_reason')) db.exec('ALTER TABLE users ADD COLUMN ban_reason TEXT');
   // Скриншоты-доказательства к блокировке. Лежат отдельно от списка аккаунтов
@@ -261,6 +270,12 @@ const qAllWills    = db.prepare('SELECT id, owner, to_nick, ct, days, created_at
 const qMarkWarned  = db.prepare('UPDATE wills SET warned_at = ? WHERE id = ?');
 const qClearWarned = db.prepare('UPDATE wills SET warned_at = NULL WHERE owner = ?');
 const qLastSeen    = db.prepare('SELECT last_seen FROM users WHERE nick = ?');
+// Мастер-ключ и восстановление
+const qGetMaster   = db.prepare('SELECT master_pass, master_recov FROM users WHERE nick = ?');
+const qSetMasterP  = db.prepare('UPDATE users SET master_pass = ? WHERE nick = ?');
+const qSetMasterR  = db.prepare('UPDATE users SET master_recov = ?, recovery_lookup = ?, recovery_hash = ? WHERE nick = ?');
+const qByRecovery  = db.prepare('SELECT nick, banned, master_recov, recovery_hash, public_key, enc_private_key FROM users WHERE recovery_lookup = ?');
+const qAfterRecov  = db.prepare('UPDATE users SET password_hash = ?, master_pass = ?, enc_private_key = ? WHERE nick = ?');
 // Править и удалять может только автор — отсюда условие по from_nick
 // Сверяем и отправителя, и получателя: иначе запросом «изменить письмо для Kim»
 // можно было испортить своё же неотправленное письмо Тому
@@ -1347,6 +1362,108 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ===== МАСТЕР-КЛЮЧ И ВОССТАНОВЛЕНИЕ =====
+  // Сервер тут только хранилище. В master_pass и master_recov лежат
+  // непрозрачные байты, и открыть их нечем: секреты — пароль и двенадцать
+  // слов — сюда не приходят никогда.
+  if (req.method === 'POST' && url.pathname === '/api/master/set') {
+    if (!rateLimit('master:' + clientIp(req), 40, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+
+      const мп = typeof body.masterPass === 'string' ? body.masterPass : '';
+      if (!мп || мп.length > MAX_KEY) return json(400, { error: 'Нужна обёртка мастер-ключа' });
+      qSetMasterP.run(мп, u.nick);
+
+      // Обёртка под фразой приходит вместе с опознавателем: без него аккаунт
+      // потом не найти, а по нему одному фразу не подобрать.
+      const мр = typeof body.masterRecov === 'string' ? body.masterRecov : '';
+      const токен = typeof body.recoveryToken === 'string' ? body.recoveryToken : '';
+      if (мр && токен) {
+        if (мр.length > MAX_KEY || токен.length < 32 || токен.length > 200) {
+          return json(400, { error: 'Неверные данные восстановления' });
+        }
+        const lookup = crypto.createHash('sha256').update(токен).digest('hex');
+        const чужой = qByRecovery.get(lookup);
+        if (чужой && чужой.nick !== u.nick) {
+          return json(409, { error: 'Эта фраза уже используется' });
+        }
+        qSetMasterR.run(мр, lookup, await scryptHash(токен), u.nick);
+        console.log('[мастер] Восстановление настроено для', u.nick);
+      }
+
+      // Закрытый ключ мог быть перезавёрнут при переезде
+      const пк = typeof body.encPrivateKey === 'string' ? body.encPrivateKey : '';
+      if (пк && пк.length <= MAX_KEY) {
+        const было = qGetMyKeys.get(u.nick) || {};
+        if (было.public_key) qSetKeys.run(было.public_key, пк, u.nick);
+      }
+      json(200, { ok: true });
+    }, MAX_KEY_BODY);
+    return;
+  }
+
+  // Шаг первый: по фразе находим аккаунт и отдаём завёрнутое. Открыть отданное
+  // без фразы нельзя, но и раздавать это кому попало незачем — потому и
+  // проверяем сразу, а не только на втором шаге.
+  if (req.method === 'POST' && url.pathname === '/api/recover/start') {
+    if (!rateLimit('recover:' + clientIp(req), 10, 600000)) {
+      return json(429, { error: 'Слишком много попыток, подожди' });
+    }
+    readBody(async (body) => {
+      const токен = typeof body.recoveryToken === 'string' ? body.recoveryToken : '';
+      if (токен.length < 32 || токен.length > 200) return json(400, { error: 'Неверная фраза' });
+      const lookup = crypto.createHash('sha256').update(токен).digest('hex');
+      const u = qByRecovery.get(lookup);
+      if (!u || !u.recovery_hash) return json(404, { error: 'Такая фраза не подходит' });
+      if (!await scryptVerify(токен, u.recovery_hash)) return json(404, { error: 'Такая фраза не подходит' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      console.log('[восстановление] Запрошено для', u.nick);
+      json(200, { ok: true, nick: u.nick, masterRecov: u.master_recov,
+                  publicKey: u.public_key || null, encPrivateKey: u.enc_private_key || null });
+    });
+    return;
+  }
+
+  // Шаг второй: новый пароль. Фразу спрашиваем заново — из первого шага
+  // никакого «пропуска» не выдаётся, иначе перехваченный ответ давал бы право
+  // сменить пароль.
+  if (req.method === 'POST' && url.pathname === '/api/recover/finish') {
+    if (!rateLimit('recover:' + clientIp(req), 10, 600000)) {
+      return json(429, { error: 'Слишком много попыток, подожди' });
+    }
+    readBody(async (body) => {
+      const токен = typeof body.recoveryToken === 'string' ? body.recoveryToken : '';
+      if (токен.length < 32 || токен.length > 200) return json(400, { error: 'Неверная фраза' });
+      const lookup = crypto.createHash('sha256').update(токен).digest('hex');
+      const u = qByRecovery.get(lookup);
+      if (!u || !u.recovery_hash) return json(404, { error: 'Такая фраза не подходит' });
+      if (!await scryptVerify(токен, u.recovery_hash)) return json(404, { error: 'Такая фраза не подходит' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+
+      const секрет = typeof body.newSecret === 'string' ? body.newSecret : '';
+      const мп = typeof body.masterPass === 'string' ? body.masterPass : '';
+      if (!секрет || секрет.length > 512 || !мп || мп.length > MAX_KEY) {
+        return json(400, { error: 'Неверные данные' });
+      }
+      const пк = typeof body.encPrivateKey === 'string' && body.encPrivateKey.length <= MAX_KEY
+        ? body.encPrivateKey : (u.enc_private_key || null);
+      qAfterRecov.run(await scryptHash(секрет), мп, пк, u.nick);
+      // Выкидываем все устройства: пароль сменился, старые пропуска больше не
+      // должны работать. Иначе тот, из-за кого пришлось восстанавливаться,
+      // остался бы в аккаунте.
+      try { qDropDevices.run(u.nick); } catch (e) {}
+      kickUser(u.nick, 'password-changed');
+      console.log('[восстановление] Пароль сменён по фразе:', u.nick);
+      json(200, { ok: true, nick: u.nick });
+    }, MAX_KEY_BODY);
+    return;
+  }
+
   // ===== ПИСЬМО, КОТОРОЕ УЙДЁТ, ЕСЛИ Я ЗАМОЛЧУ =====
   // Единственная причина открывать Void, когда тебе никто не пишет: пока
   // заходишь — письмо лежит, перестал — уходит. Пароли от всего, что нужно
@@ -1772,7 +1889,9 @@ const server = http.createServer((req, res) => {
       if (!u) return json(401, { error: 'Неверный ник или пароль' });
       if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
       const row = qGetMyKeys.get(u.nick) || {};
-      json(200, { ok: true, publicKey: row.public_key || null, encPrivateKey: row.enc_private_key || null });
+      const м = qGetMaster.get(u.nick) || {};
+      json(200, { ok: true, publicKey: row.public_key || null, encPrivateKey: row.enc_private_key || null,
+                  masterPass: м.master_pass || null, masterRecov: м.master_recov || null });
     });
     return;
   }

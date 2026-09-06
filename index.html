@@ -848,6 +848,9 @@
            class="reg-input" id="slogin-code" placeholder="код из приложения" style="display:none;">
     <div id="slogin-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Неверный ник или пароль</div>
     <label class="remember-row"><input type="checkbox" id="slogin-remember" checked><span>Запомнить на этом устройстве</span></label>
+    <a href="#" onclick="показатьВосстановление();return false;"
+       style="font-size:12px;color:var(--text3);text-decoration:none;align-self:center;
+              border-bottom:1px dashed var(--border);">Забыл пароль</a>
     <div style="display:flex;gap:10px;width:100%;">
       <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="loginSimple()">ВОЙТИ</button>
@@ -974,6 +977,15 @@
         <div class="settings-item-info">
           <div class="settings-item-name">Чёрный список</div>
           <div class="settings-item-sub" id="blocked-sub">Никого нет</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
+      <div class="settings-item" id="recov-item" onclick="показатьСвойЗапасной()">
+        <div class="settings-item-icon" data-ico="key"></div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Запасной ключ</div>
+          <div class="settings-item-sub" id="recov-sub">Двенадцать слов на случай забытого пароля</div>
         </div>
         <div class="settings-item-arrow">›</div>
       </div>
@@ -1882,6 +1894,9 @@
   }
 
   function finishAuth(isNew = false, mode = 'anon') {
+    // Мастер-ключ налаживаем первым делом: на нём держится и чтение истории,
+    // и разворот закрытого ключа шифрования.
+    мастерГотов = наладитьМастер().catch(e => { console.error('[мастер]', e.message); return false; });
     saveState();              // аккаунт должен появиться в списке до отрисовки меню
     updateAccountsMenu();
     updateAuthMenus();
@@ -1904,6 +1919,12 @@
     обновитьПунктСкрытия();
     // Написанное без связи могло остаться с прошлого запуска
     setTimeout(() => { обновитьЗначокОчереди(); разгрестиОчередь(); }, 1500);
+    // Двенадцать слов показываем один раз — и новичкам, и тем, кто завёл
+    // аккаунт до появления восстановления. Позже, чтобы не спорить с
+    // приветственными экранами.
+    setTimeout(() => {
+      предложитьФразу().catch(e => console.warn('[фраза]', e.message)).then(обновитьПодписьЗапасного);
+    }, 4000);
     const reg = document.getElementById('register-screen');
     reg.classList.add('hide');
     setTimeout(() => {
@@ -1956,6 +1977,10 @@
           myPassword = savedPass;
           myRawPass = await authSecret(myName, savedPass);
           cryptoKey = await deriveKey([myName, savedPass]);
+          // Обычное открытие приложения идёт мимо finishAuth — состояние тут
+          // собирается вручную. Без этой строки мастер-ключ не налаживался, и
+          // старый аккаунт не переезжал: испытание поймало ровно это.
+          мастерГотов = наладитьМастер().catch(e => { console.error('[мастер]', e.message); return false; });
           connectDmWs();
         } else {
           // Без пароля переписку не расшифровать и на сервер не войти —
@@ -1968,6 +1993,7 @@
         // Сид-фраза лежит локально, поэтому токен пересчитываем сами —
         // спрашивать пользователя нечего
         myRawPass = await seedAuthToken(currentSeed);
+        мастерГотов = наладитьМастер().catch(e => { console.error('[мастер]', e.message); return false; });
         connectDmWs();
       }
       document.getElementById('profile-nick').textContent = '@' + myName;
@@ -1986,6 +2012,14 @@
       showTabbar(true);
       showTab('chats', true);
       renderChatList();
+      // Переезд мог перешифровать историю — перерисуем, когда закончится
+      мастерГотов.then(получилось => {
+        if (получилось) { renderChatList(); if (currentChat) renderMessages(); }
+        обновитьПодписьЗапасного();
+      });
+      setTimeout(() => {
+        предложитьФразу().catch(e => console.warn('[фраза]', e.message)).then(обновитьПодписьЗапасного);
+      }, 4000);
 
       // Приложение открыли нажатием на уведомление
       const m = /#chat=([^&]+)/.exec(location.hash || '');
@@ -2057,24 +2091,34 @@
     return [...new Uint8Array(биты)].map(b => b.toString(16).padStart(2,'0')).join('');
   }
 
+  // История шифруется мастер-ключом, а не ключом из пароля: только так её
+  // можно открыть и паролем, и двенадцатью словами. Пока мастера нет (самый
+  // первый миг после входа) — падаем на старый ключ, чтобы ничего не потерять.
   async function encryptText(text) {
-    if (!cryptoKey) return { plain: text };
+    const ключ = мастерКлюч || cryptoKey;
+    if (!ключ) return { plain: text };
     const enc = new TextEncoder();
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, cryptoKey, enc.encode(text));
+    const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, ключ, enc.encode(text));
     return { iv: Array.from(iv), ct: Array.from(new Uint8Array(ct)) };
   }
 
   async function decryptText(data) {
     if (!data) return '';
     if (data.plain !== undefined) return data.plain;
-    if (!cryptoKey || !data.ct) return '[недоступно]';
-    try {
-      const plain = await crypto.subtle.decrypt(
-        { name:'AES-GCM', iv: new Uint8Array(data.iv) }, cryptoKey, new Uint8Array(data.ct)
-      );
-      return new TextDecoder().decode(plain);
-    } catch { return '[не удалось открыть]'; }
+    if (!data.ct) return '[недоступно]';
+    // Пробуем мастером, а не сойдётся — старым ключом из пароля. Второй путь
+    // нужен ровно один раз: пока аккаунт не переехал, история ещё под ним.
+    for (const ключ of [мастерКлюч, cryptoKey]) {
+      if (!ключ) continue;
+      try {
+        const plain = await crypto.subtle.decrypt(
+          { name:'AES-GCM', iv: new Uint8Array(data.iv) }, ключ, new Uint8Array(data.ct)
+        );
+        return new TextDecoder().decode(plain);
+      } catch (e) {}
+    }
+    return '[не удалось открыть]';
   }
 
   // ===== СКВОЗНОЕ ШИФРОВАНИЕ (E2E) =====
@@ -2107,19 +2151,30 @@
   // тем же ключом, что и локальная переписка (выводится из пароля/фразы)
   async function wrapPrivate(privJwk) {
     const iv = crypto.getRandomValues(new Uint8Array(12));
-    const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, cryptoKey, new TextEncoder().encode(privJwk));
+    const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, мастерКлюч || cryptoKey,
+                                           new TextEncoder().encode(privJwk));
     return JSON.stringify({ iv: b64(iv), ct: b64(ct) });
   }
   async function unwrapPrivate(blob) {
     const o = JSON.parse(blob);
-    const plain = await crypto.subtle.decrypt({ name:'AES-GCM', iv: unb64(o.iv) }, cryptoKey, unb64(o.ct));
-    return new TextDecoder().decode(plain);
+    // Как и с историей: сначала мастер, потом старый ключ. Ключ, завёрнутый до
+    // переезда, должен открываться и после — иначе человек потеряет переписку
+    // не из-за шифрования, а из-за нашей смены схемы.
+    for (const ключ of [мастерКлюч, cryptoKey]) {
+      if (!ключ) continue;
+      try {
+        const plain = await crypto.subtle.decrypt({ name:'AES-GCM', iv: unb64(o.iv) }, ключ, unb64(o.ct));
+        return new TextDecoder().decode(plain);
+      } catch (e) {}
+    }
+    throw new Error('Закрытый ключ не открывается');
   }
 
   // Достаём пару ключей: с устройства, иначе с сервера, иначе создаём новую
   async function ensureKeyPair() {
     if (myKeyPair) return true;
     if (!cryptoKey || !myName || !myRawPass) return false;
+    await мастерГотов;         // без мастера закрытый ключ не развернуть
     const lsKey = 'void_e2e:' + acctId(myName);
 
     try {
@@ -5754,6 +5809,489 @@
       const д = await письмаСпросить('/api/will/list');
       обновитьПодписьПисем(д.wills.length);
     } catch (e) {}
+  }
+
+  // ===== ВОССТАНОВЛЕНИЕ ПО ДВЕНАДЦАТИ СЛОВАМ =====
+  // Забыл пароль — раньше аккаунт пропадал навсегда. Теперь есть вторая
+  // дверь: двенадцать слов, показанные один раз.
+  //
+  // Главное: фраза возвращает не только ник, но и ПЕРЕПИСКУ. Это сделано
+  // мастер-ключом. Раньше история и закрытый ключ шифровались прямо ключом из
+  // пароля, и без пароля их было не открыть. Теперь между ними стоит случайный
+  // мастер-ключ, завёрнутый дважды:
+  //
+  //     обёртка 1: мастер под ключом из пароля
+  //     обёртка 2: мастер под ключом из двенадцати слов
+  //
+  // Обе лежат рядом — и на устройстве, и на сервере. Каждая бесполезна без
+  // своего секрета. Развернул любую — получил один и тот же мастер.
+  //
+  // Почты здесь нет намеренно. Код из письма доказывает владение ящиком, но
+  // ничего не расшифровывает; чтобы после него вернуть переписку, ключ должен
+  // лежать у сервера — то есть сервер сможет её читать. Восстановить можно
+  // ровно то, чей секрет кто-то хранит. Здесь хранит человек.
+  const СЛОВА_ВОССТ_EN = [
+    'river','stone','forest','meadow','canyon','island','valley','desert',
+    'glacier','estuary','jungle','marsh','prairie','ridge','summit','tundra',
+    'beach','cave','cliff','creek','dune','fjord','grove','hill',
+    'lagoon','oasis','pond','atoll','swamp','trail','volcano','waterfall',
+    'cloud','storm','thunder','frost','rainbow','breeze','drizzle','blizzard',
+    'sunrise','horizon','twilight','eclipse','comet','meteor','aurora','hail',
+    'mist','monsoon','cyclone','drought','shadow','lightning','moonlight','starlight',
+    'tempest','tornado','typhoon','vapor','zephyr','dawn','dusk','noon',
+    'falcon','raven','badger','otter','walrus','panther','gazelle','iguana',
+    'lemur','mantis','narwhal','ocelot','pelican','quail','rabbit','salmon',
+    'tiger','vulture','weasel','yak','zebra','beaver','cobra','dolphin',
+    'eagle','ferret','gopher','heron','jackal','koala','lizard','moose',
+    'cedar','maple','juniper','birch','aspen','spruce','bamboo','cactus',
+    'clover','daisy','fern','laurel','hazel','ivy','jasmine','lotus',
+    'moss','nutmeg','orchid','palm','poppy','reed','sage','bramble',
+    'tulip','vine','sequoia','wheat','yarrow','acorn','blossom','cypress',
+    'anchor','basket','candle','curtain','drawer','fireplace','garden','hammock',
+    'kettle','ladder','mirror','napkin','oven','pillow','quilt','ribbon',
+    'saucer','teapot','umbrella','vase','window','blanket','bucket','carpet',
+    'doorway','envelope','funnel','goblet','hanger','jar','key','lantern',
+    'hammer','chisel','wrench','pliers','shovel','drill','compass','magnet',
+    'lever','pulley','spring','gear','bolt','screw','bearing','piston',
+    'valve','circuit','battery','cable','antenna','engine','motor','pump',
+    'sensor','spanner','switch','turbine','wire','anvil','clamp','file',
+    'bread','honey','butter','cheese','pepper','cinnamon','vanilla','almond',
+    'apricot','barley','cherry','coconut','garlic','lemon','mango','mustard',
+    'noodle','olive','onion','peanut','pumpkin','radish','saffron','spinach',
+    'sugar','tomato','turnip','waffle','yogurt','biscuit','cabbage','pudding',
+    'sailboat','wagon','tractor','glider','rocket','canoe','ferry','kayak',
+    'scooter','subway','trolley','yacht','guitar','violin','drum','flute',
+    'banjo','cello','harp','piano','trumpet','whistle','granite','marble',
+    'amber','bronze','copper','silver','quartz','velvet','leather','ceramic'
+  ];
+
+  let мастерКлюч = null;      // им шифруется история и закрытый ключ
+  let мастерБайты = null;     // сырой мастер: нужен, чтобы заворачивать
+  // Гонка, которую надо было закрыть: ключи для шифрования разворачиваются
+  // сразу после входа по сокету, а мастер к этому моменту может быть ещё не
+  // готов — на телефоне вывод ключа занимает полсекунды. Тогда закрытый ключ
+  // переехавшего аккаунта не открылся бы, и человек увидел бы «не удалось
+  // открыть» на всей переписке. Поэтому все, кому мастер нужен, ждут этого.
+  let мастерГотов = Promise.resolve(false);
+
+  // Шесть русских и шесть английских. Смешение языков не для красоты: в такой
+  // фразе сразу видно, где сбился, и её труднее принять за обычную фразу.
+  function придуматьФразу() {
+    const взять = (список, сколько) => {
+      const из = new Uint32Array(сколько);
+      crypto.getRandomValues(из);
+      return [...из].map(ч => список[ч % список.length]);
+    };
+    return [...взять(СЛОВА_СВЕРКИ, 6), ...взять(СЛОВА_ВОССТ_EN, 6)];
+  }
+
+  const фразаСтрокой = слова => слова.join(' ').toLowerCase().trim();
+
+  // Ключ из фразы. Соль своя: тот же набор слов не должен давать тот же ключ,
+  // что и где-либо ещё.
+  async function ключИзФразы(слова) {
+    const материал = await crypto.subtle.importKey(
+      'raw', new TextEncoder().encode(фразаСтрокой(слова)), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: new TextEncoder().encode('VOID_recover_v1'), iterations: 200000, hash: 'SHA-256' },
+      материал, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+
+  // Опознаватель для сервера: по нему находят аккаунт, не зная ни ника, ни
+  // пароля. Фразу из него не вывести — это односторонняя свёртка.
+  async function токенФразы(слова) {
+    const buf = await crypto.subtle.digest(
+      'SHA-256', new TextEncoder().encode(фразаСтрокой(слова) + ':VOID_RECOVER_v1'));
+    return btoa(String.fromCharCode(...new Uint8Array(buf)));
+  }
+
+  async function завернуть(байты, ключ) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, ключ, байты));
+    const вместе = new Uint8Array(iv.length + ct.length);
+    вместе.set(iv); вместе.set(ct, iv.length);
+    return btoa(String.fromCharCode(...вместе));
+  }
+
+  async function развернуть(б64, ключ) {
+    const всё = Uint8Array.from(atob(б64), c => c.charCodeAt(0));
+    const открытое = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: всё.slice(0, 12) }, ключ, всё.slice(12));
+    return new Uint8Array(открытое);
+  }
+
+  async function принятьМастер(байты) {
+    мастерБайты = байты;
+    мастерКлюч = await crypto.subtle.importKey('raw', байты, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+  }
+
+  // --- Наладить мастер-ключ: развернуть готовый или завести и переехать ---
+  // Вызывается после каждого входа, когда cryptoKey уже готов.
+  async function наладитьМастер() {
+    if (!cryptoKey || !myName) return false;
+    const id = acctId(myName);
+
+    // 1. Обёртка с устройства
+    let обёртки = null;
+    try { обёртки = JSON.parse(localStorage.getItem('void_master:' + id)); } catch (e) {}
+
+    // 2. Не нашли — спрашиваем сервер: могли войти на новом устройстве
+    if (!обёртки?.p && myRawPass) {
+      try {
+        const r = await fetch(API + '/api/keys/mine', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ nick: myName, password: myRawPass })
+        });
+        const д = await r.json().catch(() => ({}));
+        if (r.ok && д.masterPass) обёртки = { p: д.masterPass, r: д.masterRecov || null };
+      } catch (e) {}
+    }
+
+    // 3. Есть обёртка — разворачиваем и живём дальше
+    if (обёртки?.p) {
+      try {
+        await принятьМастер(await развернуть(обёртки.p, cryptoKey));
+        try { localStorage.setItem('void_master:' + id, JSON.stringify(обёртки)); } catch (e) {}
+        return true;
+      } catch (e) {
+        // Обёртка есть, но не открывается этим паролем. Такое бывает после
+        // восстановления с другого устройства: пароль сменился, а копия здесь
+        // осталась старая. Молчать нельзя — иначе человек увидит пустые
+        // сообщения и решит, что переписка пропала.
+        console.error('[мастер] Обёртка не открывается этим паролем');
+        return false;
+      }
+    }
+
+    // 4. Обёртки нет вовсе — это старый аккаунт, заведённый до мастер-ключа.
+    return await переехатьНаМастер();
+  }
+
+  // Перевод старого аккаунта. Самое опасное место во всём Void: здесь
+  // перешифровывается ЧУЖАЯ переписка. Правило одно и нарушать его нельзя —
+  // старое не трогаем, пока новое не прочитано обратно и не сверено.
+  async function переехатьНаМастер() {
+    console.log('[мастер] Старый аккаунт, перевожу на мастер-ключ');
+    const id = acctId(myName);
+    const прежнийКлюч = cryptoKey;
+
+    // Заводим мастер и сразу заворачиваем его паролем
+    const новые = crypto.getRandomValues(new Uint8Array(32));
+    const новыйКлюч = await crypto.subtle.importKey('raw', новые, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+
+    // --- перешифровываем историю В КОПИЮ, оригинал не трогаем ---
+    const копия = {};
+    let всего = 0, сверено = 0;
+    try {
+      for (const [кто, чат] of Object.entries(chats)) {
+        копия[кто] = { ...чат, messages: [] };
+        for (const м of (чат.messages || [])) {
+          if (!м.enc || !м.enc.ct) { копия[кто].messages.push(м); continue; }
+          всего++;
+          // Читаем старым ключом
+          const открытое = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: new Uint8Array(м.enc.iv) }, прежнийКлюч, new Uint8Array(м.enc.ct));
+          const текст = new TextDecoder().decode(открытое);
+          // Пишем новым
+          const iv = crypto.getRandomValues(new Uint8Array(12));
+          const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, новыйКлюч, открытое);
+          const свежее = { iv: Array.from(iv), ct: Array.from(new Uint8Array(ct)) };
+          // И ТУТ ЖЕ читаем обратно новым: если не сойдётся — переезда не будет
+          const назад = new TextDecoder().decode(await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv }, новыйКлюч, new Uint8Array(свежее.ct)));
+          if (назад !== текст) throw new Error('сверка не сошлась на сообщении');
+          сверено++;
+          копия[кто].messages.push({ ...м, enc: свежее });
+        }
+      }
+    } catch (e) {
+      // Не смогли — оставляем всё как было. «Восстановление не завелось» —
+      // беда поправимая, «переписка пропала» — нет.
+      console.error('[мастер] Переезд отменён:', e.message, '| сверено', сверено, 'из', всего);
+      return false;
+    }
+
+    // --- закрытый ключ шифрования тоже перезаворачиваем ---
+    let новаяОбёрткаКлюча = null;
+    try {
+      const местные = JSON.parse(localStorage.getItem('void_e2e:' + id) || 'null');
+      if (местные?.priv) {
+        const o = JSON.parse(местные.priv);
+        const jwk = new TextDecoder().decode(await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: unb64(o.iv) }, прежнийКлюч, unb64(o.ct)));
+        const iv = crypto.getRandomValues(new Uint8Array(12));
+        const ct = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, новыйКлюч, new TextEncoder().encode(jwk));
+        новаяОбёрткаКлюча = JSON.stringify({ iv: b64(iv), ct: b64(ct) });
+        // Сверяем и её
+        const o2 = JSON.parse(новаяОбёрткаКлюча);
+        const назад = new TextDecoder().decode(await crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: unb64(o2.iv) }, новыйКлюч, unb64(o2.ct)));
+        if (назад !== jwk) throw new Error('ключ не сошёлся');
+      }
+    } catch (e) {
+      // Ключ перезавернуть не вышло — но переезд из-за этого отменять НЕЛЬЗЯ.
+      // Ценна история; закрытый ключ и так открывается обоими способами
+      // (unwrapPrivate пробует и мастер, и старый), а в крайнем случае он
+      // заново заберётся с сервера. Отменить весь переезд из-за него значило
+      // бы оставить человека без восстановления ради мелочи.
+      console.warn('[мастер] Ключ оставлен как был:', e.message);
+      новаяОбёрткаКлюча = null;
+    }
+
+    // --- всё сверено, только теперь меняем настоящее ---
+    await принятьМастер(новые);
+    chats = копия;
+    const обёрткаПароля = await завернуть(новые, прежнийКлюч);
+    try { localStorage.setItem('void_master:' + id, JSON.stringify({ p: обёрткаПароля, r: null })); } catch (e) {}
+    if (новаяОбёрткаКлюча) {
+      try {
+        const местные = JSON.parse(localStorage.getItem('void_e2e:' + id) || '{}');
+        местные.priv = новаяОбёрткаКлюча;
+        localStorage.setItem('void_e2e:' + id, JSON.stringify(местные));
+      } catch (e) {}
+    }
+    saveState();
+    сохранитьМастерНаСервере(обёрткаПароля, null, новаяОбёрткаКлюча);
+    console.log('[мастер] Переезд завершён, перешифровано сообщений:', сверено);
+    return true;
+  }
+
+  async function сохранитьМастерНаСервере(обёрткаПароля, обёрткаФразы, обёрткаКлюча) {
+    if (!myRawPass) return;
+    try {
+      await fetch(API + '/api/master/set', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nick: myName, password: myRawPass,
+          masterPass: обёрткаПароля,
+          masterRecov: обёрткаФразы || undefined,
+          recoveryToken: обёрткаФразы ? (последнийТокенФразы || undefined) : undefined,
+          encPrivateKey: обёрткаКлюча || undefined
+        })
+      });
+    } catch (e) { console.warn('[мастер] Сервер не принял обёртки:', e.message); }
+  }
+  let последнийТокенФразы = null;
+
+  // --- Завести фразу восстановления и показать её один раз ---
+  async function завестиФразу() {
+    if (!мастерБайты || !myRawPass) return null;
+    const слова = придуматьФразу();
+    const ключ = await ключИзФразы(слова);
+    const обёртка = await завернуть(мастерБайты, ключ);
+    // Сверяем сразу: обёртка, которая не открывается, хуже, чем её отсутствие —
+    // человек будет думать, что у него есть запасной ключ, а его нет.
+    const назад = await развернуть(обёртка, ключ);
+    if (назад.length !== мастерБайты.length || назад.some((б, i) => б !== мастерБайты[i])) {
+      console.error('[фраза] Обёртка не сошлась, отменяю');
+      return null;
+    }
+    последнийТокенФразы = await токенФразы(слова);
+    const id = acctId(myName);
+    let обёртки = {};
+    try { обёртки = JSON.parse(localStorage.getItem('void_master:' + id)) || {}; } catch (e) {}
+    обёртки.r = обёртка;
+    try { localStorage.setItem('void_master:' + id, JSON.stringify(обёртки)); } catch (e) {}
+    await сохранитьМастерНаСервере(обёртки.p, обёртка, null);
+    try { localStorage.setItem('void_recov_shown:' + id, '1'); } catch (e) {}
+    return слова;
+  }
+
+  function естьЛиФраза() {
+    try { return !!(JSON.parse(localStorage.getItem('void_master:' + acctId(myName)) || '{}').r); }
+    catch (e) { return false; }
+  }
+
+  // Экран с двенадцатью словами. Текст короткий намеренно: длинные объяснения
+  // про безопасность обычный человек не читает, а это надо прочитать.
+  function показатьФразу(слова, впервые) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'fraza-overlay';
+    ov.style.zIndex = '760';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">ЗАПАСНОЙ КЛЮЧ</div>
+        <div style="font-size:13.5px;color:var(--text2);line-height:1.6;">
+          Запиши эти слова. Забудешь пароль — только они вернут аккаунт
+          <b style="color:var(--text);">вместе со всей перепиской</b>.
+        </div>
+        <div id="fraza-slova" style="display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;
+             background:var(--bg3);border:1px solid var(--border);border-radius:14px;
+             padding:12px 14px;margin:12px 0;user-select:all;">
+          ${слова.map((с, i) => `<div style="font-size:13.5px;color:var(--text);">
+             <span style="color:var(--text3);font-size:11px;">${i + 1}.</span> ${esc(с)}</div>`).join('')}
+        </div>
+        <div style="font-size:11.5px;color:var(--text3);line-height:1.5;">
+          Больше мы их не покажем. Никому не отдавай: у кого слова — у того аккаунт.
+        </div>
+        <div class="modal-btns" style="flex-direction:column;gap:8px;margin-top:12px;">
+          <button class="btn-primary" style="width:100%;" onclick="копироватьФразу(this)">Скопировать</button>
+          <button class="btn-secondary" style="width:100%;" onclick="this.closest('.modal-overlay').remove()">
+            ${впервые ? 'Записал' : 'Закрыть'}
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+
+  function копироватьФразу(кнопка) {
+    const блок = document.getElementById('fraza-slova');
+    if (!блок) return;
+    const слова = [...блок.children].map(э => э.textContent.replace(/^\s*\d+\.\s*/, '').trim()).join(' ');
+    копироватьТихо(слова).then(вышло => {
+      кнопка.textContent = вышло ? 'Скопировано' : 'Не вышло — перепиши вручную';
+      setTimeout(() => { кнопка.textContent = 'Скопировать'; }, 2500);
+    });
+  }
+
+  // Показываем один раз тем, у кого фразы ещё нет: и новичкам, и тем, кто
+  // завёл аккаунт до появления восстановления.
+  let попытокПоказать = 0;
+  async function предложитьФразу() {
+    if (!myName || !myRawPass || authMode === 'anon') return;   // у анонимных своя сид-фраза
+    if (скрытое) return;                                        // скрытому аккаунту это ни к чему
+    if (естьЛиФраза()) return;
+    // Не лезем поверх чужого окна. Человек может в этот момент кого-то
+    // блокировать или писать письмо, и наш экран перехватит его нажатие —
+    // испытание поймало ровно это. Подождём и предложим позже.
+    if (document.querySelector('.modal-overlay')) {
+      if (++попытокПоказать <= 5) setTimeout(() => предложитьФразу(), 20000);
+      return;
+    }
+    await мастерГотов;
+    if (!мастерБайты) return;
+    if (document.querySelector('.modal-overlay')) return;   // пока считали, окно могли открыть
+    const слова = await завестиФразу();
+    if (слова) показатьФразу(слова, true);
+  }
+
+  // Показать свой запасной ключ из настроек. Уже заведённую фразу показать
+  // нельзя — она нигде не хранится, только её обёртка. Поэтому предлагаем
+  // завести новую взамен: старая после этого перестанет работать.
+  function показатьСвойЗапасной() {
+    closeSidebar();
+    if (authMode === 'anon') { showToast('У анонимного аккаунта запасной ключ — сид-фраза'); return; }
+    if (!мастерБайты) { showToast('Ключ ещё не готов, попробуй через секунду'); return; }
+    if (!естьЛиФраза()) {
+      предложитьФразу();
+      return;
+    }
+    спроситьДа('Показать новые двенадцать слов?',
+      'Сами слова нигде не хранятся — их нельзя достать и показать заново. ' +
+      'Можно завести новые: после этого старые перестанут работать.',
+      async () => {
+        const слова = await завестиФразу();
+        if (слова) показатьФразу(слова, false);
+        else showToast('Не получилось');
+      }, 'Завести новые');
+  }
+
+  function обновитьПодписьЗапасного() {
+    const э = document.getElementById('recov-sub');
+    if (!э) return;
+    э.textContent = естьЛиФраза() ? 'Двенадцать слов записаны' : 'Не заведён — нажми, чтобы получить';
+  }
+
+  // --- Восстановление: экран ввода двенадцати слов ---
+  function показатьВосстановление() {
+    hideAllForms();
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'recov-overlay';
+    ov.style.zIndex = '760';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">ЗАБЫЛ ПАРОЛЬ</div>
+        <div style="font-size:13.5px;color:var(--text2);line-height:1.6;">
+          Введи двенадцать слов, которые Void показал при регистрации.
+          Порядок важен, регистр — нет.
+        </div>
+        <textarea class="modal-input" id="recov-words" rows="3" autocomplete="off"
+          placeholder="река гора ... river stone ..."
+          style="width:100%;margin-top:10px;resize:vertical;line-height:1.5;"></textarea>
+        <div class="reg-label" style="margin-top:8px;">Новый пароль</div>
+        <input type="password" class="modal-input" id="recov-pass" style="width:100%;"
+               placeholder="минимум 6 символов">
+        <div id="recov-err" style="color:var(--accent2);font-size:12px;margin-top:8px;display:none;"></div>
+        <div class="modal-btns" style="flex-direction:column;gap:8px;margin-top:12px;">
+          <button class="btn-primary" style="width:100%;" onclick="сделатьВосстановление(this)">Вернуть аккаунт</button>
+          <button class="btn-secondary" style="width:100%;"
+                  onclick="this.closest('.modal-overlay').remove();showStartScreen();">Отмена</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    setTimeout(() => document.getElementById('recov-words')?.focus(), 150);
+  }
+
+  async function сделатьВосстановление(кнопка) {
+    const ошибка = document.getElementById('recov-err');
+    const сказать = т => { if (ошибка) { ошибка.textContent = т; ошибка.style.display = 'block'; } кнопка.disabled = false; };
+    ошибка.style.display = 'none';
+    кнопка.disabled = true;
+
+    const слова = (document.getElementById('recov-words')?.value || '')
+      .toLowerCase().replace(/[^\p{L}\s]/gu, ' ').split(/\s+/).filter(Boolean);
+    const пароль = document.getElementById('recov-pass')?.value || '';
+    if (слова.length !== 12) return сказать('Нужно ровно двенадцать слов, а получилось ' + слова.length);
+    if (пароль.length < 6) return сказать('Пароль — минимум шесть знаков');
+
+    try {
+      const токен = await токенФразы(слова);
+      const r = await fetch(API + '/api/recover/start', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recoveryToken: токен })
+      });
+      const д = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(д.error || 'Не получилось');
+
+      // Разворачиваем мастер фразой — вот ради этого всё и затевалось
+      const ключФразы = await ключИзФразы(слова);
+      let байты;
+      try { байты = await развернуть(д.masterRecov, ключФразы); }
+      catch (e) { throw new Error('Слова подошли, но ключ не открылся. Напиши владельцу.'); }
+
+      // Заворачиваем мастер новым паролем и меняем пароль на сервере
+      myName = д.nick;
+      const новыйКлюч = await deriveKey([д.nick, пароль]);
+      const обёрткаПароля = await завернуть(байты, новыйКлюч);
+      const новыйСекрет = await authSecret(д.nick, пароль);
+
+      const r2 = await fetch(API + '/api/recover/finish', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recoveryToken: токен, newSecret: новыйСекрет,
+                               masterPass: обёрткаПароля, encPrivateKey: д.encPrivateKey || undefined })
+      });
+      const д2 = await r2.json().catch(() => ({}));
+      if (!r2.ok) throw new Error(д2.error || 'Не получилось сменить пароль');
+
+      // Входим уже с новым паролем
+      cryptoKey = новыйКлюч;
+      await принятьМастер(байты);
+      мастерГотов = Promise.resolve(true);
+      authMode = 'simple';
+      myPassword = пароль;
+      myRawPass = новыйСекрет;
+      passwordHash = await hashPassword(д.nick, пароль);
+      const id = acctId(д.nick);
+      try {
+        localStorage.setItem('void_master:' + id, JSON.stringify({ p: обёрткаПароля, r: д.masterRecov }));
+        if (д.publicKey && д.encPrivateKey) {
+          localStorage.setItem('void_e2e:' + id, JSON.stringify({ pub: д.publicKey, priv: д.encPrivateKey }));
+        }
+      } catch (e) {}
+      storeSessionPass(пароль, true, д.nick);
+      // Переписка этого аккаунта, если она осталась на устройстве
+      try { chats = JSON.parse(localStorage.getItem('void_chats:' + id)) || {}; } catch (e) { chats = {}; }
+      currentSeed = []; currentChat = null;
+      document.getElementById('recov-overlay')?.remove();
+      restoreProfileFields(д.nick);
+      applyPrefs();
+      finishAuth(false, 'simple');
+      setTimeout(() => showToast('Аккаунт возвращён'), 800);
+    } catch (e) {
+      сказать(e.message === 'Failed to fetch' ? 'Нет связи с сервером' : e.message);
+    }
   }
 
   // ===== ПЕРЕПИСКА БЕЗ СЛЕДА =====
