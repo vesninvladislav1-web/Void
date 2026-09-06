@@ -793,6 +793,7 @@
     <!-- Единственное, что работает вообще без аккаунта. Поэтому и стоит
          отдельно, за чертой: это не четвёртый способ зарегистрироваться. -->
     <div class="start-cherta"><span>или</span></div>
+    <button class="start-btn secondary-btn" onclick="показатьВходСТелефона()">Войти с телефона</button>
     <button class="start-btn secondary-btn" onclick="начатьБезСледа()">Написать без следа</button>
     <div class="start-poyasnenie">Без ника и пароля. Закрыл вкладку — не осталось ничего.</div>
   </div>
@@ -1974,7 +1975,20 @@
     if (loadState()) {
       clearInterval(neonInterval);
       requestNotifications();
-      if (authMode === 'simple') {
+      // Устройство, на которое личность перенесли с телефона: пароля здесь
+      // нет и быть не должно, поэтому обычный путь через readSessionPass не
+      // подходит — пропуск и мастер-ключ лежат отдельно.
+      const перенос = (() => {
+        try { return JSON.parse(localStorage.getItem('void_link:' + acctId(myName))); }
+        catch (e) { return null; }
+      })();
+      if (перенос?.пропуск && перенос?.мастер) {
+        myRawPass = перенос.пропуск;
+        authMode = перенос.режим || 'simple';
+        await принятьМастер(Uint8Array.from(atob(перенос.мастер), c => c.charCodeAt(0)));
+        мастерГотов = Promise.resolve(true);
+        connectDmWs();
+      } else if (authMode === 'simple') {
         const savedPass = readSessionPass();
         if (savedPass) {
           myPassword = savedPass;
@@ -2176,7 +2190,10 @@
   // Достаём пару ключей: с устройства, иначе с сервера, иначе создаём новую
   async function ensureKeyPair() {
     if (myKeyPair) return true;
-    if (!cryptoKey || !myName || !myRawPass) return false;
+    // На перенесённом устройстве ключа из пароля нет вовсе — там мастер.
+    // Раньше здесь стояло «нет cryptoKey — уходим», и компьютер, впущенный с
+    // телефона, не мог ни писать, ни читать: испытание поймало ровно это.
+    if ((!cryptoKey && !мастерКлюч) || !myName || !myRawPass) return false;
     await мастерГотов;         // без мастера закрытый ключ не развернуть
     const lsKey = 'void_e2e:' + acctId(myName);
 
@@ -4210,7 +4227,7 @@
   // opts.silent — служебное сообщение: у себя его не сохраняем, оно не письмо
   async function sendTo(peer, text, opts = {}) {
     if (isRoom(peer)) return false;
-    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return false; }
+    if (!cryptoKey && !мастерКлюч) { showToast('Ошибка доступа — перезайди в аккаунт'); return false; }
     const наСвязи = myRawPass && dmWsAuthOk && dmWs?.readyState === 1;
     // Служебные сообщения в очередь не кладём: они про «сейчас» — прочитано,
     // печатает, ключ сменился. Через час они уже неправда.
@@ -4284,7 +4301,7 @@
       return;
     }
     // Без ключа сообщение легло бы в историю открытым текстом — не молчим об этом
-    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
+    if (!cryptoKey && !мастерКлюч) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
     // Шифруем в любом случае, есть связь или нет: без шифротекста письмо
     // нечего будет положить в очередь.
     let payload = null, ждёт = false;
@@ -4437,7 +4454,7 @@
     const chat = chats[currentChat];
     const msg = chat?.messages[editingIdx];
     if (!msg) { cancelEdit(); return; }
-    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
+    if (!cryptoKey && !мастерКлюч) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
 
     // Сначала отправляем: если не выйдет, локально ничего не портим
     if (msg.mid && !isRoom(currentChat)) {
@@ -5963,6 +5980,249 @@
   }
 
   // ===== ВЛОЖЕНИЯ, КОТОРЫЕ ЖДУТ СВЯЗИ: КОНЕЦ =====
+
+  // Экран на компьютере: «открой Void на телефоне». Ника не спрашиваем сразу —
+  // в домашней сети он не нужен вовсе, и это главный случай.
+  async function показатьВходСТелефона() {
+    hideAllForms();
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'stel-overlay';
+    ov.style.zIndex = '780';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:340px;">
+        <div class="modal-title">ВОЙТИ С ТЕЛЕФОНА</div>
+        <div id="stel-body" style="font-size:13.5px;color:var(--text2);line-height:1.6;">Готовлю…</div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) { отменитьВход(); ov.remove(); } });
+
+    const итог = await начатьВходСТелефона(null);
+    const тело = document.getElementById('stel-body');
+    if (!тело) return;
+    if (итог.ошибка) { тело.textContent = итог.ошибка; return; }
+
+    тело.innerHTML = `
+      Открой Void на телефоне — он сам спросит, впустить ли этот компьютер.
+      <div style="font-size:12px;color:var(--text3);margin-top:10px;line-height:1.55;">
+        Если телефон в другой сети, он покажет три числа. Выбери вот это:
+      </div>
+      <div style="font-size:34px;font-family:'Space Mono',monospace;text-align:center;
+                  color:var(--accent);margin:10px 0 4px;letter-spacing:4px;">${итог.цифра}</div>
+      <div style="font-size:12px;color:var(--text3);text-align:center;">
+        Код, если понадобится: <b style="color:var(--text2);">${esc(итог.код)}</b>
+      </div>
+      <div id="stel-err" style="color:var(--accent2);font-size:12px;margin-top:10px;display:none;"></div>
+      <div class="modal-btns" style="margin-top:12px;">
+        <button class="btn-secondary" style="width:100%;"
+                onclick="отменитьВход();this.closest('.modal-overlay').remove();">Отмена</button>
+      </div>`;
+
+    ждатьТелефон(
+      () => { document.getElementById('stel-overlay')?.remove();
+              setTimeout(() => showToast('Вошли с телефона'), 700); },
+      почему => { const э = document.getElementById('stel-err');
+                  if (э) { э.textContent = почему; э.style.display = 'block'; } }
+    );
+  }
+
+  // Телефон посматривает, не просится ли кто. Раз в пять секунд: заявка живёт
+  // две минуты, чаще незачем, а батарею жалко.
+  setInterval(() => { посмотретьЗаявки().catch(() => {}); }, 5000);
+
+  // ===== ВХОД НА КОМПЬЮТЕРЕ =====
+  // Компьютеру нужен не «логин», а личность: без закрытого ключа он не
+  // прочитает ни одного сообщения. Значит с телефона переезжает ключевой
+  // материал — мимо сервера, в пакете, который он не может открыть.
+  //
+  // Что именно переезжает: пропуск (им говорят с сервером) и мастер-ключ (им
+  // открывается история и закрытый ключ). ПАРОЛЬ не переезжает. Это стоило
+  // лишней работы, но иначе компьютер получил бы единственный секрет, из
+  // которого выводится всё остальное, включая скрытый аккаунт.
+  //
+  // Переписка на компьютер тоже не переезжает: она лежит на телефоне, а
+  // сервер хранит только то, что не успело дойти. Компьютер начнёт с чистого
+  // экрана и наполнится сам.
+  let входДело = null;      // { код, пара, опрос }
+
+  async function начатьВходСТелефона(ник) {
+    отменитьВход();
+    const пара = await crypto.subtle.generateKey({ name:'ECDH', namedCurve:'P-256' }, true, ['deriveBits']);
+    const открытый = await expKey(пара.publicKey);
+    let д;
+    try {
+      const r = await fetch(API + '/api/link/new', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ publicKey: открытый, nick: ник || undefined })
+      });
+      д = await r.json();
+      if (!r.ok) throw new Error(д.error || 'Не получилось');
+    } catch (e) {
+      return { ошибка: e.message === 'Failed to fetch' ? 'Нет связи с сервером' : e.message };
+    }
+    входДело = { код: д.code, пара, цифра: д.digit };
+    return { код: д.code, цифра: д.digit };
+  }
+
+  function отменитьВход() {
+    if (входДело?.опрос) clearInterval(входДело.опрос);
+    входДело = null;
+  }
+
+  // Ждём, пока телефон впустит. Опрашиваем нечасто: две минуты жизни заявки
+  // и секунда на опрос — это сто двадцать запросов, больше незачем.
+  function ждатьТелефон(готово, беда) {
+    if (!входДело) return;
+    входДело.опрос = setInterval(async () => {
+      if (!входДело) return;
+      try {
+        const r = await fetch(API + '/api/link/poll', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: входДело.код })
+        });
+        const д = await r.json().catch(() => ({}));
+        if (!r.ok) { отменитьВход(); return беда(д.error || 'Заявка устарела'); }
+        if (д.waiting) return;
+        const дело = входДело;
+        отменитьВход();
+        await принятьПакетСТелефона(д, дело);
+        готово();
+      } catch (e) { /* сеть моргнула — попробуем на следующем круге */ }
+    }, 1000);
+  }
+
+  // Расшифровать то, что прислал телефон, и стать этим человеком
+  async function принятьПакетСТелефона(д, дело) {
+    const общий = await общийКлючСДругим(дело.пара.privateKey, д.publicKey);
+    const открытое = await развернуть(д.payload, общий);
+    const данные = JSON.parse(new TextDecoder().decode(открытое));
+
+    myName = данные.ник;
+    myRawPass = данные.пропуск;
+    authMode = данные.режим || 'simple';
+    myAvatar = данные.аватар || null;
+    myStatus = данные.статус || '';
+    myPassword = null;                 // пароль сюда не переезжает, и это нарочно
+    cryptoKey = null;
+    await принятьМастер(Uint8Array.from(atob(данные.мастер), c => c.charCodeAt(0)));
+    мастерГотов = Promise.resolve(true);
+    chats = {}; currentSeed = []; currentChat = null;
+
+    // Переехавшее устройство нельзя восстановить обычным способом: пароля нет,
+    // а значит нет и ключа, которым развернулась бы обёртка. Храним отдельно.
+    const id = acctId(myName);
+    try {
+      localStorage.setItem('void_link:' + id, JSON.stringify({
+        пропуск: myRawPass, мастер: данные.мастер, режим: authMode
+      }));
+      localStorage.setItem('void_acct:' + id, JSON.stringify({
+        name: myName, avatar: myAvatar, seed: [], authMode, passwordHash: '', myStatus, isAdmin: false
+      }));
+      localStorage.setItem('void_active', id);
+      upsertAccount({ id, nick: myName, authMode, avatar: myAvatar, isAdmin: false });
+    } catch (e) {}
+    applyPrefs();
+    finishAuth(false, authMode);
+  }
+
+  async function общийКлючСДругим(свойЗакрытый, чужойОткрытый) {
+    const чужой = await impPub(чужойОткрытый);
+    const биты = await crypto.subtle.deriveBits({ name:'ECDH', public: чужой }, свойЗакрытый, 256);
+    const hk = await crypto.subtle.importKey('raw', биты, 'HKDF', false, ['deriveKey']);
+    return crypto.subtle.deriveKey(
+      { name:'HKDF', hash:'SHA-256', salt: new TextEncoder().encode('VOID_LINK_v1'),
+        info: new TextEncoder().encode('perenos') },
+      hk, { name:'AES-GCM', length:256 }, false, ['encrypt','decrypt']);
+  }
+
+  // ===== ТЕЛЕФОН: КТО-ТО ПРОСИТСЯ ВНУТРЬ =====
+  let входСпрошен = 0;
+  async function посмотретьЗаявки() {
+    if (!myName || !myRawPass || скрытое) return;
+    if (document.querySelector('.modal-overlay')) return;   // человек занят
+    let д;
+    try {
+      const r = await fetch(API + '/api/link/pending', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass })
+      });
+      д = await r.json().catch(() => ({}));
+      if (!r.ok) return;
+    } catch (e) { return; }
+    const заявка = (д.requests || [])[0];
+    if (!заявка || заявка.code === входСпрошен) return;
+    входСпрошен = заявка.code;
+    показатьЗаявку(заявка);
+  }
+
+  function показатьЗаявку(з) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'link-overlay';
+    ov.style.zIndex = '780';
+    const выбор = з.sameNetwork ? '' : `
+      <div style="font-size:12.5px;color:var(--text2);line-height:1.6;margin-top:10px;">
+        Выбери число, которое видно на экране компьютера:
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        ${(з.choices || []).map(ц => `<button class="btn-secondary" style="flex:1;font-size:17px;padding:12px;"
+            onclick="впуститьКомпьютер('${esc(з.code)}', ${ц})">${ц}</button>`).join('')}
+      </div>`;
+    ov.innerHTML = `
+      <div class="modal" style="max-width:330px;">
+        <div class="modal-title">ВПУСТИТЬ КОМПЬЮТЕР?</div>
+        <div style="font-size:14px;color:var(--text);line-height:1.5;margin-top:4px;">
+          ${esc(з.browser || 'Компьютер')}${з.sameNetwork ? ' · в твоей сети' : ''}
+        </div>
+        <div style="font-size:12px;color:var(--sos-text, #ef4444);line-height:1.55;margin-top:10px;">
+          Впускай, только если этот компьютер стоит перед тобой.
+          Никто не имеет права просить тебя это сделать.
+        </div>
+        ${выбор}
+        <div class="modal-btns" style="flex-direction:column;gap:8px;margin-top:12px;">
+          ${з.sameNetwork
+            ? `<button class="btn-primary" style="width:100%;" onclick="впуститьКомпьютер('${esc(з.code)}', null)">Впустить</button>`
+            : ''}
+          <button class="btn-secondary" style="width:100%;"
+                  onclick="this.closest('.modal-overlay').remove()">Это не я</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+
+  async function впуститьКомпьютер(код, цифра) {
+    document.getElementById('link-overlay')?.remove();
+    if (!мастерБайты) { showToast('Ключ ещё не готов, попробуй через секунду'); return; }
+    try {
+      const пара = await crypto.subtle.generateKey({ name:'ECDH', namedCurve:'P-256' }, true, ['deriveBits']);
+      const мой = await expKey(пара.publicKey);
+      // Открытый ключ компьютера лежит в заявке на сервере; чтобы его не
+      // возить лишний раз, забираем прямо сейчас вместе с проверкой цифры.
+      const r0 = await fetch(API + '/api/link/pending', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass })
+      });
+      const д0 = await r0.json().catch(() => ({}));
+      const з = (д0.requests || []).find(з => з.code === код);
+      if (!з) { showToast('Заявка устарела'); return; }
+      const общий = await общийКлючСДругим(пара.privateKey, з.publicKey);
+      const пакет = await завернуть(new TextEncoder().encode(JSON.stringify({
+        ник: myName, пропуск: myRawPass, режим: authMode,
+        аватар: myAvatar, статус: myStatus,
+        мастер: btoa(String.fromCharCode(...мастерБайты))
+      })), общий);
+      const r = await fetch(API + '/api/link/approve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nick: myName, password: myRawPass, code: код,
+                               payload: пакет, publicKey: мой, digit: цифра })
+      });
+      const д = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(д.error || 'Не получилось');
+      showToast('Компьютер впущен');
+    } catch (e) {
+      showToast(e.message === 'Failed to fetch' ? 'Нет связи с сервером' : e.message);
+    }
+  }
 
   // ===== ВОССТАНОВЛЕНИЕ ПО ДВЕНАДЦАТИ СЛОВАМ =====
   // Забыл пароль — раньше аккаунт пропадал навсегда. Теперь есть вторая
@@ -7946,7 +8206,7 @@
     e.target.value = '';
     if (!file || !currentChat) return;
     if (isRoom(currentChat)) { showToast(isGroup(currentChat) ? 'В группе вложения пока не работают' : 'В LAN-чате вложения пока не работают'); return; }
-    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
+    if (!cryptoKey && !мастерКлюч) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
     // Связи нет — файл больше не пропадает: он подождёт её на устройстве.
     // Ключ собеседника при этом всё равно нужен, иначе шифровать нечем.
     const наСвязиФайл = myRawPass && dmWsAuthOk && dmWs?.readyState === 1;
@@ -8236,7 +8496,7 @@
   async function sendToGroup(key, body, opts = {}) {
     const g = groupOf(key);
     if (!g) return false;
-    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return false; }
+    if (!cryptoKey && !мастерКлюч) { showToast('Ошибка доступа — перезайди в аккаунт'); return false; }
     if (!(myRawPass && dmWsAuthOk && dmWs?.readyState === 1)) {
       showToast('Нет связи с сервером — сообщение не отправлено');
       dmWakeCheck();
@@ -9434,7 +9694,7 @@
   async function sendSticker(val, type) {
     document.getElementById('sticker-panel').style.display = 'none';
     if (!currentChat || isLanChat(currentChat)) return;
-    if (!cryptoKey) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
+    if (!cryptoKey && !мастерКлюч) { showToast('Ошибка доступа — перезайди в аккаунт'); return; }
     const stickerData = (type === 'emoji' || type === 'void' || type === 'glitch') ? val : customStickers[parseInt(val)];
     if (!stickerData) { showToast('Стикер не найден'); return; }
     const stickerText = '__STICKER__' + type + ':' + stickerData;

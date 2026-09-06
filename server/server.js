@@ -75,6 +75,10 @@ const TTL_SLED_MAX     = 24 * 3600000;  // и сутки в любом случ�
 // телефоне это делает невозможной отправку всего, что крупнее пары сотен
 // мегабайт. Недокачанный кусок живёт сутки: решение владельца.
 const TTL_НЕДОКАЧ = 24 * 3600000;
+// Вход на компьютере переносом с телефона. Всё живёт в памяти и недолго:
+// две минуты — достаточно, чтобы дойти до телефона и нажать «впустить».
+const TTL_ВХОДА    = 2 * 60000;
+const МАКС_ВХОДОВ  = 500;
 const ДИСК_ОТКАЗ_ГБ   = Number(process.env.VOID_DISK_MIN_GB)  || 2;
 const ДИСК_ТРЕВОГА_ГБ = Number(process.env.VOID_DISK_WARN_GB) || 5;
 
@@ -82,6 +86,8 @@ const ДИСК_ТРЕВОГА_ГБ = Number(process.env.VOID_DISK_WARN_GB) || 5;
 const rooms  = {};   // LAN сигналинг: roomId -> { peerId: ws }
 // код -> { создан, тишинаС, участники: Map(пир -> ws|null), очередь: [], байт }
 const следы  = new Map();
+// Заявки на вход с компьютера: код -> { создан, ip, ключ, ник, цифра, ответ }
+const входы  = new Map();
 // Раньше здесь был один сокет на аккаунт, и вход со второго устройства
 // выбивал первое. Теперь у ника набор подключений — по одному на устройство.
 const online = {};   // nick -> Set(ws)
@@ -1378,6 +1384,118 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // ===== ВХОД НА КОМПЬЮТЕРЕ =====
+  // Компьютеру нужен не «логин», а личность: без закрытого ключа он не
+  // прочитает ни одного сообщения. Значит ключи надо перенести с телефона
+  // мимо сервера. Сервер тут — почтовый ящик для одного непрозрачного пакета.
+  //
+  // Три пути, и приложение пробует их само:
+  //   1) телефон и компьютер в одной сети — телефон показывает карточку сам,
+  //      набирать не надо ничего;
+  //   2) сети разные — компьютер спрашивает ник (он не секрет), телефон
+  //      получает уведомление и подтверждает выбором цифры;
+  //   3) не вышло — на компьютере код, его вводят руками.
+  if (req.method === 'POST' && url.pathname === '/api/link/new') {
+    if (!rateLimit('linknew:' + clientIp(req), 30, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const ключ = typeof body.publicKey === 'string' ? body.publicKey : '';
+      if (!ключ || ключ.length > MAX_KEY) return json(400, { error: 'Нужен ключ' });
+      if (входы.size >= МАКС_ВХОДОВ) return json(503, { error: 'Сервер занят, попробуй позже' });
+      const ник = typeof body.nick === 'string' ? body.nick.trim().slice(0, 16) : '';
+
+      const код = [...crypto.randomBytes(5)]
+        .map(б => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[б % 32]).join('');
+      // Цифра для подтверждения при разных сетях: человек выберет её из трёх,
+      // и это уже не рефлекс, а сверка со вторым экраном.
+      const цифра = crypto.randomBytes(1)[0] % 90 + 10;
+      входы.set(код, { создан: Date.now(), ip: clientIp(req), ключ, ник,
+                       цифра, браузер: описатьБраузер(req), ответ: null });
+      console.log('[вход] Заявка с компьютера', ник ? 'для ' + ник : '(без ника)');
+      json(200, { ok: true, code: код, digit: цифра });
+    }, MAX_KEY_BODY);
+    return;
+  }
+
+  // Телефон спрашивает: не просит ли кто-нибудь войти? Отдаём только заявки
+  // с того же адреса в интернете либо явно на этот ник.
+  if (req.method === 'POST' && url.pathname === '/api/link/pending') {
+    if (!rateLimit('linkpend:' + clientIp(req), 240, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      const мой = clientIp(req);
+      const список = [];
+      for (const [код, з] of входы) {
+        if (з.ответ) continue;
+        const своя = з.ip === мой;
+        const поНику = з.ник && з.ник.toLowerCase() === u.nick.toLowerCase();
+        if (!своя && !поНику) continue;
+        // Цифры для выбора: настоящая и две выдуманные. При одной сети выбор
+        // не нужен — там и так видно, что компьютер стоит перед тобой.
+        const выбор = своя ? null : перемешать([з.цифра,
+          (з.цифра + 7) % 90 + 10, (з.цифра + 23) % 90 + 10]);
+        список.push({ code: код, browser: з.браузер, sameNetwork: своя,
+                      publicKey: з.ключ, choices: выбор });
+      }
+      json(200, { ok: true, requests: список });
+    });
+    return;
+  }
+
+  // Телефон подтвердил и прислал непрозрачный пакет для компьютера
+  if (req.method === 'POST' && url.pathname === '/api/link/approve') {
+    if (!rateLimit('linkok:' + clientIp(req), 30, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const u = await verifyUser(body.nick, body.password);
+      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (u.banned) return json(403, { error: 'Аккаунт заблокирован' });
+      const код = typeof body.code === 'string' ? body.code : '';
+      const з = входы.get(код);
+      if (!з) return json(404, { error: 'Заявка не найдена или устарела' });
+      const пакет = typeof body.payload === 'string' ? body.payload : '';
+      const ключ = typeof body.publicKey === 'string' ? body.publicKey : '';
+      if (!пакет || пакет.length > MAX_KEY_BODY || !ключ) return json(400, { error: 'Неверные данные' });
+
+      // Цифру сверяет сервер, а не телефон. Проверять на странице значение,
+      // которое ей же и выдали, — самообман: подделать такую проверку можно
+      // не приходя в сознание.
+      if (з.ip !== clientIp(req)) {
+        if (Number(body.digit) !== з.цифра) {
+          console.warn('[вход] Неверное число, отказано:', u.nick);
+          return json(403, { error: 'Число не то — вход не разрешён' });
+        }
+      }
+      з.ответ = { пакет, ключ, ник: u.nick };
+      console.log('[вход] Компьютер впущен в аккаунт', u.nick);
+      json(200, { ok: true });
+    }, MAX_KEY_BODY);
+    return;
+  }
+
+  // Компьютер ждёт. Пакет отдаём ровно один раз и тут же забываем заявку.
+  if (req.method === 'POST' && url.pathname === '/api/link/poll') {
+    if (!rateLimit('linkpoll:' + clientIp(req), 600, 600000)) {
+      return json(429, { error: 'Слишком часто, подожди' });
+    }
+    readBody(async (body) => {
+      const код = typeof body.code === 'string' ? body.code : '';
+      const з = входы.get(код);
+      if (!з) return json(404, { error: 'Заявка устарела' });
+      if (!з.ответ) return json(200, { ok: true, waiting: true });
+      входы.delete(код);
+      json(200, { ok: true, waiting: false, payload: з.ответ.пакет,
+                  publicKey: з.ответ.ключ, nick: з.ответ.ник });
+    });
+    return;
+  }
+
   // ===== ДОКАЧКА =====
   // Загрузка делится на куски. Клиент спрашивает «сколько ты уже принял?» и
   // досылает остаток с этого места. Кусок лежит во времянке под своим
@@ -2331,6 +2449,7 @@ const server = http.createServer((req, res) => {
       online: Object.keys(online).length,
       rooms: Object.keys(rooms).length,
       sled: следы.size,
+      links: входы.size,
       wills: (() => { try { return db.prepare('SELECT COUNT(*) AS n FROM wills').get().n; } catch (e) { return 0; } })(),
       diskGuard: { freeGb: +(свободноНаДиске() / ГБ).toFixed(1), refuseGb: ДИСК_ОТКАЗ_ГБ,
                    blocking: местаМало() },
@@ -2932,6 +3051,44 @@ const дозорДиска = setInterval(() => {
 }, 30 * 60000);
 дозорДиска.unref();
 
+// ===== ЗАЯВКИ НА ВХОД С КОМПЬЮТЕРА =====
+// Две минуты и всё. Заявка — это приглашение впустить кого-то в свой аккаунт,
+// и лежать такое долго не должно.
+function погаситьВходы() {
+  const now = Date.now();
+  let снято = 0;
+  for (const [код, з] of входы) if (now - з.создан > TTL_ВХОДА) { входы.delete(код); снято++; }
+  if (снято) console.log('[вход] Просрочено заявок:', снято);
+}
+const дозорВходов = setInterval(погаситьВходы, 30000);
+дозорВходов.unref();
+
+// Название браузера из его же представления. Нужно, чтобы человек на телефоне
+// видел, что именно просится внутрь, а не просто «вход».
+function описатьБраузер(req) {
+  const ua = String(req.headers['user-agent'] || '');
+  const где = /Windows/.test(ua) ? 'Windows'
+            : /Mac OS X|Macintosh/.test(ua) ? 'Mac'
+            : /Android/.test(ua) ? 'Android'
+            : /iPhone|iPad/.test(ua) ? 'iPhone'
+            : /Linux/.test(ua) ? 'Linux' : 'Устройство';
+  const чем = /Edg\//.test(ua) ? 'Edge'
+            : /YaBrowser/.test(ua) ? 'Яндекс'
+            : /Firefox/.test(ua) ? 'Firefox'
+            : /Chrome/.test(ua) ? 'Chrome'
+            : /Safari/.test(ua) ? 'Safari' : 'браузер';
+  return где + ' · ' + чем;
+}
+
+function перемешать(массив) {
+  const к = [...массив];
+  for (let i = к.length - 1; i > 0; i--) {
+    const j = crypto.randomBytes(1)[0] % (i + 1);
+    [к[i], к[j]] = [к[j], к[i]];
+  }
+  return к;
+}
+
 // ===== ГАШЕНИЕ КОМНАТ «БЕЗ СЛЕДА» =====
 // Комната живёт, пока в ней кто-то есть, плюс час на «сейчас вернусь». И не
 // дольше суток в любом случае: иначе «без следа» превратилось бы в хранилище
@@ -3016,6 +3173,7 @@ function shutdown(signal) {
   clearInterval(разносПисем);
   clearInterval(снятиеБанов);
   clearInterval(дозорДиска);
+  clearInterval(дозорВходов);
   wss.clients.forEach(c => { try { c.close(1001, 'server restart'); } catch (e) {} });
   const closeDb = () => { try { if (db.open) db.close(); } catch (e) {} };
   server.close(() => { closeDb(); process.exit(0); });
