@@ -6803,13 +6803,22 @@
     // Не лезем поверх чужого окна. Человек может в этот момент кого-то
     // блокировать или писать письмо, и наш экран перехватит его нажатие —
     // испытание поймало ровно это. Подождём и предложим позже.
-    if (document.querySelector('.modal-overlay')) {
+    //
+    // Приветственные экраны считаются тоже, и это второй пойманный случай:
+    // окно с фразой всплывало поверх онбординга и перехватывало «Далее», так
+    // что новый человек просто не мог пройти дальше. У онбординга свой класс,
+    // под .modal-overlay он не подпадал.
+    const занято = document.querySelector('.modal-overlay') ||
+                   document.getElementById('onboarding')?.style.display === 'flex' ||
+                   document.getElementById('register-screen')?.style.display !== 'none';
+    if (занято) {
       if (++попытокПоказать <= 5) setTimeout(() => предложитьФразу(), 20000);
       return;
     }
     await мастерГотов;
     if (!мастерБайты) return;
     if (document.querySelector('.modal-overlay')) return;   // пока считали, окно могли открыть
+    if (document.getElementById('onboarding')?.style.display === 'flex') return;
     const слова = await завестиФразу();
     if (слова) показатьФразу(слова, true);
   }
