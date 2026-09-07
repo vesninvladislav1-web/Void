@@ -1289,6 +1289,7 @@
       <div class="sled-title">БЕЗ СЛЕДА</div>
       <div class="sled-sub" id="sled-sub">Соединяю…</div>
     </div>
+    <button class="sled-nav" onclick="пожаловатьсяБезСледа()" aria-label="Пожаловаться" data-ico="warn"></button>
     <button class="sled-nav" onclick="следСпроситьСтереть()" aria-label="Стереть переписку" data-ico="trash"></button>
   </div>
   <div class="sled-body" id="sled-body"></div>
@@ -2996,6 +2997,14 @@
           handleIncomingEdit(msg);
           return;
         }
+
+        // Срочная жалоба, а владелец как раз в сети. Уведомление в таком
+        // случае не приходит — сервер шлёт его только отсутствующим,
+        // поэтому говорим здесь.
+        if (msg.type === 'zhaloba') {
+          if (isAdmin || isMod) showToast('Жалоба: ' + (msg.category || 'срочное'));
+          return;
+        }
       } catch(ex) { console.error('[DM] Parse error', ex); }
     };
 
@@ -3650,6 +3659,13 @@
     if (canCopy) addIco('copy', 'Скопировать', plain, () => copyMsg(body));
     if (canFwd)  addIco('forward', 'Переслать', plain, () => showForwardModal(idx));
     if (canEdit) addIco('edit', 'Изменить', plain, () => startEdit(idx));
+    // Жаловаться можно только на чужое и только там, где есть на кого:
+    // в LAN-чате сервера нет вовсе, а на себя жаловаться незачем.
+    // isLan здесь покрывает и группы — в них отправитель не один.
+    if (!msg.own && !isLan) {
+      const warn = B('background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);color:#F59E0B;');
+      addIco('warn', 'Пожаловаться', warn, () => показатьЖалобу(idx));
+    }
     addIco('trash', 'Удалить у себя', danger, () => deleteMsg(idx, false));
     if (canUnsend) addIco('trash', 'Удалить у всех', danger, () => deleteMsg(idx, true));
     add('Отмена', B('background:var(--bg3);border:1px solid var(--border);color:var(--text2);text-align:center;'), () => {});
@@ -3660,6 +3676,170 @@
 
   function copyMsg(text) {
     navigator.clipboard.writeText(text).catch(()=>{});
+  }
+
+  // ===== ЖАЛОБА =====
+  // Здесь нарушается главное обещание Void, и поэтому здесь же оно
+  // проговаривается вслух. Сервер не умеет читать переписку — но то, что
+  // человек приложит к жалобе, он прочитает, потому что это ему показали.
+  // Экран устроен так, чтобы уходило ровно то, что видно на нём: никаких
+  // «мы также передадим для улучшения качества».
+
+  const ПРИЧИНЫ_ЖАЛОБЫ = [
+    ['продажа запрещённого', 'Наркотики, оружие'],
+    ['мошенничество',        'Обман, выманивание денег или кода'],
+    ['угрозы',               'Угрозы, шантаж'],
+    ['травля',               'Оскорбления, травля'],
+    ['детское',              'Материалы с детьми'],
+    ['спам',                 'Спам, реклама'],
+    ['другое',               'Другое']
+  ];
+
+  // Сколько сообщений собеседника показать вокруг того, на которое жалуются.
+  // Одна вырванная строка почти всегда выглядит хуже, чем есть: контекст
+  // нужен не жалобщику, а тому, кто будет разбирать.
+  const ЖАЛОБА_КОНТЕКСТ = 6;
+
+  async function показатьЖалобу(idx) {
+    const chat = chats[currentChat];
+    if (!chat) return;
+    const наКого = currentChat;
+
+    // Собираем окно вокруг выбранного сообщения и расшифровываем его.
+    // Своё тоже показываем — но по умолчанию не отправляем: разбирающему
+    // полезно видеть, кто начал, а решать, показывать ли себя, человеку.
+    const от = Math.max(0, idx - ЖАЛОБА_КОНТЕКСТ);
+    const набор = [];
+    for (let i = от; i <= idx; i++) {
+      const м = chat.messages[i];
+      if (!м || м.system) continue;
+      let текст = '';
+      try { текст = await decryptText(м.enc || { plain: м.text || '' }); }
+      catch (e) { текст = '[не удалось открыть]'; }
+      const { body } = stripFwd(stripTtl(текст).body);
+      набор.push({ i, own: !!м.own, mid: м.mid || null, ts: м.timestamp || 0,
+                   text: короткоДляЖалобы(body), выбрано: i === idx || !м.own });
+    }
+    if (!набор.length) { showToast('Нечего показывать'); return; }
+    окноЖалобы(наКого, набор);
+  }
+
+  // Переписка без следа. Аккаунта у собеседника нет вовсе, поэтому и
+  // заблокировать его нельзя — жалоба здесь нужна не для наказания, а чтобы
+  // владелец вообще увидел, что в этом режиме происходит. Комнату он закроет.
+  function пожаловатьсяБезСледа() {
+    if (!след || !след.сообщения) return;
+    const набор = след.сообщения
+      .filter(м => !м.заметка && !м.ошибка && typeof м.текст === 'string')
+      .slice(-ЖАЛОБА_КОНТЕКСТ - 1)
+      .map((м, k) => ({ i: k, own: !!м.своё, mid: null, ts: м.ts || 0,
+                        text: короткоДляЖалобы(м.текст), выбрано: !м.своё }));
+    if (!набор.some(с => !с.own)) { showToast('Собеседник ещё ничего не написал'); return; }
+    окноЖалобы('след:' + след.код, набор, true);
+  }
+
+  function окноЖалобы(наКого, набор, безСледа) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'zhaloba-overlay';
+    ov.style.zIndex = '640';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:380px;gap:10px;">
+        <div class="modal-title">ПОЖАЛОВАТЬСЯ${безСледа ? '' : ' НА @' + esc(наКого)}</div>
+        <div style="font-size:12.5px;color:var(--text2);line-height:1.6;">
+          Обычно переписку не может прочитать никто, кроме вас двоих.
+          <b style="color:#F59E0B;">Отправив жалобу, ты сам покажешь отмеченные
+          сообщения владельцу сервера</b> — иначе разбирать нечего.
+          ${безСледа ? '<br><br>Здесь у собеседника нет аккаунта, поэтому ' +
+            'заблокировать его нельзя. Но владелец увидит, что происходит, ' +
+            'и сможет закрыть эту комнату.' : ''}
+        </div>
+        <div class="reg-label" style="margin-top:2px;">Что случилось</div>
+        <select id="zh-reason" class="reg-input" style="cursor:pointer;">
+          ${ПРИЧИНЫ_ЖАЛОБЫ.map(([з, п]) => '<option value="' + esc(з) + '">' + esc(п) + '</option>').join('')}
+        </select>
+        <div class="reg-label" style="margin-top:2px;">Что уйдёт — сними лишнее</div>
+        <div id="zh-list" style="max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="document.getElementById('zhaloba-overlay')?.remove()">Отмена</button>
+          <button class="btn-primary" id="zh-send" onclick="отправитьЖалобу()">Отправить</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+
+    // Разметку собираем кодом, а не строкой: подставлять содержимое чужого
+    // сообщения в HTML — самый простой способ однажды пустить туда разметку
+    const список = document.getElementById('zh-list');
+    ov._набор = набор;
+    // Адресата запоминаем здесь, а не читаем при отправке из currentChat:
+    // из переписки без следа никакого currentChat нет вовсе
+    ov._наКого = наКого;
+    ov._безСледа = !!безСледа;
+    набор.forEach((с, k) => {
+      const стр = document.createElement('label');
+      стр.style.cssText = 'display:flex;gap:8px;align-items:flex-start;padding:8px;border-radius:10px;' +
+        'background:' + (с.own ? 'var(--bg2)' : 'var(--bg3)') + ';border:1px solid var(--border);cursor:pointer;';
+      const га = document.createElement('input');
+      га.type = 'checkbox'; га.checked = с.выбрано; га.style.cssText = 'margin-top:3px;flex-shrink:0;';
+      га.onchange = () => { ov._набор[k].выбрано = га.checked; };
+      const тело = document.createElement('div');
+      тело.style.cssText = 'font-size:12.5px;line-height:1.5;min-width:0;';
+      const кто = document.createElement('div');
+      кто.style.cssText = 'font-size:10.5px;color:var(--text3);margin-bottom:2px;';
+      кто.textContent = с.own ? 'ты' : '@' + наКого;
+      const txt = document.createElement('div');
+      txt.style.cssText = 'color:var(--text);word-break:break-word;';
+      txt.textContent = с.text;
+      тело.appendChild(кто); тело.appendChild(txt);
+      стр.appendChild(га); стр.appendChild(тело);
+      список.appendChild(стр);
+    });
+  }
+
+  // Вложения и стикеры в жалобе бесполезны: сервер получит имя файла, а не
+  // его содержимое — оно всё равно зашифровано. Поэтому подписываем словами.
+  function короткоДляЖалобы(текст) {
+    const t = String(текст || '');
+    if (t.startsWith('__STICKER__')) return '[стикер]';
+    if (t.startsWith('__SOS__'))     return '[сигнал SOS]';
+    const fm = parseFileMeta(t);
+    if (fm) return '[вложение: ' + (fm.name || 'файл') + ']';
+    return t.slice(0, 2000);
+  }
+
+  async function отправитьЖалобу() {
+    const ov = document.getElementById('zhaloba-overlay');
+    if (!ov || !ov._набор) return;
+    const кнопка = document.getElementById('zh-send');
+    const выбранные = ov._набор.filter(с => с.выбрано);
+    if (!выбранные.length) { showToast('Отметь хотя бы одно сообщение'); return; }
+    const причина = document.getElementById('zh-reason')?.value || 'другое';
+    const наКого = ov._наКого;
+    if (кнопка) { кнопка.disabled = true; кнопка.textContent = 'Отправляю...'; }
+    try {
+      const r = await fetch(API + '/api/zhaloba', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          // Из переписки без следа ник не прикладываем, даже если аккаунт
+          // есть: весь смысл режима в том, что он с аккаунтом не связан,
+          // и жалоба не должна становиться той самой ниточкой
+          nick: ov._безСледа ? undefined : (myName || undefined),
+          password: ov._безСледа ? undefined : (myRawPass || undefined),
+          on: наКого, reason: причина,
+          messages: выбранные.map(с => ({ mid: с.mid, text: с.text, ts: с.ts, own: с.own }))
+        })
+      });
+      const д = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(д.error || 'Ошибка сервера');
+      ov.remove();
+      // Никакой «оценки» и «спасибо за обращение»: человеку важно понять, что
+      // дальше, а дальше — живой человек, а не бот
+      showToast('Жалоба ушла. Её посмотрит человек');
+    } catch (e) {
+      showToast(e.message || 'Не удалось отправить');
+      if (кнопка) { кнопка.disabled = false; кнопка.textContent = 'Отправить'; }
+    }
   }
 
   // forEveryone=true — убрать сообщение и у собеседника
@@ -4698,6 +4878,7 @@
         <div class="adm-list" id="adm-list"><div class="adm-empty">Загрузка...</div></div>
         <div class="adm-health" id="adm-health"></div>
         <button class="adm-btn" style="width:100%;" id="adm-totp-btn" onclick="showTotpModal()"><i data-ico="verify"></i>Двухфакторная защита</button>
+        <button class="adm-btn" style="width:100%;" id="adm-zhal-btn" onclick="показатьЖалобы()"><i data-ico="warn"></i>Жалобы</button>
         <button class="adm-btn" style="width:100%;" onclick="показатьЖурнал()"><i data-ico="clock"></i>Журнал действий</button>
         ${isAdmin ? '<button class="adm-btn danger" style="width:100%;" onclick="adminPurgeMessages()"><i data-ico="trash"></i>Очистить все сообщения на сервере</button>' : ''}
         <div class="modal-btns">
@@ -4711,6 +4892,15 @@
     loadAdminUsers();
     loadAdminHealth();
     refreshTotpBtn();
+    счётЖалоб();
+  }
+
+  // Только число, без содержимого: открывать очередь ради значка незачем
+  async function счётЖалоб() {
+    try {
+      const д = await adminCall('zhaloby', { state: 'новая', limit: 1 });
+      обновитьЗначокЖалоб(д.новых);
+    } catch (e) {}
   }
 
   async function loadAdminUsers() {
@@ -4797,6 +4987,175 @@
 
   // Журнал действий. Видят оба: модератор должен видеть свои записи —
   // иначе получается слежка, а не общая работа.
+  // ===== ОЧЕРЕДЬ ЖАЛОБ =====
+  // Бот сюда ничего не решает — он только разложил по срочности и спрятал
+  // мусор. Всё, что меняет чью-то учётную запись, нажимает человек, и
+  // необратимое по-прежнему доступно только владельцу.
+
+  const ЦВЕТ_СРОЧНОСТИ = с => с >= 80 ? '#ef4444' : с >= 50 ? '#F59E0B' : 'var(--text3)';
+
+  let жалобыФильтр = 'новая';
+
+  async function показатьЖалобы() {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'zhal-overlay';
+    ov.style.zIndex = '700';
+    ov.innerHTML = `
+      <div class="modal adm-modal">
+        <div class="modal-title">ЖАЛОБЫ</div>
+        <div style="font-size:11.5px;color:var(--text3);margin:-6px 0 4px;">
+          Разложил бот. Решаешь ты — он ничего не блокирует сам.
+        </div>
+        <div style="display:flex;gap:6px;">
+          <button class="adm-btn" style="flex:1;" onclick="сменитьФильтрЖалоб('новая')">Новые</button>
+          <button class="adm-btn" style="flex:1;" onclick="сменитьФильтрЖалоб('мусор')">Мусор</button>
+          <button class="adm-btn" style="flex:1;" onclick="сменитьФильтрЖалоб('все')">Все</button>
+        </div>
+        <div id="zhal-body" class="adm-list"><div class="adm-empty">Загрузка...</div></div>
+        <div class="modal-btns"><button class="btn-primary" style="width:100%;"
+          onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    загрузитьЖалобы();
+  }
+
+  function сменитьФильтрЖалоб(что) { жалобыФильтр = что; загрузитьЖалобы(); }
+
+  async function загрузитьЖалобы() {
+    const тело = document.getElementById('zhal-body');
+    if (!тело) return;
+    тело.innerHTML = '<div class="adm-empty">Загрузка...</div>';
+    let данные;
+    try { данные = await adminCall('zhaloby', { state: жалобыФильтр, limit: 100 }); }
+    catch (e) { тело.innerHTML = '<div class="adm-empty">' + esc(e.message) + '</div>'; return; }
+
+    обновитьЗначокЖалоб(данные.новых);
+    const список = данные.zhaloby || [];
+    if (!список.length) {
+      тело.innerHTML = '<div class="adm-empty">' +
+        (жалобыФильтр === 'новая' ? 'Разбирать нечего' : 'Пусто') + '</div>';
+      return;
+    }
+    тело.innerHTML = '';
+    for (const з of список) тело.appendChild(карточкаЖалобы(з));
+  }
+
+  function карточкаЖалобы(з) {
+    const к = document.createElement('div');
+    к.className = 'adm-row';
+    к.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+
+    const шапка = document.createElement('div');
+    шапка.className = 'adm-head';
+    шапка.innerHTML =
+      '<span class="adm-nick">@' + esc(з.on_nick) + '</span>' +
+      '<span class="adm-tag" style="color:' + ЦВЕТ_СРОЧНОСТИ(з.score) + ';">' +
+        esc(з.category || 'прочее') + ' · ' + (з.score | 0) + '</span>';
+    к.appendChild(шапка);
+
+    // Сверка с базой — самое важное поле карточки: она отвечает на вопрос
+    // «а было ли вообще такое сообщение», прежде чем читать текст
+    // Подтверждение — хорошая новость, и цвет у неё спокойный. Тревожный
+    // остаётся за подделкой: на экране должно бросаться в глаза именно то,
+    // из-за чего можно ошибиться и наказать невиновного.
+    const сверка = { 'есть': ['сообщения подтверждены сервером', '#4ADE80'],
+                     'нет':  ['подтвердить не удалось', 'var(--text3)'],
+                     'поздно': ['слишком старое, уже стёрто с сервера', 'var(--text3)'],
+                     'подделка': ['таких сообщений от него НЕ БЫЛО', '#ef4444'],
+                     'без следа': ['переписка без следа — проверять нечего', 'var(--text3)'] }[з.proof]
+                   || ['—', 'var(--text3)'];
+
+    const мета = document.createElement('div');
+    мета.className = 'adm-meta';
+    мета.innerHTML =
+      'от ' + (з.by_nick ? '@' + esc(з.by_nick) : 'без следа') + ' · ' + esc(новаяДата(з.at)) +
+      (з.reason ? ' · ' + esc(з.reason) : '') +
+      '<br><span style="color:' + сверка[1] + ';">' + сверка[0] + '</span>' +
+      '<br>бот' + (з.by_model ? ' (модель)' : ' (правила)') + ': ' + esc(з.why || '') +
+      (з.state !== 'новая' ? '<br>состояние: ' + esc(з.state) + (з.acted ? ' — ' + esc(з.acted) : '') : '');
+    к.appendChild(мета);
+
+    // Текст жалобы пишет посторонний человек. Он попадает только между
+    // тегами и только через textContent — в атрибут его нельзя ни при каких
+    // условиях: esc не экранирует кавычки.
+    const письма = document.createElement('div');
+    письма.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-top:2px;';
+    for (const с of (з.body || [])) {
+      const стр = document.createElement('div');
+      стр.style.cssText = 'font-size:12px;line-height:1.5;padding:6px 8px;border-radius:8px;' +
+        'word-break:break-word;background:' + (с.own ? 'var(--bg2)' : 'var(--bg3)') +
+        ';border-left:2px solid ' + (с.own ? 'var(--border)' : '#F59E0B') + ';';
+      const кто = document.createElement('div');
+      кто.style.cssText = 'font-size:10px;color:var(--text3);';
+      кто.textContent = с.own ? 'жалобщик' : '@' + з.on_nick;
+      const txt = document.createElement('div');
+      txt.textContent = с.text;
+      стр.appendChild(кто); стр.appendChild(txt);
+      письма.appendChild(стр);
+    }
+    к.appendChild(письма);
+
+    const кнопки = document.createElement('div');
+    кнопки.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;';
+    const кн = (текст, стиль, дело) => {
+      const b = document.createElement('button');
+      b.className = 'adm-btn' + (стиль === 'danger' ? ' danger' : '');
+      b.style.cssText = 'flex:1;min-width:90px;font-size:12px;';
+      b.textContent = текст;
+      b.onclick = async () => {
+        b.disabled = true;
+        try { await дело(); await загрузитьЖалобы(); }
+        catch (e) { showToast(e.message || 'Не вышло'); b.disabled = false; }
+      };
+      кнопки.appendChild(b);
+    };
+
+    if (з.state === 'новая') {
+      кн('Мусор', '', () => adminCall('zhaloba-act', { id: з.id, act: 'мусор' }));
+      кн('Решено', '', () => adminCall('zhaloba-act', { id: з.id, act: 'решена', acted: 'без наказания' }));
+    } else {
+      кн('Вернуть в новые', '', () => adminCall('zhaloba-act', { id: з.id, act: 'новая' }));
+    }
+    // В переписке без следа блокировать некого — аккаунта нет ни у кого.
+    // Единственный рычаг: закрыть саму комнату. Обещание с экрана жалобы.
+    if (з.proof === 'без следа' && String(з.on_nick).startsWith('след:')) {
+      кн('Закрыть комнату', 'danger', async () => {
+        await adminCall('sled-close', { room: String(з.on_nick).slice(5) });
+        await adminCall('zhaloba-act', { id: з.id, act: 'решена', acted: 'комната закрыта' });
+        showToast('Комната закрыта');
+      });
+    }
+    // Блокировка идёт обычным admin/ban — отдельного пути нет намеренно,
+    // чтобы не появилось второго места, где банят в обход журнала
+    if (з.proof !== 'без следа') {
+      кн('Бан 24 ч', 'danger', async () => {
+        await adminCall('ban', { nick: з.on_nick, hours: 24,
+                                 reason: 'жалоба #' + з.id + ': ' + (з.category || '') });
+        await adminCall('zhaloba-act', { id: з.id, act: 'решена', acted: 'бан 24 ч' });
+        showToast('Заблокирован на сутки');
+      });
+      if (isAdmin) кн('Бан навсегда', 'danger', async () => {
+        if (!confirm('Заблокировать @' + з.on_nick + ' навсегда?')) throw new Error('Отменено');
+        await adminCall('ban', { nick: з.on_nick,
+                                 reason: 'жалоба #' + з.id + ': ' + (з.category || '') });
+        await adminCall('zhaloba-act', { id: з.id, act: 'решена', acted: 'бан навсегда' });
+        showToast('Заблокирован');
+      });
+    }
+    к.appendChild(кнопки);
+    return к;
+  }
+
+  // Сколько неразобранного — на кнопке в панели и в самой панели
+  function обновитьЗначокЖалоб(сколько) {
+    const b = document.getElementById('adm-zhal-btn');
+    if (!b) return;
+    b.innerHTML = ico('warn', 17) + 'Жалобы' +
+      (сколько > 0 ? ' <span style="color:#F59E0B;font-weight:700;">' + (сколько | 0) + '</span>' : '');
+  }
+
   async function показатьЖурнал() {
     const ov = document.createElement('div');
     ov.className = 'modal-overlay';
