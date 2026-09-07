@@ -2488,6 +2488,35 @@
     clearSessionPass();
   }
 
+  // Почему нас не пустили: код двухфакторки. Объясняем словами и не выкидываем
+  // молча — человек должен понимать, что сеть тут ни при чём.
+  function объяснитьКод() {
+    if (document.getElementById('totp-why')) return;
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.id = 'totp-why';
+    ov.style.zIndex = '800';
+    ov.innerHTML = `
+      <div class="modal" style="max-width:330px;">
+        <div class="modal-title">НУЖЕН КОД</div>
+        <div style="font-size:13.5px;color:var(--text2);line-height:1.6;">
+          На этом аккаунте включён вход по коду, а это устройство сервер пока
+          не знает. <b style="color:var(--text);">Со связью всё в порядке</b> —
+          нужен шестизначный код из приложения-аутентификатора.
+        </div>
+        <div style="font-size:12px;color:var(--text3);line-height:1.55;margin-top:10px;">
+          Ввести его нужно один раз: дальше устройство станет доверенным.
+        </div>
+        <div class="modal-btns" style="flex-direction:column;gap:8px;margin-top:12px;">
+          <button class="btn-primary" style="width:100%;"
+                  onclick="this.closest('.modal-overlay').remove();doLogout();">Ввести код</button>
+          <button class="btn-secondary" style="width:100%;"
+                  onclick="this.closest('.modal-overlay').remove();">Позже</button>
+        </div>
+      </div>`;
+    document.body.appendChild(ov);
+  }
+
   function updateDmStatus(status) {
     const el = document.getElementById('dm-conn-el');
     if (!el) return;
@@ -2495,6 +2524,10 @@
     el.style.display = 'block';
     if (status === 'ok')         { el.textContent = 'Сервер подключён'; el.style.color = 'var(--online)'; }
     else if (status === 'wait')  { el.textContent = 'Подключение...';   el.style.color = '#F59E0B'; }
+    // «Нужен код» — не то же самое, что «нет связи», и путать их дорого: на
+    // поиск несуществующей поломки сети однажды ушёл час, пока настоящей
+    // причиной был непредъявленный код двухфакторки.
+    else if (status === 'totp')  { el.textContent = 'Нужен код из приложения'; el.style.color = '#F59E0B'; }
     else                         { el.textContent = 'Нет связи';        el.style.color = '#EF4444'; }
   }
 
@@ -2841,9 +2874,11 @@
           dmWsGen++;
           clearTimeout(dmWsRetryTimer); dmWsRetryTimer = null;
           dropDmWs();
-          updateDmStatus('off');
-          showToast('Нужен код из приложения — войди заново');
-          setTimeout(() => doLogout(), 1500);
+          updateDmStatus('totp');
+          // Раньше здесь была всплывающая подсказка и молчаливый выход через
+          // полторы секунды. Подсказка исчезала раньше, чем человек успевал
+          // прочитать, оставалось только «Нет связи» — и причину искали не там.
+          объяснитьКод();
           return;
         }
 
