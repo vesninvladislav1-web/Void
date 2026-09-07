@@ -2529,6 +2529,9 @@
     // поиск несуществующей поломки сети однажды ушёл час, пока настоящей
     // причиной был непредъявленный код двухфакторки.
     else if (status === 'totp')  { el.textContent = 'Нужен код из приложения'; el.style.color = '#F59E0B'; }
+    // Тот же урок ещё раз: сервер попросил подождать — это не «нет связи».
+    // Связь есть, и сказать надо именно то, что происходит.
+    else if (status === 'busy')  { el.textContent = 'Сервер просит подождать'; el.style.color = '#F59E0B'; }
     else                         { el.textContent = 'Нет связи';        el.style.color = '#EF4444'; }
   }
 
@@ -2901,6 +2904,24 @@
           dropDmWs();
           updateDmStatus('off');
           if (msg.reason === 'banned' || msg.reason === 'deleted') showBannedScreen(msg.reason, msg.note);
+          return;
+        }
+
+        // Сервер попросил подождать. Регистрировать тут НЕЧЕГО: аккаунт есть,
+        // просто счётчик исчерпан. Раньше эта ветка проваливалась в общую и
+        // приложение шло заводить аккаунт заново, упиралось в предел уже на
+        // регистрации и показывало «нет связи» — при живом сервере и живом
+        // аккаунте. Симптом неотличим от настоящего обрыва, и на его поиск
+        // уходят часы.
+        if (msg.type === 'auth-fail' && msg.error === 'rate-limit') {
+          dmWsAuthOk = false;
+          console.warn('[DM] Сервер ограничил вход — ждём, не регистрируемся');
+          updateDmStatus('busy');
+          dropDmWs();
+          clearTimeout(dmWsRetryTimer);
+          // Минута: окно счётчика — десять минут, но за минуту оно могло
+          // освободиться от чужих попыток
+          dmWsRetryTimer = setTimeout(() => { dmWsRetryTimer = null; connectDmWs(); }, 60000);
           return;
         }
 
@@ -6789,7 +6810,13 @@
     ov.className = 'modal-overlay';
     ov.id = 'link-overlay';
     ov.style.zIndex = '780';
-    const выбор = з.sameNetwork ? '' : `
+    // Число спрашиваем всегда, даже когда компьютер в той же сети. Раньше
+    // «своя сеть» давала кнопку «Впустить» без всякой сверки, и это было
+    // дырой: у сотового оператора за одним адресом тысячи чужих людей, любой
+    // из них мог прислать заявку и получить чужой ключ одним твоим нажатием.
+    // Нажатие осталось одно — просто теперь оно доказывает, что компьютер
+    // действительно перед тобой.
+    const выбор = `
       <div style="font-size:12.5px;color:var(--text2);line-height:1.6;margin-top:10px;">
         Выбери число, которое видно на экране компьютера:
       </div>
@@ -6809,9 +6836,6 @@
         </div>
         ${выбор}
         <div class="modal-btns" style="flex-direction:column;gap:8px;margin-top:12px;">
-          ${з.sameNetwork
-            ? `<button class="btn-primary" style="width:100%;" onclick="впуститьКомпьютер('${esc(з.code)}', null)">Впустить</button>`
-            : ''}
           <button class="btn-secondary" style="width:100%;"
                   onclick="this.closest('.modal-overlay').remove()">Это не я</button>
         </div>

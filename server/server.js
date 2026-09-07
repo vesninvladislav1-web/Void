@@ -1317,6 +1317,43 @@ const bucketSweep = setInterval(() => {
 }, 300000);
 bucketSweep.unref();
 
+// ===== ПОДБОР ПАРОЛЯ: СЧИТАЕМ ПО АККАУНТУ, А НЕ ПО АДРЕСУ =====
+// Разница принципиальная, и раньше она была потеряна.
+//
+// Предел на адрес защищает СЕРВЕР от потока с одной машины. Пароль он не
+// защищает вовсе: за одним адресом сотового оператора сидят тысячи чужих
+// людей, и общий счётчик просто отнимает вход у случайных прохожих. Именно
+// это и происходило: двадцать входов в десять минут на весь оператор.
+//
+// Пароль защищает предел на АККАУНТ. И считать надо только промахи: удачный
+// вход доказывает знание пароля и тратить попытки не должен, иначе человек
+// с плохой связью, переподключившись двадцать раз, запрёт сам себя.
+const промахи = new Map();
+const ПРОМАХОВ_ХВАТИТ = 10;
+const ПРОМАХ_ОКНО = 600000;
+
+function свежиеПромахи(ник) {
+  const сейчас = Date.now();
+  const т = (промахи.get(ник) || []).filter(t => сейчас - t < ПРОМАХ_ОКНО);
+  if (т.length) промахи.set(ник, т); else промахи.delete(ник);
+  return т;
+}
+function перебираютПароль(ник) {
+  return !!ник && свежиеПромахи(ник).length >= ПРОМАХОВ_ХВАТИТ;
+}
+function отметитьПромах(ник) {
+  if (!ник) return;
+  const т = свежиеПромахи(ник);
+  т.push(Date.now());
+  промахи.set(ник, т);
+}
+function забытьПромахи(ник) { if (ник) промахи.delete(ник); }
+
+const промахСметание = setInterval(() => {
+  for (const ник of [...промахи.keys()]) свежиеПромахи(ник);
+}, 300000);
+промахСметание.unref();
+
 const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 
 function clientIp(req) {
@@ -1383,7 +1420,7 @@ const server = http.createServer((req, res) => {
 
   // POST /api/register
   if (req.method === 'POST' && url.pathname === '/api/register') {
-    if (!rateLimit('reg:' + clientIp(req), 10, 600000)) {
+    if (!rateLimit('reg:' + clientIp(req), 60, 600000)) {
       return json(429, { error: 'Слишком много попыток, подожди' });
     }
     readBody(async (body) => {
@@ -1408,12 +1445,21 @@ const server = http.createServer((req, res) => {
 
   // POST /api/login
   if (req.method === 'POST' && url.pathname === '/api/login') {
-    if (!rateLimit('login:' + clientIp(req), 20, 600000)) {
+    // Тот же разбор, что и у входа по сокету: адрес — заслон от потока,
+    // аккаунт — защита пароля. Общий счётчик на адрес отнимал вход у соседей
+    // по сотовому оператору, а подбирающему пароль не мешал: он просто
+    // менял адрес.
+    if (!rateLimit('login:' + clientIp(req), 300, 600000)) {
       return json(429, { error: 'Слишком много попыток, подожди' });
     }
     readBody(async (body) => {
+      const ник0 = typeof body.nick === 'string' ? body.nick.trim().toLowerCase() : '';
+      if (перебираютПароль(ник0)) {
+        return json(429, { error: 'Слишком много неудачных попыток. Подожди десять минут' });
+      }
       const u = await verifyUser(body.nick, body.password);
-      if (!u) return json(401, { error: 'Неверный ник или пароль' });
+      if (!u) { отметитьПромах(ник0); return json(401, { error: 'Неверный ник или пароль' }); }
+      забытьПромахи(ник0);
       if (u.banned) return json(403, { error: 'Аккаунт заблокирован', reason: u.ban_reason });
 
       const dev = typeof body.deviceId === 'string' ? body.deviceId.slice(0, 64) : '';
@@ -1435,7 +1481,7 @@ const server = http.createServer((req, res) => {
   // Ключ шифрования переписки выводится из фразы отдельной функцией, поэтому
   // сервер не может его получить.
   if (req.method === 'POST' && url.pathname === '/api/seed/register') {
-    if (!rateLimit('reg:' + clientIp(req), 10, 600000)) {
+    if (!rateLimit('reg:' + clientIp(req), 60, 600000)) {
       return json(429, { error: 'Слишком много попыток, подожди' });
     }
     readBody(async (body) => {
@@ -1461,7 +1507,7 @@ const server = http.createServer((req, res) => {
   // Ник возвращает сервер: по фразе он определяется однозначно,
   // запоминать его пользователю не нужно.
   if (req.method === 'POST' && url.pathname === '/api/seed/login') {
-    if (!rateLimit('login:' + clientIp(req), 20, 600000)) {
+    if (!rateLimit('login:' + clientIp(req), 300, 600000)) {
       return json(429, { error: 'Слишком много попыток, подожди' });
     }
     readBody(async (body) => {
@@ -1470,9 +1516,16 @@ const server = http.createServer((req, res) => {
       const lookup = crypto.createHash('sha256').update(token).digest('hex');
       const row = qUserBySeed.get(lookup);
       if (!row) return json(404, { error: 'Аккаунт с такой фразой не найден' });
+      // Промахи считаем по найденному аккаунту: фраза длинная, но подпирать
+      // её счётчиком всё равно надо — только не общим на весь адрес
+      if (перебираютПароль(row.nick.toLowerCase())) {
+        return json(429, { error: 'Слишком много неудачных попыток. Подожди десять минут' });
+      }
       if (!(await scryptVerify(token, row.password_hash))) {
+        отметитьПромах(row.nick.toLowerCase());
         return json(401, { error: 'Неверная сид-фраза' });
       }
+      забытьПромахи(row.nick.toLowerCase());
       if (row.banned) return json(403, { error: 'Аккаунт заблокирован', reason: row.ban_reason || null });
 
       // Тот же барьер, что и на входе по паролю. Через интерфейс код на такой
@@ -1765,9 +1818,11 @@ const server = http.createServer((req, res) => {
         const своя = з.ip === мой;
         const поНику = з.ник && з.ник.toLowerCase() === u.nick.toLowerCase();
         if (!своя && !поНику) continue;
-        // Цифры для выбора: настоящая и две выдуманные. При одной сети выбор
-        // не нужен — там и так видно, что компьютер стоит перед тобой.
-        const выбор = своя ? null : перемешать([з.цифра,
+        // Цифры для выбора: настоящая и две выдуманные. Даются всегда, даже
+        // при совпадении адреса: совпадение адреса ничего не доказывает —
+        // см. разбор у /api/link/approve. Само поле sameNetwork остаётся,
+        // но теперь это только подпись на карточке, а не разрешение.
+        const выбор = перемешать([з.цифра,
           (з.цифра + 7) % 90 + 10, (з.цифра + 23) % 90 + 10]);
         список.push({ code: код, browser: з.браузер, sameNetwork: своя,
                       publicKey: з.ключ, choices: выбор });
@@ -1796,11 +1851,22 @@ const server = http.createServer((req, res) => {
       // Цифру сверяет сервер, а не телефон. Проверять на странице значение,
       // которое ей же и выдали, — самообман: подделать такую проверку можно
       // не приходя в сознание.
-      if (з.ip !== clientIp(req)) {
-        if (Number(body.digit) !== з.цифра) {
-          console.warn('[вход] Неверное число, отказано:', u.nick);
-          return json(403, { error: 'Число не то — вход не разрешён' });
-        }
+      //
+      // Проверяем ВСЕГДА, в том числе при совпадении адреса. Раньше здесь
+      // стояло исключение «своя сеть — можно без числа», и оно было ошибкой:
+      // «тот же публичный адрес» не значит «та же комната». У сотовых
+      // операторов за одним адресом сидят тысячи чужих людей, и любой из них
+      // мог завести заявку, дождаться, пока сосед по оператору нажмёт
+      // «Впустить», и получить его мастер-ключ вместе с закрытым. Это полный
+      // захват аккаунта одним неосторожным нажатием.
+      //
+      // Стоимость исправления для человека нулевая: он и раньше делал одно
+      // нажатие, и теперь делает одно — только не «Впустить», а по числу,
+      // которое горит на экране компьютера. Именно это и доказывает, что
+      // компьютер стоит перед ним.
+      if (Number(body.digit) !== з.цифра) {
+        console.warn('[вход] Неверное число, отказано:', u.nick);
+        return json(403, { error: 'Число не то — вход не разрешён' });
       }
       з.ответ = { пакет, ключ, ник: u.nick };
       console.log('[вход] Компьютер впущен в аккаунт', u.nick);
@@ -1982,7 +2048,7 @@ const server = http.createServer((req, res) => {
   // без фразы нельзя, но и раздавать это кому попало незачем — потому и
   // проверяем сразу, а не только на втором шаге.
   if (req.method === 'POST' && url.pathname === '/api/recover/start') {
-    if (!rateLimit('recover:' + clientIp(req), 10, 600000)) {
+    if (!rateLimit('recover:' + clientIp(req), 60, 600000)) {
       return json(429, { error: 'Слишком много попыток, подожди' });
     }
     readBody(async (body) => {
@@ -2004,7 +2070,7 @@ const server = http.createServer((req, res) => {
   // никакого «пропуска» не выдаётся, иначе перехваченный ответ давал бы право
   // сменить пароль.
   if (req.method === 'POST' && url.pathname === '/api/recover/finish') {
-    if (!rateLimit('recover:' + clientIp(req), 10, 600000)) {
+    if (!rateLimit('recover:' + clientIp(req), 60, 600000)) {
       return json(429, { error: 'Слишком много попыток, подожди' });
     }
     readBody(async (body) => {
@@ -2108,7 +2174,7 @@ const server = http.createServer((req, res) => {
   // решётки, а эту часть браузер серверу не отправляет никогда.
   if (req.method === 'POST' && url.pathname === '/api/sled/new') {
     // Без аккаунта проверить некого, поэтому единственная защита — частота.
-    if (!rateLimit('slednew:' + clientIp(req), 20, 3600000)) {
+    if (!rateLimit('slednew:' + clientIp(req), 120, 3600000)) {
       return json(429, { error: 'Слишком часто, подожди' });
     }
     if (следы.size >= MAX_SLED) return json(503, { error: 'Сервер занят, попробуй позже' });
@@ -2439,7 +2505,7 @@ const server = http.createServer((req, res) => {
   // поэтому вместе с новым паролем клиент присылает его перешифрованную копию.
   // Сервер по-прежнему не может её прочитать — он лишь заменяет одну на другую.
   if (req.method === 'POST' && url.pathname === '/api/account/password') {
-    if (!rateLimit('pwch:' + clientIp(req), 10, 600000)) {
+    if (!rateLimit('pwch:' + clientIp(req), 60, 600000)) {
       return json(429, { error: 'Слишком много попыток, подожди' });
     }
     readBody(async (body) => {
@@ -3030,17 +3096,30 @@ wss.on('connection', (ws, req) => {
 
       // --- Авторизация для личных чатов ---
       if (msg.type === 'auth') {
-        if (!rateLimit('wsauth:' + ip, 20, 600000)) {
+        // Предел на адрес — только заслон от потока с одной машины. Раньше
+        // здесь стояло 20 за десять минут, и этого хватало, чтобы за общим
+        // адресом оператора двадцать первый человек не вошёл вовсе. На
+        // экране у него было написано «нет связи».
+        if (!rateLimit('wsauth:' + ip, 300, 600000)) {
+          send({ type: 'auth-fail', error: 'rate-limit' });
+          return;
+        }
+        const ник0 = typeof msg.nick === 'string' ? msg.nick.trim().toLowerCase() : '';
+        // А пароль защищает счётчик промахов по самому аккаунту
+        if (перебираютПароль(ник0)) {
+          console.warn('[auth] Слишком много промахов по аккаунту', ник0);
           send({ type: 'auth-fail', error: 'rate-limit' });
           return;
         }
         const u = await verifyUser(msg.nick, msg.password);
         if (ws.readyState !== 1) return;  // сокет закрылся, пока считался scrypt
         if (!u) {
+          отметитьПромах(ник0);
           console.log('[auth] FAIL for', msg.nick);
           send({ type: 'auth-fail' });
           return;
         }
+        забытьПромахи(ник0);
         if (u.banned) {
           // auth-fail без reason клиент попытается «починить» авторегистрацией,
           // поэтому причину указываем явно
