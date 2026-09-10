@@ -509,8 +509,12 @@
   .sos-card-head { font-family:'Space Mono',monospace; font-size:13px; font-weight:700; color:#ef4444; }
   .sos-card-coords { font-family:'Space Mono',monospace; font-size:14px; user-select:all; }
   .sos-card-meta { font-size:11px; color:var(--text3); line-height:1.5; }
-  .sos-card-btn { display:block; text-align:center; padding:8px; border-radius:10px; background:var(--bg3);
-    border:1px solid var(--border); color:var(--text); font-size:12px; text-decoration:none; }
+  .sos-card-btn { display:block; width:100%; text-align:center; padding:8px; border-radius:10px; background:var(--bg3);
+    border:1px solid var(--border); color:var(--text); font-size:12px; text-decoration:none;
+    font-family:inherit; cursor:pointer; }
+  /* Куда девать скопированное. Без этой строки кнопка «скопировать» —
+     загадка: человек в панике не станет гадать, что делать дальше. */
+  .sos-card-kuda { font-size:10.5px; color:var(--text3); line-height:1.5; text-align:center; margin-top:-2px; }
   .msg-sticker-void { width:104px; height:104px; }
   .msg-sticker-missing { width:104px; height:104px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px;
     background:var(--bg3); border:1px dashed var(--border); border-radius:14px; font-size:20px; }
@@ -8243,7 +8247,8 @@
     const p = sosPoints[sosPoints.length - 1];
     const coords = p ? p.lat + ', ' + p.lon : '—';
     const time = p ? new Date(p.t).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' }) : '—';
-    const link = p ? 'https://maps.google.com/?q=' + p.lat + ',' + p.lon : '';
+    // Тот же разбор, что и в карточке: OpenStreetMap вместо Google
+    const link = p ? вКарте(Number(p.lat), Number(p.lon)) : '';
     return (sosCfg.tpl || sosDefaultTpl())
       .replace('{coords}', coords).replace('{time}', time).replace('{link}', link);
   }
@@ -8546,18 +8551,48 @@
     try { d = JSON.parse(payload); } catch (e) { return '<div class="sos-card">Аварийный сигнал</div>'; }
     const p = d.last;
     if (!p) return '<div class="sos-card">Аварийный сигнал</div>';
+    // Числа приводим и проверяем до того, как вставить их в разметку и в
+    // обработчик нажатия: они пришли из чужого сообщения, и доверять им
+    // как строкам нельзя.
+    const lat = Number(p.lat), lon = Number(p.lon);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return '<div class="sos-card">Аварийный сигнал — координаты не читаются</div>';
+    }
     const when = new Date(p.t).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
-    const link = 'https://maps.google.com/?q=' + p.lat + ',' + p.lon;
     const track = Array.isArray(d.track) ? d.track.length : 0;
     const path = track > 1 && d.from
       ? 'путь за ' + Math.max(1, Math.round((p.t - d.from) / 60000)) + ' мин · точек: ' + track
       : 'одна точка';
     return `<div class="sos-card">
       <div class="sos-card-head">${ico('sos', 15)}Аварийный сигнал</div>
-      <div class="sos-card-coords">${esc(p.lat + ', ' + p.lon)}</div>
+      <div class="sos-card-coords">${esc(lat + ', ' + lon)}</div>
       <div class="sos-card-meta">${esc(when)}${p.acc ? ' · точность ±' + p.acc + ' м' : ''}<br>${esc(path)}</div>
-      <a class="sos-card-btn" href="${link}" target="_blank" rel="noopener noreferrer">Открыть на карте</a>
+      <button class="sos-card-btn" onclick="скопироватьМесто(${lat}, ${lon})">Скопировать координаты</button>
+      <div class="sos-card-kuda">Вставь в Яндекс.Карты, 2ГИС или Google Maps — они поймут.
+        Или продиктуй по телефону.</div>
+      <a class="sos-card-btn" href="${вКарте(lat, lon)}" target="_blank" rel="noopener noreferrer">Открыть на карте</a>
     </div>`;
+  }
+
+  // Ссылка на карту ведёт в OpenStreetMap, а не в Google. Раньше вела туда,
+  // и получалось, что в самый неподходящий момент — когда человеку нужна
+  // помощь — его точные координаты уходили рекламной компании. OSM ведёт
+  // некоммерческий фонд, профилей он не строит.
+  //
+  // Полностью убрать чужой сервер отсюда нельзя: чтобы доехать, нужны
+  // маршрут и пробки, а этого своя карта не даст. Поэтому ссылка осталась
+  // ОТДЕЛЬНОЙ кнопкой — её нажимают осознанно, — а первым делом предлагаются
+  // координаты, которые никуда не уходят вовсе.
+  const вКарте = (lat, lon) =>
+    'https://www.openstreetmap.org/?mlat=' + lat + '&mlon=' + lon + '#map=17/' + lat + '/' + lon;
+
+  function скопироватьМесто(lat, lon) {
+    const текст = lat + ', ' + lon;
+    navigator.clipboard.writeText(текст)
+      .then(() => showToast('Скопировано: ' + текст))
+      // Координаты и так на виду и выделяются нажатием (user-select:all),
+      // поэтому отказ буфера не тупик — говорим, что делать
+      .catch(() => showToast('Буфер недоступен — координаты выше, нажми на них и скопируй'));
   }
 
   // ===== УДАЛЕНИЕ СВОЕГО АККАУНТА =====
