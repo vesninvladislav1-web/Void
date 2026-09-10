@@ -4371,7 +4371,12 @@
       if (isRoom(кому) || !chat0(чат)) continue;
       for (const м of чат.messages) if (м.pending && м.ct) список.push({ кому, м });
     }
-    return список.sort((a, b) => (a.м.timestamp || 0) - (b.м.timestamp || 0));
+    // Срочные — вперёд всех, остальные по времени. Срочный сейчас один:
+    // стикер «нет связи». Он не сообщение, а сигнал «я пропадаю», и дойти
+    // должен сразу, а не после десяти писем, накопившихся за час без сети.
+    return список.sort((a, b) =>
+      (b.м.срочно ? 1 : 0) - (a.м.срочно ? 1 : 0) ||
+      (a.м.timestamp || 0) - (b.м.timestamp || 0));
   }
   const chat0 = ч => ч && Array.isArray(ч.messages);
 
@@ -4415,7 +4420,12 @@
         }
         delete м.pending;
         delete м.ct;     // шифротекст больше не нужен, он уже у сервера
+        const былСрочный = !!м.срочно;
+        delete м.срочно;
         ушло++;
+        // Срочное уходит первым кадром и без задержки: пауза ниже нужна,
+        // чтобы не завалить слабый канал пачкой, а здесь кадр ровно один.
+        if (былСрочный) continue;
         // Между письмами пауза: на плохой связи пачка из полусотни кадров
         // подряд обрывает соединение вернее, чем каждое из них по отдельности
         await new Promise(r => setTimeout(r, 120));
@@ -10505,22 +10515,48 @@
     if (!stickerData) { showToast('Стикер не найден'); return; }
     const stickerText = '__STICKER__' + type + ':' + stickerData;
     const stickerMid = newMid();
-    // Картинки теперь тоже уходят на сервер — они сжимаются при загрузке
-    if (myRawPass && dmWsAuthOk && dmWs?.readyState === 1) {
-      const payload = await e2eEncrypt(currentChat, stickerText);
+    // «Нет связи» — не картинка, а сигнал. Его отправляют ровно тогда, когда
+    // связь уже плохая, поэтому он идёт особым путём: в очередь впереди
+    // всего накопленного и с немедленной попыткой достучаться, минуя
+    // выдержку между переподключениями.
+    const срочный = (type === 'glitch' && stickerData === 'nosignal');
+    let ждёт = false;
+    let payload = null;
+
+    if (myRawPass) {
+      payload = await e2eEncrypt(currentChat, stickerText);
       if (!payload) {
         showToast('Собеседник ещё ни разу не заходил — написать ему пока нельзя');
         return;
       }
-      console.log('[DM] Sending sticker dm to', currentChat, '(' + payload.length + ' байт шифротекста)');
-      if (!послатьВСокет(dmWs, { type: 'dm', to: currentChat, text: payload, mid: stickerMid }, 'Стикер')) return;
-    } else if (myRawPass) {
-      showToast('Нет связи с сервером — стикер не отправлен');
-      dmWakeCheck();
-      return;
+      if (dmWsAuthOk && dmWs?.readyState === 1) {
+        console.log('[DM] Стикер', stickerData, '—', payload.length, 'байт шифротекста');
+        if (!послатьВСокет(dmWs, { type: 'dm', to: currentChat, text: payload, mid: stickerMid }, 'Стикер')) return;
+      } else {
+        // Раньше здесь было «стикер не отправлен» — и всё. То есть стикер,
+        // который означает «я пропадаю», пропадал первым: в очередь попадал
+        // только текст. Теперь ждёт связи наравне с письмами.
+        console.warn('[DM] Нет связи — стикер в очередь', срочный ? '(срочный)' : '');
+        ждёт = true;
+        // Срочный не ждёт следующей попытки по расписанию: выдержка
+        // сбрасывается и соединение поднимается прямо сейчас.
+        dmWakeCheck();
+      }
     }
+
     const enc = await encryptText(stickerText);
-    chats[currentChat].messages.push({enc, own:true, time:now(), timestamp:Date.now(), isSticker:true, mid:stickerMid});
+    const стикерМсг = {enc, own:true, time:now(), timestamp:Date.now(), isSticker:true, mid:stickerMid};
+    if (ждёт) {
+      стикерМсг.ct = payload;
+      if (срочный) стикерМсг.срочно = true;
+      if (!вОчередь(стикерМсг)) {
+        showToast('Слишком много неотправленного — дождись связи');
+        return;
+      }
+      showToast(срочный ? 'Уйдёт первым, как только появится связь' : 'Нет связи — уйдёт, когда появится');
+    }
+    chats[currentChat].messages.push(стикерМсг);
+    обновитьЗначокОчереди();
     playSound();
     renderMessages();
     renderChatList();
