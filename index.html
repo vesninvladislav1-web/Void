@@ -10037,8 +10037,36 @@
     'M12 23 V19 H18 V16 H25 V14 H32 V17 H38 V15 H44 V20 H48 V25 H51 V31 H47 V36 H51 V42 H46 V47 H49 V51 H42 V48 H35 V52 H27 V49 H21 V45 H16 V41 H12 V35 H15 V29 H11 V23 Z'
   ];
 
+  // ДВА СЛОЯ ДВИЖЕНИЯ. Раньше рывками двигалось всё подряд — и тело, и
+  // наклон, и вспышки, и лицо, — отчего существо казалось не глючащим, а
+  // трясущимся: глазу негде было отдохнуть.
+  //
+  // Теперь движение разделено по смыслу:
+  //   glAnim   — ПОМЕХА. Вспышки, полосы, пересборка тела, рваное лицо.
+  //              Идёт рывками: сбой обязан быть резким.
+  //   глПлавно — СОБСТВЕННОЕ ДВИЖЕНИЕ существа. Машет рукой, дышит,
+  //              наклоняется, катится слеза. Это жест, а не сбой.
+  //
+  // Помехи остались такими же частыми и ровными, как были: вспышками их
+  // делать не стали намеренно.
   const glAnim = (attr, values, dur) =>
     `<animate attributeName="${attr}" values="${values}" dur="${dur}" calcMode="discrete" repeatCount="indefinite"/>`;
+
+  // Плавное движение обязано возвращаться в исходное значение, иначе на
+  // стыке круга будет скачок — при рывках он не виден, при плавном режет
+  // глаз. Поэтому первое значение дописывается в конец само.
+  const замкнуть = (values) => {
+    const ч = String(values).split(';').map(s => s.trim()).filter(Boolean);
+    if (ч.length > 1 && ч[0] !== ч[ч.length - 1]) ч.push(ч[0]);
+    return ч.join(';');
+  };
+  const глПлавно = (attr, values, dur) =>
+    `<animate attributeName="${attr}" values="${замкнуть(values)}" dur="${dur}" repeatCount="indefinite"/>`;
+  // То же для перемещений и поворотов: их анимируют не animate, а
+  // animateTransform — обычный animate по transform браузеры не исполняют.
+  const глДвижение = (тип, values, dur, доп) =>
+    `<animateTransform attributeName="transform" type="${тип}" values="${замкнуть(values)}" ` +
+    `dur="${dur}" repeatCount="indefinite"${доп || ''}/>`;
   const glBlink = (x, y, w, h, color, values, dur) =>
     `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="${color}">${glAnim('opacity', values, dur)}</rect>`;
 
@@ -10095,10 +10123,13 @@
   function glitchSvg(o) {
     const dur = o.dur || '2.7s';
     const tilt = o.tilt || '-4 32 46; -2 32 46; -5 32 46; -3 32 46';
-    const shift = o.shift ? `<animateTransform attributeName="transform" type="translate" values="${o.shift}" dur="${dur}" calcMode="discrete" repeatCount="indefinite" additive="sum"/>` : '';
+    // Наклон и смещение — это поза и дыхание, то есть собственное движение
+    // существа. Оно плавное. Дрожь остаётся на слое помех: тело по-прежнему
+    // пересобирается рывками, вспышки мигают рывками, полоса рвётся рывками.
+    const shift = o.shift ? глДвижение('translate', o.shift, o.shiftDur || dur, ' additive="sum"') : '';
     const bodyOpacity = o.bodyOpacity ? glAnim('opacity', o.bodyOpacity, o.bodyDur || '1.08s') : '';
     return `<svg viewBox="0 0 64 64">${GL_CLIP}<g>` +
-      `<animateTransform attributeName="transform" type="rotate" values="${tilt}" dur="${dur}" calcMode="discrete" repeatCount="indefinite"/>${shift}` +
+      глДвижение('rotate', tilt, o.tiltDur || dur) + shift +
       (o.behind || '') +
       `<path d="${GL_BODY[0]}" fill="#2A2A38" stroke="#3E3E52" stroke-width="0.7">` +
         `<animate attributeName="d" dur="${dur}" calcMode="discrete" repeatCount="indefinite" values="${GL_BODY.join(';')}"/>${bodyOpacity}` +
@@ -10179,8 +10210,10 @@
         // Слеза начинается ПОД глазом (глаз стоит на x 23) и падает по щеке.
         // В первой правке она стартовала левее и ниже — на уровне рта, отчего
         // читалась не как слеза, а как ещё один цветной сбой.
+        // Слеза катится ПЛАВНО: падение — это движение самого существа,
+        // а не сбой картинки. Рывками она выглядела как ещё одна вспышка.
         `<rect x="23.2" y="37" width="2.4" height="3.4" fill="#35E6FF">
-          ${glAnim('y', '37;41;46;52;37', '3.06s')}${glAnim('opacity', '1;1;0.8;0.3;0', '3.06s')}</rect>` +
+          ${глПлавно('y', '37;41;46;52;37', '3.06s')}${глПлавно('opacity', '1;1;0.8;0.3;0;0;1', '3.06s')}</rect>` +
         // Рот: углы ВНИЗ, середина выше краёв — этого и не хватало
         glMouth('M22 42 L25 45 L28 43 L31 44 L34 46 L37 44',
                 'M22 43 L25 45 L28 42 L31 45 L34 45 L37 45',
@@ -10247,15 +10280,21 @@
           ${glBlink(19, 27, 2, 2, '#35E6FF', '0.25;0.05;0.2;0.05', '3.6s')}
           ${glBlink(42, 40, 2, 2, '#A56BFF', '0.05;0.22;0.05;0.05', '4.5s')}
         </g>`,
-      // Три «з» уходят вверх и растворяются — сложены из тех же прямоугольных
-      // ступенек, что и всё существо, поэтому не выглядят чужой наклейкой
+      // Два «з» уходят вверх и растворяются — сложены из тех же прямоугольных
+      // ступенек, что и всё существо, поэтому не выглядят чужой наклейкой.
+      //
+      // Здесь была моя ошибка: перемещение я задал через
+      // `<animate attributeName="transform">`, а так в SVG нельзя — браузер
+      // это молча не исполняет. «З» висели на месте и только гасли. Движение
+      // задаётся animateTransform, и оно плавное: это подъём тёплого воздуха,
+      // а не сбой картинки.
       behind: `<g fill="#6B6B7B">
-          <path d="M45 22 H52 V24 H49 V26 H52 V28 H45 V26 H48 V24 H45 Z">
-            ${glAnim('opacity', '0;0.9;0.5;0', '4.2s')}
-            ${glAnim('transform', 'translate(0,0);translate(2,-5);translate(3,-10);translate(4,-15)', '4.2s')}</path>
-          <path d="M52 14 H57 V15.5 H54.5 V17 H57 V18.5 H52 V17 H54.5 V15.5 H52 Z">
-            ${glAnim('opacity', '0;0;0.8;0', '4.2s')}
-            ${glAnim('transform', 'translate(0,0);translate(1,-3);translate(2,-7);translate(3,-11)', '4.2s')}</path>
+          <g>${глДвижение('translate', '0 0;2 -5;3 -10;4 -15', '4.2s')}
+            <path d="M45 22 H52 V24 H49 V26 H52 V28 H45 V26 H48 V24 H45 Z">
+              ${глПлавно('opacity', '0;0.85;0.45;0', '4.2s')}</path></g>
+          <g>${глДвижение('translate', '0 0;1 -3;2 -7;3 -11', '4.2s')}
+            <path d="M52 14 H57 V15.5 H54.5 V17 H57 V18.5 H52 V17 H54.5 V15.5 H52 Z">
+              ${глПлавно('opacity', '0;0;0.7;0', '4.2s')}</path></g>
         </g>`,
       face: `<g fill="#F2F2F7">
           <rect x="22" y="31" width="6" height="1.8"/>
@@ -10279,20 +10318,22 @@
       // сразу, и на любом отдельном кадре мысли просто не было — существо
       // выглядело нейтральным. Теперь собранная мысль стоит больше половины
       // цикла, и только потом рассыпается.
+      // Кусочки мысли ПРОЯВЛЯЮТСЯ плавно: мысль складывается, а не мигает.
       behind: `<g fill="#2A2A38" stroke="#3E3E52" stroke-width="0.6">
-          <rect x="44" y="25" width="3" height="3">${glAnim('opacity', '0;1;1;1;1;1;0;0', '3.6s')}</rect>
-          <rect x="49" y="19" width="4" height="4">${glAnim('opacity', '0;0;1;1;1;1;0;0', '3.6s')}</rect>
-          <rect x="55" y="11" width="6.5" height="6.5">${glAnim('opacity', '0;0;0;1;1;1;0;0', '3.6s')}</rect>
+          <rect x="44" y="25" width="3" height="3">${глПлавно('opacity', '0;1;1;1;1;1;0;0', '3.6s')}</rect>
+          <rect x="49" y="19" width="4" height="4">${глПлавно('opacity', '0;0;1;1;1;1;0;0', '3.6s')}</rect>
+          <rect x="55" y="11" width="6.5" height="6.5">${глПлавно('opacity', '0;0;0;1;1;1;0;0', '3.6s')}</rect>
         </g>`,
-      // Зрачки съезжают вправо-вверх и там подрагивают
+      // Зрачки ведёт вправо-вверх — это взгляд, движение существа, поэтому
+      // плавно. Рывками выходило дрожание глаз, а не «вспоминает».
       face: `<g fill="#F2F2F7">
           <rect x="25" y="28" width="3" height="6">
-            ${glAnim('x', '25;25.8;25.2;25.6', '3.6s')}${glAnim('y', '28;27.4;28.2;27.6', '3.6s')}</rect>
+            ${глПлавно('x', '25;25.9;25.2;25.7', '3.6s')}${глПлавно('y', '28;27.3;28.2;27.5', '3.6s')}</rect>
           <rect x="37" y="27" width="3" height="6">
-            ${glAnim('x', '37;37.8;37.2;37.6', '3.6s')}${glAnim('y', '27;26.4;27.2;26.6', '3.6s')}</rect>
+            ${глПлавно('x', '37;37.9;37.2;37.7', '3.6s')}${глПлавно('y', '27;26.3;27.2;26.5', '3.6s')}</rect>
         </g>
         <rect x="26" y="41" width="9" height="1.8" fill="#F2F2F7">
-          ${glAnim('x', '26;26.6;25.8;26.2', '3.6s')}</rect>`
+          ${глПлавно('x', '26;26.7;25.8;26.3', '3.6s')}</rect>`
     }),
 
     // Любовь. Здесь не дрожь по кругу, а короткая история на пять секунд:
@@ -10338,9 +10379,9 @@
              dur="5s" repeatCount="indefinite"/>` +
           `<g transform="translate(-32,-33)">` +
             `<g>` +
-              `<animateTransform attributeName="transform" type="rotate"
-                 values="-4 32 46; -2 32 46; -5 32 46; -3 32 46" dur="2.7s"
-                 calcMode="discrete" repeatCount="indefinite"/>` +
+              // Наклон плавный, как у всех остальных: это поза существа,
+              // а не помеха. Пересборка тела ниже осталась рывками.
+              глДвижение('rotate', '-4 32 46; -2 32 46; -5 32 46; -3 32 46', '2.7s') +
               `<path d="${B[0]}" fill="#2A2A38" stroke="#3E3E52" stroke-width="0.7">` +
                 `<animate attributeName="d" values="${seq}" dur="5s" calcMode="discrete" repeatCount="indefinite"/>` +
                 // Краснеет не в момент сборки, а когда уже стал сердцем
