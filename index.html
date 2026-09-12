@@ -4918,6 +4918,7 @@
         <button class="adm-btn" style="width:100%;" id="adm-totp-btn" onclick="showTotpModal()"><i data-ico="verify"></i>Двухфакторная защита</button>
         <button class="adm-btn" style="width:100%;" id="adm-zhal-btn" onclick="показатьЖалобы()"><i data-ico="warn"></i>Жалобы</button>
         <button class="adm-btn" style="width:100%;" onclick="показатьЖурнал()"><i data-ico="clock"></i>Журнал действий</button>
+        <button class="adm-btn" style="width:100%;" onclick="показатьПадения()"><i data-ico="warn"></i>Отчего падал сервер</button>
         ${isAdmin ? '<button class="adm-btn danger" style="width:100%;" onclick="adminPurgeMessages()"><i data-ico="trash"></i>Очистить все сообщения на сервере</button>' : ''}
         <div class="modal-btns">
           <button class="btn-secondary" onclick="loadAdminUsers();loadAdminHealth()">Обновить</button>
@@ -5192,6 +5193,48 @@
     if (!b) return;
     b.innerHTML = ico('warn', 17) + 'Жалобы' +
       (сколько > 0 ? ' <span style="color:#F59E0B;font-weight:700;">' + (сколько | 0) + '</span>' : '');
+  }
+
+  // Отчего падал сервер. Причина и раньше была — в логе pm2, — но смотреть
+  // туда можно только через ssh, а разбираться обычно приходится не за
+  // столом. Теперь она в отдельном файле и видна с телефона.
+  async function показатьПадения() {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay';
+    ov.style.zIndex = '700';
+    ov.innerHTML = `
+      <div class="modal adm-modal">
+        <div class="modal-title">ОТЧЕГО ПАДАЛ СЕРВЕР</div>
+        <div id="pad-body" class="adm-list"><div class="adm-empty">Загрузка...</div></div>
+        <div class="modal-btns"><button class="btn-primary" style="width:100%;"
+          onclick="this.closest('.modal-overlay').remove()">Закрыть</button></div>
+      </div>`;
+    document.body.appendChild(ov);
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+
+    const тело = document.getElementById('pad-body');
+    try {
+      const r = await adminCall('padeniya', { limit: 30 });
+      const список = r.padeniya || [];
+      const работает = r.uptime > 86400
+        ? Math.round(r.uptime / 86400) + ' сут'
+        : r.uptime > 3600 ? Math.round(r.uptime / 3600) + ' ч' : Math.round(r.uptime / 60) + ' мин';
+      const шапка = '<div class="adm-meta" style="padding:4px 2px 10px;">' +
+        'Сейчас работает без перерыва: ' + esc(работает) + '</div>';
+      тело.innerHTML = шапка + (список.length ? список.map(п => `
+        <div class="adm-row">
+          <div class="adm-head">
+            <span class="adm-nick">${esc(п.вид === 'падение' ? 'упал' : 'обещание')}</span>
+            <span class="adm-tag">${esc(новаяДата(Date.parse(п.при) || Date.now()))}</span>
+          </div>
+          <div class="adm-meta">${esc(п.что || '—')}
+            ${п.где ? '<br><span style="color:var(--text3);font-size:10.5px;">' + esc(п.где) + '</span>' : ''}
+            <br>до этого проработал: ${esc(String(п.прожил))} с</div>
+        </div>`).join('')
+        : '<div class="adm-empty">Ни одного падения — так и должно быть</div>');
+    } catch (e) {
+      тело.innerHTML = '<div class="adm-empty">' + esc(e.message) + '</div>';
+    }
   }
 
   async function показатьЖурнал() {
@@ -8195,7 +8238,9 @@
     try {
       const ctl = new AbortController();
       const t = setTimeout(() => ctl.abort(), SOS_PROBE_MS);
-      const r = await fetch(API + '/api/status', { cache: 'no-store', signal: ctl.signal });
+      // /health вместо /api/status: он отвечает тем же «жив или нет», но
+      // при этом действительно проверяет базу и не отдаёт наружу цифры
+      const r = await fetch(API + '/health', { cache: 'no-store', signal: ctl.signal });
       clearTimeout(t);
       return r.ok;
     } catch (e) { return false; }

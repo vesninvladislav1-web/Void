@@ -1317,6 +1317,83 @@ const bucketSweep = setInterval(() => {
 }, 300000);
 bucketSweep.unref();
 
+// ===== ЖИВ ЛИ СЕРВЕР НА САМОМ ДЕЛЕ =====
+// Наблюдателю снаружи важно не «отвечает ли порт», а «работает ли Void».
+// Разница существенная: процесс может стоять и отвечать 200, когда база
+// заблокирована или диск переполнен — а переписка при этом уже не ходит.
+//
+// Поэтому проверяем ЗАПИСЬ в базу. Чтение продолжает работать и тогда,
+// когда запись уже нет: именно так выглядит кончившееся место.
+// Пользуемся готовыми qSetSetting и qGetSetting — заводить для этого
+// отдельные запросы незачем.
+//
+// Настоящая проверка делается не чаще раза в двадцать секунд. Без этого
+// запись в базу шла бы на каждый запрос, и достаточно было бы долбить
+// /health, чтобы нагрузить диск. Наблюдатель ходит раз в минуты — ему
+// хватит с запасом.
+let здоровьеКогда = 0, здоровьеИтог = { ok: true };
+const ЗДОРОВЬЕ_КЭШ = 20000;
+
+function проверитьЗдоровье() {
+  const сейчас = Date.now();
+  if (сейчас - здоровьеКогда < ЗДОРОВЬЕ_КЭШ) return здоровьеИтог;
+  здоровьеКогда = сейчас;
+  try {
+    if (!server.listening) { здоровьеИтог = { ok: false, why: 'http' }; return здоровьеИтог; }
+    if (!wss) { здоровьеИтог = { ok: false, why: 'ws' }; return здоровьеИтог; }
+    const метка = String(сейчас);
+    qSetSetting.run('health_ping', метка);
+    const назад = qGetSetting.get('health_ping');
+    if (!назад || назад.value !== метка) { здоровьеИтог = { ok: false, why: 'db-read' }; return здоровьеИтог; }
+    // Место на диске: пока текст ходит, считаем живым, но если кончилось
+    // совсем — база скоро встанет, и об этом лучше узнать заранее
+    if (свободноНаДиске() < 200 * 1024 * 1024) { здоровьеИтог = { ok: false, why: 'disk' }; return здоровьеИтог; }
+    здоровьеИтог = { ok: true };
+  } catch (e) {
+    console.error('[health] База не отвечает:', e.message);
+    здоровьеИтог = { ok: false, why: 'db-write' };
+  }
+  return здоровьеИтог;
+}
+
+// ===== ЖУРНАЛ ПАДЕНИЙ =====
+// Пишем в ФАЙЛ, а не в базу, намеренно: падение чаще всего и означает, что
+// с базой что-то не так, и запись туда в этот момент не дойдёт. Файл же
+// пишется до последнего.
+//
+// И не в Sentry: это отправка ошибок вместе со стеками на чужой сервер, а
+// мы из Void чужие серверы как раз выносим.
+const ПАДЕНИЯ = path.join(__dirname, 'padeniya.log');
+const ПАДЕНИЙ_ХРАНИМ = 50;
+
+function записатьПадение(вид, ошибка) {
+  try {
+    const строка = JSON.stringify({
+      при: new Date().toISOString(),
+      вид,
+      что: String((ошибка && ошибка.message) || ошибка || '').slice(0, 300),
+      где: String((ошибка && ошибка.stack) || '').split('\n').slice(1, 5).join(' | ').slice(0, 600),
+      прожил: Math.round(process.uptime())
+    }) + '\n';
+    fs.appendFileSync(ПАДЕНИЯ, строка);
+  } catch (e) {}
+}
+
+function прочитатьПадения(сколько) {
+  try {
+    const все = fs.readFileSync(ПАДЕНИЯ, 'utf8').trim().split('\n').filter(Boolean);
+    return все.slice(-(сколько || 20)).reverse()
+      .map(с => { try { return JSON.parse(с); } catch (e) { return null; } })
+      .filter(Boolean);
+  } catch (e) { return []; }
+}
+
+// Подрезаем при запуске, чтобы файл не рос бесконечно
+try {
+  const все = fs.existsSync(ПАДЕНИЯ) ? fs.readFileSync(ПАДЕНИЯ, 'utf8').trim().split('\n').filter(Boolean) : [];
+  if (все.length > ПАДЕНИЙ_ХРАНИМ) fs.writeFileSync(ПАДЕНИЯ, все.slice(-ПАДЕНИЙ_ХРАНИМ).join('\n') + '\n');
+} catch (e) {}
+
 // ===== ПОДБОР ПАРОЛЯ: СЧИТАЕМ ПО АККАУНТУ, А НЕ ПО АДРЕСУ =====
 // Разница принципиальная, и раньше она была потеряна.
 //
@@ -2822,6 +2899,15 @@ const server = http.createServer((req, res) => {
 
       // Журнал видят оба: и владелец, и модератор. Модератор должен видеть
       // свои записи — иначе выходит слежка, а не общая работа.
+      // Отчего сервер падал. Ради этого и заведён отдельный файл: в логе
+      // pm2 причина есть, но он перезаписывается, а смотреть туда можно
+      // только через ssh — с телефона в дороге это недоступно.
+      if (action === 'padeniya') {
+        const сколько = Math.min(Math.max(Number(body.limit) || 20, 1), 50);
+        return withSession(200, { ok: true, padeniya: прочитатьПадения(сколько),
+                                  uptime: Math.round(process.uptime()) });
+      }
+
       if (action === 'log') {
         const сколько = Math.min(Math.max(Number(body.limit) || 100, 1), 500);
         return withSession(200, { ok: true, log: qLogTail.all(сколько) });
@@ -2976,8 +3062,30 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // GET /api/status — состояние сервера. Ники отдаём только по админ-ключу.
+  // ===== ЖИВ ЛИ СЕРВЕР =====
+  // Сюда стучится наблюдатель снаружи. Отвечает ровно одно: работает или
+  // нет. Никаких цифр — сколько людей в сети и сколько комнат постороннему
+  // знать незачем, а наблюдателю это и не нужно.
+  //
+  // Главное: проверка НАСТОЯЩАЯ. Прежний /api/status отвечал «ok: true»
+  // даже с мёртвой базой — запрос к ней стоял в try/catch и молча возвращал
+  // ноль. Наблюдатель видел бы «всё хорошо» у лежащего сервера.
+  //
+  // Проверяем именно ЗАПИСЬ, а не чтение: при переполненном диске или
+  // заблокированной базе чтение ещё идёт, а запись уже нет — и Void в этот
+  // момент уже не работает, хотя выглядит живым.
+  if (req.method === 'GET' && url.pathname === '/health') {
+    const итог = проверитьЗдоровье();
+    return json(итог.ok ? 200 : 503, итог.ok ? { ok: true } : { ok: false, why: итог.why });
+  }
+
+  // GET /api/status — подробности только по админ-ключу. Раньше счётчики
+  // отдавались кому угодно: любой посторонний видел, сколько человек сейчас
+  // в сети. Для мессенджера, обещающего незаметность, это лишнее.
   if (req.method === 'GET' && url.pathname === '/api/status') {
+    if (!ADMIN_KEY || url.searchParams.get('key') !== ADMIN_KEY) {
+      return json(403, { error: 'Нужен ключ' });
+    }
     const data = {
       ok: true,
       online: Object.keys(online).length,
@@ -2989,10 +3097,9 @@ const server = http.createServer((req, res) => {
                    blocking: местаМало() },
       uptime: Math.round(process.uptime())
     };
-    if (ADMIN_KEY && url.searchParams.get('key') === ADMIN_KEY) {
-      data.onlineNicks = Object.keys(online);
-      data.roomIds = Object.keys(rooms);
-    }
+    // Ключ уже проверен выше, отдельная проверка тут больше не нужна
+    data.onlineNicks = Object.keys(online);
+    data.roomIds = Object.keys(rooms);
     json(200, data);
     return;
   }
@@ -3703,12 +3810,21 @@ cleanup.unref();
 // ===== УСТОЙЧИВОСТЬ =====
 server.on('error', e => console.error('[http] Server error:', e.message));
 wss.on('error', e => console.error('[ws] Server error:', e.message));
-process.on('unhandledRejection', e => console.error('[fatal] Unhandled rejection:', e && e.message));
+process.on('unhandledRejection', e => {
+  console.error('[fatal] Unhandled rejection:', e && e.message);
+  // Не роняем процесс: необработанное обещание чаще всего безобидно.
+  // Но в журнал пишем — иначе причина растворится в логе pm2, который
+  // со временем перезаписывается.
+  записатьПадение('обещание', e);
+});
 // После необработанной ошибки состояние процесса неизвестно. Раньше он
 // продолжал работать как ни в чём не бывало; теперь корректно закрываемся,
 // а pm2 поднимет заново.
 process.on('uncaughtException', e => {
   console.error('[fatal] Uncaught exception:', e && e.stack);
+  // Записываем ПЕРВЫМ делом, до всякого закрытия: если упало из-за базы,
+  // то дальше может не быть и этой возможности. Файл пишется до последнего.
+  записатьПадение('падение', e);
   shutdown('uncaughtException');
 });
 
