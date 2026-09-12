@@ -39,6 +39,9 @@
     --sos-text: #FF7A5C;   /* тем же #CC3A1E буквами по тёмному вышло бы 3.2 — мало */
     --online: #4ade80;
     --shadow: rgba(255,107,74,0.18);
+    /* Светлая кромка сверху у панелей и пузырей: свет падает сверху, и
+       предмет с освещённым ребром читается как предмет, а не как заливка */
+    --edge: rgba(255,255,255,0.12);
     --glass: rgba(44,39,36,0.55);
     --glass2: rgba(35,31,28,0.8);
     --glass-border: rgba(255,255,255,0.07);
@@ -53,13 +56,29 @@
     --text: #1C1917; --text2: #5F5954; --text3: #6B6460;   /* 5.5 и 4.9 к светлому фону */
     --msg-own: #FCEAE5; --msg-other: #FFFFFF; --online: #22c55e; --badge: #CC3A1E; --sos-text: #CC3A1E;
     --shadow: rgba(255,107,74,0.14);
+    --edge: rgba(0,0,0,0.10);   /* белая кромка на белом невидима — в светлой теме ребро тёмное */
     --glass: rgba(250,250,250,0.75);
     --glass2: rgba(255,255,255,0.9);
     --glass-border: rgba(0,0,0,0.06);
   }
 
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Inter',sans-serif; background:var(--bg); color:var(--text); height:var(--app-h,100vh); overflow:hidden; transition:background 0.3s,color 0.3s; }
+  /* ===== МАТЕРИАЛ =====
+     Ровная заливка читалась как пустой лист: «слишком минималистично, мало
+     деталей». Две вещи превращают её в поверхность.
+
+     Колодец: фон темнее к середине и чуть светлее по краям — как взгляд в
+     дыру. Это тот же приём, что и у иконки: у чёрной дыры свет живёт по
+     краю темноты, а не размазан по ней.
+
+     Зерно: четыре процента шума поверх всего. Столько глаз не видит как
+     точки, но перестаёт видеть заливку. Дешевле этого нет ничего. */
+  body { font-family:'Inter',sans-serif; color:var(--text); height:var(--app-h,100vh); overflow:hidden; transition:background 0.3s,color 0.3s;
+    background:radial-gradient(120% 80% at 50% 40%, var(--bg2) 0%, var(--bg) 55%, #15120F 100%); }
+  .light body, body.light { background:radial-gradient(120% 80% at 50% 40%, #FFFFFF 0%, var(--bg) 60%, #EDECE8 100%); }
+  body::before { content:''; position:fixed; inset:0; pointer-events:none; z-index:2000; opacity:0.045;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  .light body::before, body.light::before { opacity:0.03; }
 
   /* ===== ЭКРАН РЕГИСТРАЦИИ ===== */
   #register-screen {
@@ -86,7 +105,10 @@
   .reg-hint { font-size:11px; color:var(--text3); text-align:center; line-height:1.6; }
   .remember-row { display:flex; align-items:center; gap:8px; width:100%; font-size:12px; color:var(--text2); cursor:pointer; user-select:none; margin-top:2px; }
   .remember-row input { accent-color:var(--accent); width:15px; height:15px; cursor:pointer; flex:0 0 auto; }
-  .reg-btn { width:100%; padding:14px; background:var(--accent); border:none; border-radius:14px; color:white; font-size:15px; font-family:'Space Mono',monospace; font-weight:700; letter-spacing:3px; cursor:pointer; transition:opacity 0.2s,transform 0.2s; margin-top:4px; }
+  /* Кнопки набраны обычным шрифтом без разрядки. Моноширинный с растяжкой
+     в три пикселя читался как из две тысячи десятого; моноширинному место
+     там, где значения — время, ники, отпечатки ключей. */
+  .reg-btn { width:100%; padding:14px; background:var(--accent); border:none; border-radius:14px; color:white; font-size:15px; font-family:'Inter',sans-serif; font-weight:600; letter-spacing:0; cursor:pointer; transition:opacity 0.2s,transform 0.2s; margin-top:4px; }
   .reg-btn:hover { background:#E55A3C; opacity:0.85; transform:scale(1.02); }
 
   /* Стартовый экран */
@@ -95,7 +117,7 @@
   .start-cherta { display:flex; align-items:center; gap:10px; color:var(--text3); font-size:11px; margin:2px 0; }
   .start-cherta::before, .start-cherta::after { content:''; flex:1; height:1px; background:var(--border); }
   .start-poyasnenie { font-size:11px; color:var(--text3); text-align:center; line-height:1.5; margin-top:-4px; }
-  .start-btn { width:100%; padding:15px; border-radius:14px; font-size:15px; font-family:'Space Mono',monospace; font-weight:700; letter-spacing:2px; cursor:pointer; transition:opacity 0.2s,transform 0.2s; }
+  .start-btn { width:100%; padding:15px; border-radius:14px; font-size:15px; font-family:'Inter',sans-serif; font-weight:600; letter-spacing:0; cursor:pointer; transition:opacity 0.2s,transform 0.2s; }
   .start-btn:hover { transform:scale(1.02); opacity:0.9; }
   .start-btn:active { transform:scale(0.97); }
 
@@ -178,7 +200,7 @@
   .chats-screen.hidden { display:none; }
 
   .chats-topbar { padding:16px 20px; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; flex-shrink:0; position:relative; z-index:10; }
-  .chats-topbar-title { font-family:'Space Mono',monospace; font-size:16px; font-weight:700; letter-spacing:2px; flex:1; }
+  .chats-topbar-title { font-family:'Inter',sans-serif; font-size:19px; font-weight:700; letter-spacing:-0.01em; flex:1; }
 
   .chats-search-wrap { padding:12px 16px; border-bottom:1px solid var(--border); position:relative; flex-shrink:0; }
   .chats-search-icon { position:absolute; left:28px; top:50%; transform:translateY(-50%); color:var(--text3); pointer-events:none; display:flex; }
@@ -217,14 +239,23 @@
   .queue-bar .ico { flex-shrink:0; opacity:0.75; }
   .empty-chats { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:200px; gap:10px; color:var(--text3); padding:20px; text-align:center; }
   .empty-chats .empty-icon { font-size:30px; opacity:0.4; }
+  /* Помеха на пустых экранах: крупная там, где кроме неё ничего нет,
+     мелкая и приглушённая — там, где человек уже внутри и она не должна
+     мешать (пустая переписка, список комнат) */
+  .pomeha { width:132px; height:132px; }
+  .pomeha svg { width:100%; height:100%; display:block; }
+  .pomeha-small { width:72px; height:72px; opacity:0.75; margin:0 auto 4px; }
+  .adm-empty .pomeha-small { margin-bottom:8px; }
   .empty-chats p { font-size:12px; line-height:1.6; }
   /* Позвать человека раньше пряталось в меню «⋯». Теперь это первое, что
      видно на пустом экране: до ссылки одно нажатие вместо трёх. */
   .empty-actions { display:flex; flex-direction:column; gap:8px; width:100%; max-width:260px; margin-top:6px; }
-  .empty-actions .reg-btn { display:flex; align-items:center; justify-content:center; gap:9px; padding:12px; font-size:13px; letter-spacing:1.5px; }
+  .empty-actions .reg-btn { display:flex; align-items:center; justify-content:center; gap:9px; padding:12px; font-size:14px; letter-spacing:0; }
   .empty-actions .reg-btn .ico { flex-shrink:0; }
 
   .chat-item { display:flex; align-items:center; gap:12px; padding:12px 18px; cursor:pointer; transition:background 0.15s; position:relative; border-radius:var(--radius-lg); margin:4px 12px; background:var(--glass); border:1px solid var(--glass-border); overflow:hidden; }
+  /* Та же верхняя грань, что у пузырей: строка списка — тоже поверхность */
+  .chat-item { border-top-color:var(--edge); }
   .chat-item:hover { background:var(--glass2); }
   .chat-item.active { background:var(--glass2); }
   .chat-item.active::before { content:''; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); border-radius:0 2px 2px 0; }
@@ -251,7 +282,9 @@
   @keyframes chatSlideIn { from{opacity:0;transform:translateX(32px)} to{opacity:1;transform:none} }
 
   .chat-topbar { padding:14px 20px; background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border-bottom:1px solid var(--glass-border); display:flex; align-items:center; gap:12px; flex-shrink:0; }
-  .back-btn { width:40px; height:40px; border-radius:50%; background:var(--accent); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; color:white; transition:all 0.2s; flex-shrink:0; box-shadow:0 2px 10px var(--shadow); }
+  /* «Назад» — не действие, а навигация; залитая акцентом она была ещё одним
+     оранжевым пятном рядом с аватаром и кнопкой отправки. Теперь грань. */
+  .back-btn { width:40px; height:40px; border-radius:12px; background:var(--bg3); border:1px solid var(--border); border-top-color:var(--edge); cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:18px; color:var(--text2); transition:all 0.2s; flex-shrink:0; }
   .back-btn:hover { opacity:0.85; transform:scale(1.05); }
   .back-btn:active { transform:scale(0.95); }
   .chat-topbar-info { flex:1; min-width:0; }
@@ -270,6 +303,31 @@
   .chat-topbar-sub { font-size:12px; color:var(--text2); margin-top:2px; }
   .chat-topbar-actions { display:flex; gap:6px; align-items:center; }
   .chat-topbar-actions::before { content:''; width:1px; height:20px; background:var(--border); margin-right:2px; }
+  /* «Плюс» в строке ввода и его меню. Устроено так же, как меню «⋯» в шапке
+     чата, только раскрывается ВВЕРХ: строка ввода стоит у нижнего края, и
+     вниз ему открываться некуда. */
+  .plus-wrap { position:relative; flex-shrink:0; }
+  .plus-btn { width:38px; height:38px; border-radius:12px; background:var(--bg3); border:1px solid var(--border);
+    border-top-color:var(--edge); color:var(--text2); cursor:pointer; display:flex; align-items:center;
+    justify-content:center; transition:background 0.15s, transform 0.15s; }
+  .plus-btn .ico { width:18px; height:18px; transition:transform 0.2s; }
+  .plus-btn.open .ico { transform:rotate(45deg); }
+  .plus-btn:hover { background:var(--glass); color:var(--text); }
+  .plus-menu { position:absolute; left:0; bottom:calc(100% + 8px); min-width:190px; background:var(--glass2);
+    backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border);
+    border-top-color:var(--edge); border-radius:var(--radius-lg); padding:6px; display:flex;
+    flex-direction:column; gap:2px; z-index:80; transform-origin:bottom left; transform:scale(0.92);
+    opacity:0; pointer-events:none; transition:transform 0.15s, opacity 0.15s; }
+  .plus-menu.open { transform:scale(1); opacity:1; pointer-events:all; }
+  .plus-item { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:var(--radius-md);
+    background:none; border:none; color:var(--text); font-size:14px; font-family:'Inter',sans-serif;
+    cursor:pointer; text-align:left; white-space:nowrap; }
+  .plus-item:hover { background:var(--glass); }
+  .plus-item .ico { width:17px; height:17px; color:var(--text2); flex-shrink:0; }
+  /* Микрофон показывается в строке только во время записи — тогда его есть
+     чем остановить. В остальное время он в меню «плюса». */
+  #voice-btn { display:none; }
+  #voice-btn.recording { display:inline-flex; }
   .chat-menu-wrap { position:relative; }
   .chat-menu { position:absolute; right:0; top:calc(100% + 8px); background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:var(--radius-lg); padding:6px; display:flex; flex-direction:column; gap:2px; min-width:170px; z-index:500; transform-origin:top right; transform:scale(0.85); opacity:0; pointer-events:none; transition:transform 0.18s cubic-bezier(0.34,1.56,0.64,1), opacity 0.15s; }
   .chat-menu.open { transform:scale(1); opacity:1; pointer-events:all; }
@@ -284,10 +342,13 @@
   .messages { flex:1; overflow-y:auto; padding:12px 16px; display:flex; flex-direction:column; gap:2px; }
   .messages::-webkit-scrollbar { width:3px; }
   .messages::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
-  .no-messages { margin:auto; color:var(--text3); font-size:13px; }
+  .no-messages { margin:auto; color:var(--text3); font-size:13px; display:flex; flex-direction:column; align-items:center; gap:8px; }
 
-  .date-divider { text-align:center; margin:14px 0; flex-shrink:0; }
-  .date-divider span { font-size:11px; color:var(--text3); font-family:'Space Mono',monospace; letter-spacing:2px; opacity:0.5; }
+  /* Разделитель дня — не бледная надпись в пустоте, а ступенчатая линия
+     по обе стороны: та же рваная развёртка, из которой сделана Помеха */
+  .date-divider { display:flex; align-items:center; gap:10px; margin:12px 2px 14px; flex-shrink:0; }
+  .date-divider span { font-size:10px; color:var(--text3); font-family:'Space Mono',monospace; letter-spacing:2px; opacity:0.7; white-space:nowrap; }
+  .date-divider svg { flex:1; height:5px; opacity:0.5; color:var(--text3); }
 
   .msg-wrap { display:flex; align-items:flex-end; gap:8px; max-width:75%; transition:transform 0.15s ease; }
   .msg-wrap.own { margin-left:auto; flex-direction:row-reverse; animation:msgFromRight 0.22s cubic-bezier(0.25,0.46,0.45,0.94); }
@@ -298,9 +359,22 @@
   .msg-avatar-sm { width:28px; height:28px; border-radius:8px; overflow:hidden; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; color:white; flex-shrink:0; font-family:'Space Mono',monospace; cursor:pointer; }
   .bubble { padding:10px 14px 8px; border-radius:var(--radius-lg); font-size:14px; line-height:1.5; word-break:break-word; overflow:hidden; }
   .bubble::after { content:''; display:table; clear:both; }
-  .msg-time-inline { float:right; margin-left:10px; margin-top:2px; font-size:10px; font-family:'Space Mono',monospace; white-space:nowrap; opacity:0.55; display:flex; align-items:center; gap:3px; position:relative; bottom:-2px; }
-  .msg-wrap:not(.own) .bubble { background:var(--msg-other); border:1px solid var(--border); border-bottom-left-radius:4px; box-shadow:0 2px 12px rgba(0,0,0,0.15); }
-  .msg-wrap.own .bubble { background:var(--msg-own); border:1px solid rgba(201,87,63,0.25); border-bottom-right-radius:4px; box-shadow:0 4px 20px rgba(201,87,63,0.18); }
+  /* Время — отдельной строкой под текстом, а не в его хвосте. Вплотную к
+     последнему слову оно читалось как часть фразы: «работает как надо 09:50». */
+  .msg-time-inline { display:flex; justify-content:flex-end; align-items:center; gap:3px; clear:both; float:none;
+    margin:3px 0 -1px; font-size:10px; font-family:'Space Mono',monospace; white-space:nowrap; opacity:0.55; }
+  /* Верхняя грань на пиксель светлее — это и отличает материал от прямоугольника:
+     так поверхность ловит свет сверху. Свечение (box-shadow вокруг) убрано:
+     когда светится всё, не светится ничего. */
+  .msg-wrap:not(.own) .bubble { background:var(--msg-other); border:1px solid var(--border); border-top-color:var(--edge); border-bottom-left-radius:4px; }
+  /* Своё: никакого ореола. Только грань цвета акцента — тонкое кольцо по краю. */
+  .msg-wrap.own .bubble { background:var(--msg-own); border:1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-top-color:color-mix(in srgb, var(--accent) 65%, transparent); border-bottom-right-radius:4px; }
+  /* Продолжение череды от того же человека: аватар не повторяется, угол
+     не заострён — заострён только последний, он и есть «хвост» */
+  .msg-wrap.cont .msg-avatar-sm { visibility:hidden; }
+  .msg-wrap.cont:not(.own) .bubble { border-bottom-left-radius:var(--radius-lg); }
+  .msg-wrap.cont.own .bubble { border-bottom-right-radius:var(--radius-lg); }
+  .msg-wrap:not(.cont) { margin-bottom:6px; }
   .msg-time { font-size:10px; color:var(--text3); font-family:'Space Mono',monospace; margin-top:3px; padding:0 4px; display:flex; align-items:center; gap:3px; }
   .msg-time.own { justify-content:flex-end; }
   .msg-time.other { padding-left:36px; }
@@ -320,9 +394,13 @@
   /* Анимация нового чата */
   @keyframes slideIn { from{opacity:0;transform:translateX(-16px)} to{opacity:1;transform:none} }
 
-  .input-area { padding:12px 16px; border-top:1px solid var(--glass-border); background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); display:flex; align-items:center; gap:10px; flex-shrink:0; overflow:hidden; }
+  .input-area { padding:12px 16px; border-top:1px solid var(--glass-border); background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); display:flex; align-items:center; gap:10px; flex-shrink:0; overflow:visible; }
+  /* overflow:visible, а не hidden: меню «плюса» раскрывается вверх, за
+     пределы строки, и hidden его просто отрезал — плюс поворачивался, а
+     меню не появлялось */
   .input-wrap { flex:1 1 0; min-width:0; background:var(--glass); border:1px solid var(--glass-border); border-radius:28px; display:flex; align-items:center; padding:0 6px 0 16px; transition:border 0.2s,box-shadow 0.2s; }
-  .input-wrap:focus-within { border-color:var(--accent); box-shadow:0 0 0 3px var(--shadow); }
+  /* Поле в фокусе отмечается гранью, а не ореолом вокруг */
+  .input-wrap:focus-within { border-color:var(--accent); }
   .msg-input { flex:1 1 0; min-width:0; width:100%; background:transparent; border:none; outline:none; color:var(--text); font-size:14px; font-family:'Inter',sans-serif; padding:12px 0; }
   .msg-input::placeholder { color:var(--text3); }
   .send-btn { width:40px; height:40px; border-radius:50%; background:var(--accent); border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; color:white; font-size:16px; transition:all 0.2s; flex-shrink:0; }
@@ -463,7 +541,8 @@
      Ничего третьего не бывает: ни изгибов, ни концов в пустоте. */
   .tab-light { position:absolute; z-index:1; top:12px; height:30px; width:30px; border-radius:15px;
     border:1.6px solid var(--tab-hue, var(--accent)); background:transparent;
-    box-shadow:0 0 12px -2px var(--tab-hue, var(--accent)), inset 0 0 8px -4px var(--tab-hue, var(--accent));
+    /* Кольцо без свечения. Оно и так грань — по правилу «свет только по краю»
+       ему не нужен ореол, чтобы быть заметным. */
     opacity:0; pointer-events:none;
     transition:left 0.26s cubic-bezier(0.34,0,0.2,1), width 0.26s cubic-bezier(0.34,0,0.2,1),
                border-color 0.3s, box-shadow 0.3s, opacity 0.2s, border-width 0.16s; }
@@ -472,14 +551,9 @@
      хотя работы делает больше — поэтому на ходу он плотнеет */
   .tab-light.running { border-width:2.6px; }
 
-  /* Отблеск под панелью — как отражение света на столе */
-  .tabbar::after { content:''; position:absolute; left:0; right:0; bottom:-11px; height:14px;
-    background:linear-gradient(90deg, transparent 0%, var(--tab-hue, var(--accent)) 9%,
-                               var(--tab-hue, var(--accent)) 91%, transparent 100%);
-    /* по вертикали гасим с обеих сторон, иначе получается не отблеск, а брусок */
-    -webkit-mask-image:linear-gradient(to bottom, transparent 0%, #000 42%, transparent 100%);
-            mask-image:linear-gradient(to bottom, transparent 0%, #000 42%, transparent 100%);
-    opacity:0.16; filter:blur(6px); pointer-events:none; transition:background 0.3s; }
+  /* Отблеска под панелью больше нет. Он был четвёртым оранжевым пятном на
+     экране, где хватает одного; панель отделяется от фона тенью и гранью. */
+  .tabbar { border-top-color:var(--edge); }
 
   /* Экран «Рядом» */
   .near-screen { display:none; flex-direction:column; height:100%; }
@@ -1158,7 +1232,9 @@
 
       <div class="chats-list" id="chat-list">
         <div class="empty-chats" id="empty-chats">
-          <div class="empty-icon" data-ico="smile" data-ico-size="40"></div>
+          <!-- Помеха вместо безликого смайлика: пустой экран — её место.
+               Она здоровается: это приглашение, а не потеря. -->
+          <div class="pomeha" id="pomeha-chats" data-pomeha="hello"></div>
           <p>Здесь пока пусто.<br>Позови кого-нибудь — это одна ссылка</p>
           <div class="empty-actions">
             <button class="reg-btn" onclick="showInviteModal()"><i data-ico="person"></i>Позвать по ссылке</button>
@@ -1227,7 +1303,10 @@
       </div>
 
       <div class="messages" id="messages">
-        <div class="no-messages" id="no-messages">Напиши первое сообщение</div>
+        <div class="no-messages" id="no-messages">
+          <div class="pomeha pomeha-small" data-pomeha="hello"></div>
+          <span>Напиши первое сообщение</span>
+        </div>
       </div>
 
       <div class="sticker-panel" id="sticker-panel" style="display:none;">
@@ -1249,15 +1328,28 @@
         <button class="reply-bar-cancel" onclick="cancelEdit()" data-ico="close" aria-label="Отменить"></button>
       </div>
       <div class="input-area">
-        <button class="icon-btn" onclick="toggleStickerPanel()" title="Стикеры" style="flex-shrink:0;" data-ico="smile"></button>
-        <button class="attach-btn" onclick="pickFile()" title="Прикрепить файл" data-ico="clip"></button>
-        <button class="attach-btn" id="voice-btn" onclick="toggleVoice()" title="Голосовое сообщение" data-ico="mic"></button>
+        <!-- Один «плюс» вместо трёх кругов: стикеры, файл и микрофон занимали
+             четверть ширины строки, и текст жался в оставшемся. Микрофон
+             появляется в строке только во время записи — чтобы было чем её
+             остановить, — остальное живёт в раскрывающемся меню. -->
+        <div class="plus-wrap">
+          <button class="plus-btn" id="plus-btn" onclick="togglePlusMenu()" title="Прикрепить" aria-label="Прикрепить" data-ico="plus"></button>
+          <div class="plus-menu" id="plus-menu">
+            <button class="plus-item" onclick="closePlusMenu();toggleStickerPanel()"><i data-ico="smile"></i>Стикер</button>
+            <button class="plus-item" onclick="closePlusMenu();pickFile()"><i data-ico="clip"></i>Файл</button>
+            <button class="plus-item" onclick="closePlusMenu();toggleVoice()"><i data-ico="mic"></i>Голосовое</button>
+            <button class="plus-item" onclick="closePlusMenu();showCapsuleModal()"><i data-ico="clock"></i>Капсула времени</button>
+          </div>
+        </div>
+        <button class="attach-btn" id="voice-btn" onclick="toggleVoice()" title="Остановить запись" data-ico="mic"></button>
         <button class="attach-btn" id="voice-cancel" onclick="cancelVoice()" title="Отменить запись" style="display:none;" data-ico="close"></button>
         <div class="input-wrap">
           <input type="text" class="msg-input" id="msg-input" placeholder="Написать сообщение..." onkeydown="handleKey(event)">
         </div>
         <button class="send-btn" id="send-btn" data-ico="send" onmousedown="sendBtnDown()" onmouseup="sendBtnUp()" onmouseleave="sendBtnCancel()" ontouchstart="sendBtnDown(event)" ontouchend="sendBtnUp()" ontouchcancel="sendBtnCancel()"></button>
-        <button class="icon-btn" id="capsule-btn" onclick="showCapsuleModal()" title="Капсула времени" style="flex-shrink:0;" data-ico="clock"></button>
+        <!-- Капсула переехала в меню «плюса»; кнопка оставлена скрытой, потому
+             что на неё ссылается код, показывающий ожидающую капсулу -->
+        <button class="icon-btn" id="capsule-btn" onclick="showCapsuleModal()" title="Капсула времени" style="flex-shrink:0;display:none;" data-ico="clock"></button>
       </div>
     </div>
 
@@ -3336,8 +3428,11 @@
     document.getElementById('near-screen').classList.toggle('active', name === 'near');
     document.getElementById('chats-screen').classList.toggle('hidden', name !== 'chats');
     document.getElementById('sidebar').classList.toggle('active', name === 'me');
-    // Кнопка нового чата принадлежит списку переписок
-    document.getElementById('fab').classList.toggle('visible', name === 'chats' && !!myName);
+    // Кнопка нового чата принадлежит списку переписок — и только непустому:
+    // на пустом экране уже стоит крупная «Позвать по ссылке», второе залитое
+    // оранжевым пятно рядом с ней лишнее
+    document.getElementById('fab').classList.toggle('visible',
+      name === 'chats' && !!myName && Object.keys(chats).length > 0);
 
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
     if (name === 'near') renderNearList();
@@ -3417,7 +3512,7 @@
             '<div class="chat-preview">' + (последнее ? 'сообщений: ' + c.messages.length : 'пока пусто') + '</div></div>' +
           '</div>';
         }).join('')
-      : '<div class="adm-empty">Комнат пока нет</div>';
+      : '<div class="adm-empty"><div class="pomeha pomeha-small" data-pomeha="wow"></div>Комнат пока нет</div>';
   }
 
   // Старые имена остались в полутора десятках мест: пусть ведут на вкладку
@@ -3519,6 +3614,26 @@
   function closeChatMenu() {
     const menu = document.getElementById('chat-menu');
     if (menu) menu.classList.remove('open');
+  }
+
+  // Меню «плюса» в строке ввода — тот же приём, что и у «⋯»
+  function togglePlusMenu() {
+    const menu = document.getElementById('plus-menu');
+    const btn = document.getElementById('plus-btn');
+    if (!menu) return;
+    const открыть = !menu.classList.contains('open');
+    menu.classList.toggle('open', открыть);
+    if (btn) btn.classList.toggle('open', открыть);
+    if (открыть) setTimeout(() => document.addEventListener('click', closePlusMenuOutside, { once: true }), 0);
+  }
+  function closePlusMenu() {
+    document.getElementById('plus-menu')?.classList.remove('open');
+    document.getElementById('plus-btn')?.classList.remove('open');
+  }
+  function closePlusMenuOutside(e) {
+    if (!e.target.closest('.plus-wrap')) closePlusMenu();
+    else if (document.getElementById('plus-menu')?.classList.contains('open'))
+      document.addEventListener('click', closePlusMenuOutside, { once: true });
   }
   function closeChatMenuOutside(e) {
     if (!e.target.closest('.chat-menu-wrap')) closeChatMenu();
@@ -3947,8 +4062,17 @@
     const was = chatRowPositions();
     list.querySelectorAll('.chat-item').forEach(e=>e.remove());
     const keys = Object.keys(chats);
-    if (keys.length===0) { empty.style.display='flex'; return; }
+    const fab = document.getElementById('fab');
+    if (keys.length===0) {
+      empty.style.display='flex';
+      посадитьПомех(empty);
+      if (fab) fab.classList.remove('visible');
+      return;
+    }
     empty.style.display='none';
+    // Только на самом списке: renderChatList зовётся и из открытой переписки
+    // после каждого письма, и без этой проверки «+» вылезал поверх сообщений
+    if (fab && currentTab === 'chats' && myName && !currentChat) fab.classList.add('visible');
     // выполнится после того, как обход ниже расставит строки
     requestAnimationFrame(() => playChatMove(was));
     keys.sort((a, b) => {
@@ -4186,14 +4310,18 @@
     const noMsg = document.getElementById('no-messages');
     Array.from(container.children).forEach(el => { if(el.id!=='no-messages') el.remove(); });
     const msgs = chats[chatKey].messages;
-    if (msgs.length===0) { noMsg.style.display='block'; return; }
+    if (msgs.length===0) { noMsg.style.display='flex'; посадитьПомех(noMsg); return; }
     noMsg.style.display='none';
 
     const texts = await Promise.all(msgs.map(msg => decryptText(msg.enc || { plain: msg.text || '' })));
     if (currentChat !== chatKey) return;      // пока расшифровывали, чат сменился
 
     const div = document.createElement('div');
-    div.className='date-divider'; div.innerHTML='<span>СЕГОДНЯ</span>';
+    div.className='date-divider';
+    // Ступенчатые линии по бокам — рваная развёртка, как у Помехи
+    const ступени = (d) => `<svg viewBox="0 0 100 5" preserveAspectRatio="none"><path d="${d}" stroke="currentColor" stroke-width="1" fill="none"/></svg>`;
+    div.innerHTML = ступени('M0 3 H14 V1 H31 V4 H48 V2 H67 V4 H83 V1 H100') + '<span>СЕГОДНЯ</span>' +
+                    ступени('M0 1 H17 V4 H33 V2 H52 V4 H69 V1 H86 V3 H100');
     container.appendChild(div);
     const isLanRoom = isRoom(chatKey);   // комната: у сообщений есть автор
     msgs.forEach((msg, idx) => {
@@ -4207,7 +4335,12 @@
       // Пересланное несёт пометку в начале текста — снимаем её до разбора
       const { from: fwdFrom, body: text } = stripFwd(texts[idx]);
       const wrap = document.createElement('div');
-      wrap.className='msg-wrap'+(msg.own?' own':'');
+      // Череда сообщений от одного человека: аватар и «хвост» только у
+      // последнего в ней. Следующее от того же — продолжение.
+      const след = msgs[idx + 1];
+      const продолжение = !!след && !след.system && !!след.own === !!msg.own &&
+                          (!isLanRoom || след.sender === msg.sender);
+      wrap.className='msg-wrap'+(msg.own?' own':'')+(продолжение?' cont':'');
       wrap.style.marginTop='2px';
       wrap.dataset.idx = idx;
       const isLocked = msg.unlockAt && msg.unlockAt > Date.now();
@@ -5073,8 +5206,11 @@
     обновитьЗначокЖалоб(данные.новых);
     const список = данные.zhaloby || [];
     if (!список.length) {
+      // Единственный экран, где пустота — хорошая новость: никто ни на кого
+      // не пожаловался. Поэтому здесь Помеха смеётся.
       тело.innerHTML = '<div class="adm-empty">' +
-        (жалобыФильтр === 'новая' ? 'Разбирать нечего' : 'Пусто') + '</div>';
+        (жалобыФильтр === 'новая' ? '<div class="pomeha pomeha-small" data-pomeha="laugh"></div>Разбирать нечего' : 'Пусто') + '</div>';
+      посадитьПомех(тело);
       return;
     }
     тело.innerHTML = '';
@@ -10496,6 +10632,25 @@
   };
 
   const GLITCH_NAMES = Object.keys(GLITCH_STICKERS);
+
+  // ===== ПОМЕХА НА ПУСТЫХ ЭКРАНАХ =====
+  // Персонаж уже нарисован для стикеров — а пустые экраны были самым слабым
+  // местом интерфейса: ровная чернота и безликий смайлик из круга. Теперь
+  // они — её место. Лицо выбирается по причине пустоты: «привет» — ты ещё не
+  // начал; «удивление» — ничего не нашлось; «смех» — в очереди жалоб, где
+  // пустота хорошая новость.
+  //
+  // Двигается она недолго: три круга и замирает. Вечное дёрганье в углу
+  // глаза на экране, куда заходишь по сто раз в день, надоедает за неделю.
+  function посадитьПомех(корень) {
+    (корень || document).querySelectorAll('.pomeha[data-pomeha]').forEach(el => {
+      if (el.dataset.posazhena) return;
+      const svg = GLITCH_STICKERS[el.dataset.pomeha];
+      if (!svg) return;
+      el.innerHTML = svg.replace(/repeatCount="indefinite"/g, 'repeatCount="3" fill="freeze"');
+      el.dataset.posazhena = '1';
+    });
+  }
 
   const VOID_STICKER_NAMES = Object.keys(VOID_STICKERS);
 
