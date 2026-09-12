@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Проверка вибрации — Void</title>
+<!--
+  Проверочная страница перед функцией «Пульс».
+
+  Смысл её существования в одной оговорке: navigator.vibrate() возвращает true
+  даже там, где мотор не шевелится вовсе — например, в браузере на компьютере.
+  То есть машина ответить на вопрос «работает ли» не может. Может только
+  человек. Поэтому страница не измеряет, а СПРАШИВАЕТ, и в конце складывает
+  ответы в короткий отчёт, который можно переслать.
+
+  Это временная страница. Когда решение принято — удалить.
+-->
+<style>
+  :root{
+    --bg:#0B0B0F; --bg2:#141419; --bg3:#1C1C24; --border:#2A2A34;
+    --text:#F2F2F7; --text2:#A0A0AE; --text3:#6B6B7B;
+    --accent:#FF6B4A; --ok:#4ADE80; --no:#EF4444;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+       font-size:15px;line-height:1.6;padding:20px 16px 60px;max-width:520px;margin:0 auto}
+  h1{font-family:'Courier New',monospace;font-size:19px;letter-spacing:2px;margin:0 0 4px}
+  .sub{color:var(--text3);font-size:13px;margin-bottom:22px}
+  .blok{background:var(--bg2);border:1px solid var(--border);border-radius:16px;
+        padding:16px;margin-bottom:14px}
+  .zag{font-family:'Courier New',monospace;font-size:12px;letter-spacing:1.6px;
+       color:var(--text3);margin-bottom:10px}
+  button{font-family:inherit;font-size:15px;cursor:pointer;border-radius:12px;
+         border:1px solid var(--border);background:var(--bg3);color:var(--text);
+         padding:13px 14px}
+  button:active{opacity:.7}
+  .glav{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;width:100%}
+  .ryad{display:flex;gap:8px;margin-top:8px}
+  .ryad button{flex:1}
+  .da{border-color:rgba(74,222,128,.4);color:var(--ok)}
+  .net{border-color:rgba(239,68,68,.4);color:var(--no)}
+  .stroka{display:flex;justify-content:space-between;gap:12px;padding:7px 0;
+          border-bottom:1px solid var(--border);font-size:13.5px}
+  .stroka:last-child{border-bottom:none}
+  .stroka span:first-child{color:var(--text2)}
+  .stroka span:last-child{text-align:right;word-break:break-word}
+  .otvet{font-size:13px;color:var(--text3);margin-top:8px;min-height:20px}
+  .otvet.yes{color:var(--ok)} .otvet.no{color:var(--no)}
+  #ploshadka{height:190px;border:2px dashed var(--border);border-radius:16px;
+             display:flex;align-items:center;justify-content:center;text-align:center;
+             color:var(--text3);font-size:14px;margin-top:10px;user-select:none;
+             touch-action:none;padding:12px}
+  #ploshadka.zhmyot{border-color:var(--accent);background:rgba(255,107,74,.09);color:var(--accent)}
+  #itog{white-space:pre-wrap;font-family:'Courier New',monospace;font-size:12px;
+        background:var(--bg3);border:1px solid var(--border);border-radius:12px;
+        padding:12px;color:var(--text2);margin-top:10px}
+  .lest{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+  .lest button{flex:0 0 auto;padding:10px 13px;font-size:14px;
+               font-family:'Courier New',monospace}
+  .lest button.probovan{border-color:var(--accent);color:var(--accent)}
+  .predupr{font-size:12.5px;color:var(--text3);line-height:1.55;margin-top:10px}
+</style>
+</head>
+<body>
+
+<h1>ПУЛЬС · ПРОВЕРКА</h1>
+<div class="sub">Работает ли вибрация в этом браузере. Полминуты.</div>
+
+<div class="blok">
+  <div class="zag">ЧТО ГОВОРИТ БРАУЗЕР</div>
+  <div id="pro"></div>
+  <div class="predupr">
+    «Есть» здесь ничего не доказывает: браузер отвечает так и там, где мотора
+    нет вовсе. Поэтому дальше спрашиваю тебя.
+  </div>
+</div>
+
+<div class="blok">
+  <div class="zag">1 · ЧУВСТВУЕТСЯ ЛИ ВООБЩЕ</div>
+  <button class="glav" id="knopka-korotko">Короткий толчок (200 мс)</button>
+  <div class="ryad">
+    <button class="da"  onclick="otvet('чувствуется', true)">Почувствовал</button>
+    <button class="net" onclick="otvet('чувствуется', false)">Ничего</button>
+  </div>
+  <div class="otvet" id="o-чувствуется">—</div>
+</div>
+
+<div class="blok">
+  <div class="zag">2 · РАЗЛИЧАЮТСЯ ЛИ ДЛИННОЕ И КОРОТКОЕ</div>
+  <button class="glav" id="knopka-ritm">Проиграть: · · — · —</button>
+  <div class="ryad">
+    <button class="da"  onclick="otvet('ритм', true)">Ритм различим</button>
+    <button class="net" onclick="otvet('ритм', false)">Одно сплошное жужжание</button>
+  </div>
+  <div class="otvet" id="o-ритм">—</div>
+</div>
+
+<div class="blok">
+  <div class="zag">3 · САМЫЙ КОРОТКИЙ ОЩУТИМЫЙ ИМПУЛЬС</div>
+  <div style="font-size:13.5px;color:var(--text2)">
+    Жми по очереди сверху вниз и запомни, на каком перестал чувствовать.
+    Это и есть предел, мельче которого ритм не передать.
+  </div>
+  <div class="lest" id="lestnica"></div>
+  <div class="ryad" style="margin-top:10px">
+    <button class="da" onclick="poslednii()">Последний, что почувствовал</button>
+  </div>
+  <div class="otvet" id="o-предел">—</div>
+</div>
+
+<div class="blok">
+  <div class="zag">4 · ГЛАВНОЕ: СВОЙ РИТМ</div>
+  <div style="font-size:13.5px;color:var(--text2)">
+    Постучи по площадке как захочется, потом нажми «Повторить». Телефон должен
+    отдать тот же ритм вибрацией. Это и есть будущий «Пульс» целиком.
+  </div>
+  <div id="ploshadka">Стучи здесь</div>
+  <div class="ryad">
+    <button id="knopka-povtor">Повторить вибрацией</button>
+    <button onclick="sbros()">Сбросить</button>
+  </div>
+  <div class="ryad">
+    <button class="da"  onclick="otvet('свой ритм', true)">Совпало</button>
+    <button class="net" onclick="otvet('свой ритм', false)">Не то или ничего</button>
+  </div>
+  <div class="otvet" id="o-свой ритм">—</div>
+</div>
+
+<div class="blok">
+  <div class="zag">5 · ТОЛЬКО ДЛЯ IPHONE</div>
+  <div style="font-size:13.5px;color:var(--text2)">
+    Если предыдущее не сработало — это единственная известная лазейка к отдаче
+    на iPhone: переключатель, который сам по себе даёт лёгкий отклик.
+    На Android не значит ничего, пропускай.
+  </div>
+  <label style="display:flex;align-items:center;gap:12px;margin-top:12px;
+                background:var(--bg3);border:1px solid var(--border);
+                border-radius:12px;padding:12px">
+    <input type="checkbox" switch id="perekl" style="width:52px;height:32px">
+    <span style="font-size:14px">Переключи туда-обратно</span>
+  </label>
+  <div class="ryad">
+    <button class="da"  onclick="otvet('переключатель', true)">Отклик есть</button>
+    <button class="net" onclick="otvet('переключатель', false)">Ничего</button>
+  </div>
+  <div class="otvet" id="o-переключатель">—</div>
+</div>
+
+<div class="blok">
+  <div class="zag">ОТЧЁТ</div>
+  <div id="itog">—</div>
+  <button class="glav" style="margin-top:10px" onclick="skopirovat(this)">Скопировать отчёт</button>
+  <div class="predupr">Скопируй и пришли мне — по нему решим, строить ли «Пульс».</div>
+</div>
+
+<script>
+// ===== ЧТО ГОВОРИТ БРАУЗЕР =====
+const естьВибро = typeof navigator.vibrate === 'function';
+const наЭкране = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+function строка(имя, знач, цвет) {
+  return '<div class="stroka"><span>' + имя + '</span><span' +
+         (цвет ? ' style="color:' + цвет + '"' : '') + '>' + знач + '</span></div>';
+}
+document.getElementById('pro').innerHTML =
+  строка('navigator.vibrate', естьВибро ? 'есть' : 'НЕТ',
+         естьВибро ? 'var(--ok)' : 'var(--no)') +
+  строка('Устройство', /iPhone|iPad|iPod/.test(navigator.userAgent) ? 'iPhone / iPad'
+        : /Android/.test(navigator.userAgent) ? 'Android' : 'не телефон') +
+  строка('Открыто как', наЭкране ? 'приложение с экрана' : 'вкладка браузера') +
+  строка('Браузер', (navigator.userAgent.match(/(Chrome|CriOS|Firefox|FxiOS|YaBrowser|SamsungBrowser|Safari)\/[\d.]+/) || ['неизвестен'])[0]);
+
+// ===== ОТВЕТЫ ЧЕЛОВЕКА =====
+const ответы = {};
+function otvet(что, да) {
+  ответы[что] = да;
+  const el = document.getElementById('o-' + что);
+  el.textContent = да ? 'да, почувствовал' : 'нет, ничего';
+  el.className = 'otvet ' + (да ? 'yes' : 'no');
+  собратьОтчёт();
+}
+
+// vibrate возвращает булево — записываем и его: расхождение между «вернул
+// true» и «человек ничего не почувствовал» само по себе показательно
+let вернулПравду = null;
+function дрожать(узор) {
+  if (!естьВибро) { вернулПравду = 'нет такой возможности'; собратьОтчёт(); return; }
+  try { вернулПравду = navigator.vibrate(узор) ? 'true' : 'false'; }
+  catch (e) { вернулПравду = 'ошибка: ' + e.message; }
+  собратьОтчёт();
+}
+
+document.getElementById('knopka-korotko').onclick = () => дрожать(200);
+// Точка-точка-тире-точка-тире: если мотор не успевает, всё сольётся в жужжание
+document.getElementById('knopka-ritm').onclick = () => дрожать([90,110,90,110,320,110,90,110,320]);
+
+// ===== ЛЕСТНИЦА ДЛИТЕЛЬНОСТЕЙ =====
+const ступени = [300, 200, 150, 100, 70, 50, 35, 20];
+let последняяСтупень = null;
+const лест = document.getElementById('lestnica');
+ступени.forEach(мс => {
+  const b = document.createElement('button');
+  b.textContent = мс + ' мс';
+  b.onclick = () => { последняяСтупень = мс; b.classList.add('probovan'); дрожать(мс); };
+  лест.appendChild(b);
+});
+function poslednii() {
+  if (последняяСтупень === null) return;
+  ответы['предел'] = последняяСтупень;
+  const el = document.getElementById('o-предел');
+  el.textContent = 'самый короткий ощутимый: ' + последняяСтупень + ' мс';
+  el.className = 'otvet yes';
+  собратьОтчёт();
+}
+
+// ===== СВОЙ РИТМ =====
+// Записываем длительности нажатий и пауз между ними — ровно то, из чего
+// потом будет состоять «Пульс»
+let узор = [], началоНажатия = 0, конецПрошлого = 0;
+const площадка = document.getElementById('ploshadka');
+
+function нажал(e) {
+  e.preventDefault();
+  площадка.classList.add('zhmyot');
+  const t = performance.now();
+  if (конецПрошлого) узор.push(Math.round(t - конецПрошлого));   // пауза
+  началоНажатия = t;
+}
+function отпустил(e) {
+  e.preventDefault();
+  площадка.classList.remove('zhmyot');
+  if (!началоНажатия) return;
+  const t = performance.now();
+  узор.push(Math.round(t - началоНажатия));                      // сама дрожь
+  конецПрошлого = t;
+  началоНажатия = 0;
+  площадка.textContent = 'касаний: ' + Math.ceil(узор.length / 2);
+}
+площадка.addEventListener('pointerdown', нажал);
+площадка.addEventListener('pointerup', отпустил);
+площадка.addEventListener('pointercancel', отпустил);
+площадка.addEventListener('pointerleave', отпустил);
+
+function sbros() {
+  узор = []; конецПрошлого = 0; началоНажатия = 0;
+  площадка.textContent = 'Стучи здесь';
+  собратьОтчёт();
+}
+document.getElementById('knopka-povtor').onclick = () => {
+  if (!узор.length) { площадка.textContent = 'сначала постучи'; return; }
+  // navigator.vibrate ждёт [дрожь, пауза, дрожь, ...] — а у нас ровно так и
+  // накопилось, потому что паузу мы кладём перед каждым следующим нажатием
+  дрожать(узор.slice(0, 40));
+};
+
+// ===== ОТЧЁТ =====
+function собратьОтчёт() {
+  const л = [];
+  л.push('ПУЛЬС · проверка');
+  л.push('устройство: ' + (/iPhone|iPad|iPod/.test(navigator.userAgent) ? 'iPhone/iPad'
+        : /Android/.test(navigator.userAgent) ? 'Android' : 'не телефон'));
+  л.push('браузер: ' + (navigator.userAgent.match(/(Chrome|CriOS|Firefox|FxiOS|YaBrowser|SamsungBrowser|Safari)\/[\d.]+/) || ['?'])[0]);
+  л.push('открыто как: ' + (наЭкране ? 'приложение с экрана' : 'вкладка'));
+  л.push('navigator.vibrate: ' + (естьВибро ? 'есть' : 'НЕТ'));
+  л.push('vibrate вернул: ' + (вернулПравду === null ? 'не пробовали' : вернулПравду));
+  л.push('');
+  const п = (имя, ключ) => л.push(имя + ': ' + (ключ in ответы
+        ? (ответы[ключ] === true ? 'ДА' : ответы[ключ] === false ? 'НЕТ' : ответы[ключ]) : '—'));
+  п('1 чувствуется', 'чувствуется');
+  п('2 ритм различим', 'ритм');
+  л.push('3 предел: ' + ('предел' in ответы ? ответы['предел'] + ' мс' : '—'));
+  п('4 свой ритм совпал', 'свой ритм');
+  п('5 переключатель (iPhone)', 'переключатель');
+  if (узор.length) л.push('', 'записанный ритм: [' + узор.slice(0, 20).join(',') + ']');
+  document.getElementById('itog').textContent = л.join('\n');
+}
+собратьОтчёт();
+
+function skopirovat(b) {
+  const t = document.getElementById('itog').textContent;
+  navigator.clipboard.writeText(t).then(() => {
+    b.textContent = 'Скопировано';
+    setTimeout(() => b.textContent = 'Скопировать отчёт', 1600);
+  }).catch(() => { b.textContent = 'Выдели и скопируй вручную'; });
+}
+</script>
+</body>
+</html>

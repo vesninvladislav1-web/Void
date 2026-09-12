@@ -1,0 +1,21 @@
+{
+  "appId": "site.voidm.app",
+  "appName": "Void",
+  "webDir": "www",
+  "server": {
+    "url": "https://voidm.site",
+    "cleartext": false,
+    "allowNavigation": ["voidm.site", "*.voidm.site"]
+  },
+  "android": {
+    "backgroundColor": "#1C1917",
+    "allowMixedContent": false
+  },
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 900,
+      "backgroundColor": "#1C1917",
+      "showSpinner": false
+    }
+  }
+}
