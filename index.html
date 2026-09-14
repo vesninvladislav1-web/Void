@@ -217,6 +217,26 @@
   .file-ico .ico { width:22px; height:22px; color:var(--text2); }
   .chats-search { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:12px; padding:9px 14px 9px 36px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; transition:border 0.2s; }
   .chats-search:focus { border-color:var(--accent); }
+  /* Найденные сообщения — под списком чатов, по тому же запросу */
+  .global-hits { display:none; padding:0 0 100px; }
+  .global-hits.on { display:block; }
+  .global-hits-label { font-family:'Space Mono',monospace; font-size:10px; letter-spacing:2px; text-transform:uppercase; color:var(--text3); padding:16px 20px 6px; }
+  .global-hits-empty { font-size:13px; color:var(--text3); padding:6px 20px 14px; }
+  .ghit { display:flex; gap:12px; padding:10px 16px; cursor:pointer; align-items:center; border-radius:14px; margin:0 8px; }
+  .ghit:hover, .ghit:focus-visible { background:var(--bg3); outline:none; }
+  .ghit:active { background:var(--border); }
+  .ghit .avatar { width:36px; height:36px; font-size:14px; border-radius:11px; }
+  .ghit-info { flex:1; min-width:0; }
+  .ghit-top { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .ghit-name { font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .ghit-time { font-family:'Space Mono',monospace; font-size:10px; color:var(--text3); white-space:nowrap; }
+  .ghit-snippet { font-size:13px; color:var(--text2); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; margin-top:2px; }
+  /* Окна выгрузки и восстановления переписки */
+  .modal-text { font-size:13px; color:var(--text2); line-height:1.5; }
+  .modal-check { display:flex; gap:10px; align-items:flex-start; font-size:13px; cursor:pointer; line-height:1.4; }
+  .modal-check input { margin-top:3px; accent-color:var(--accent); flex-shrink:0; }
+  .modal-check small { display:block; color:var(--text3); font-size:11px; margin-top:2px; }
+  .modal-hod { font-family:'Space Mono',monospace; font-size:11px; color:var(--accent); min-height:14px; word-break:break-word; }
   /* Поиск внутри переписки */
   .chat-search { display:flex; align-items:center; gap:6px; padding:8px 10px; border-bottom:1px solid var(--border); background:var(--bg2); flex-shrink:0; }
   .chat-search input { flex:1; min-width:0; background:var(--bg3); border:1px solid var(--border); border-radius:10px; padding:8px 12px; color:var(--text); font-size:13px; font-family:'Inter',sans-serif; outline:none; }
@@ -1153,6 +1173,26 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
+      <div class="settings-section-label">Переписка</div>
+
+      <div class="settings-item" onclick="показатьВыгрузку()">
+        <div class="settings-item-icon" data-ico="archive"></div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Сохранить в файл</div>
+          <div class="settings-item-sub">Вся переписка, под своим паролем</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
+      <div class="settings-item" onclick="показатьВосстановление()">
+        <div class="settings-item-icon" data-ico="download"></div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Восстановить из файла</div>
+          <div class="settings-item-sub">Добавить то, чего здесь нет</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
       <div class="settings-section-label">Система</div>
 
       <div class="settings-item" onclick="showLangModal()">
@@ -1241,6 +1281,7 @@
             <button class="reg-btn near-secondary" onclick="showNewChatModal()"><i data-ico="search"></i>Найти по нику</button>
           </div>
         </div>
+        <div class="global-hits" id="global-hits"></div>
       </div>
     </div>
 
@@ -4127,6 +4168,9 @@
         </div>`;
       list.appendChild(item);
     });
+    // Найденные сообщения — под списком, а не над ним
+    const найденное = document.getElementById('global-hits');
+    if (найденное) list.appendChild(найденное);
   }
 
   function openChat(nick) {
@@ -4750,6 +4794,107 @@
       const hay = (groupOf(key)?.name || key).toLowerCase();
       item.style.display = hay.includes(q) ? '' : 'none';
     });
+    // По тому же запросу ниже ищутся сами сообщения — во всех переписках сразу
+    clearTimeout(общийПоискТаймер);
+    const запрос = q.trim();
+    if (запрос.length < 2) { показатьНайденное([], ''); return; }
+    общийПоискТаймер = setTimeout(() => поискПоВсем(запрос), 250);
+  }
+
+  // ===== ПОИСК ПО ВСЕМ ПЕРЕПИСКАМ =====
+  // Поиск внутри одной переписки был. Но человек помнит слово, а не того,
+  // кто его написал, — и открывать чаты по одному, чтобы найти, значит не
+  // найти. Сервер здесь бесполезен: у него шифротекст. Ищет устройство.
+  let общийПоискТаймер = null, общийПоискНомер = 0;
+
+  // Расшифровывать тысячи сообщений на каждую букву — лишнее. Тексты
+  // переписки запоминаются, пока в ней ничего не изменилось.
+  const кэшТекстов = {};
+  async function текстыПереписки(кто) {
+    const msgs = chats[кто]?.messages || [];
+    const последнее = msgs[msgs.length - 1];
+    const метка = msgs.length + '|' + (последнее?.timestamp || 0) + '|' + (последнее?.mid || '');
+    const к = кэшТекстов[кто];
+    if (к && к.метка === метка) return к.тексты;
+    const тексты = await Promise.all(msgs.map(m => m.system ? '' : decryptText(m.enc || { plain: m.text || '' })));
+    кэшТекстов[кто] = { метка, тексты };
+    return тексты;
+  }
+
+  async function поискПоВсем(запрос) {
+    const номер = ++общийПоискНомер;
+    const игла = запрос.toLowerCase();
+    const найдено = [];
+    for (const кто of Object.keys(chats)) {
+      if (кто === '__lan__') continue;
+      const msgs = chats[кто].messages || [];
+      const тексты = await текстыПереписки(кто);
+      if (номер !== общийПоискНомер) return;     // человек уже дописал запрос
+      тексты.forEach((t, i) => {
+        const м = msgs[i];
+        if (!м || м.system) return;
+        const тело = stripFwd(t).body;
+        if (тело.startsWith('__STICKER__') || тело.startsWith('__SOS__')) return;
+        // Вложение ищется по имени файла: внутрь картинки заглянуть нечем
+        const мета = parseFileMeta(тело);
+        const стог = мета ? (мета.name || '') : тело;
+        const поз = стог.toLowerCase().indexOf(игла);
+        if (поз === -1) return;
+        найдено.push({ кто, idx: i, стог, поз, время: м.timestamp || 0, own: !!м.own, sender: м.sender });
+      });
+    }
+    найдено.sort((a, b) => b.время - a.время);
+    показатьНайденное(найдено.slice(0, 60), запрос);
+  }
+
+  function показатьНайденное(список, запрос) {
+    const короб = document.getElementById('global-hits');
+    if (!короб) return;
+    if (!запрос) { короб.classList.remove('on'); короб.innerHTML = ''; return; }
+    короб.classList.add('on');
+    if (!список.length) {
+      короб.innerHTML = '<div class="global-hits-label">Сообщения</div><div class="global-hits-empty">Ничего не нашлось</div>';
+      return;
+    }
+    короб.innerHTML = '<div class="global-hits-label">Сообщения · ' + список.length + '</div>';
+    for (const н of список) {
+      const чат = chats[н.кто] || {};
+      const grp = groupOf(н.кто);
+      const имя = grp ? esc(grp.name) : isLanChat(н.кто) ? esc(чат.name || 'LAN') : '@' + esc(н.кто);
+      // Кусок текста вокруг найденного: начало обрезаем, чтобы совпадение
+      // не уехало за край строки. Границы подсветки — служебные символы,
+      // которые ставятся до экранирования и заменяются после: так в разметку
+      // не попадает ничего из самого текста.
+      const от = Math.max(0, н.поз - 28), до = н.поз + запрос.length;
+      const кусок = (от > 0 ? '…' : '') + н.стог.slice(от, н.поз) + '' + н.стог.slice(н.поз, до) + '' + н.стог.slice(до, до + 80);
+      const кто = н.own ? 'Вы: ' : (isRoom(н.кто) && н.sender ? esc(н.sender) + ': ' : '');
+      const строка = document.createElement('div');
+      строка.className = 'ghit';
+      строка.setAttribute('role', 'button'); строка.tabIndex = 0;
+      строка.innerHTML = `
+        <div class="avatar" style="background:${чат.color || '#888'}">${grp ? ico('group', 16) : isLanChat(н.кто) ? ico('lan', 16) : avatarInner(н.кто)}</div>
+        <div class="ghit-info">
+          <div class="ghit-top"><span class="ghit-name">${имя}</span><span class="ghit-time">${relativeTime(н.время)}</span></div>
+          <div class="ghit-snippet">${кто}${esc(кусок).replace('', '<mark class="hl">').replace('', '</mark>')}</div>
+        </div>`;
+      const идти = () => перейтиКНайденному(н.кто, н.idx, запрос);
+      строка.onclick = идти;
+      строка.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); идти(); } };
+      короб.appendChild(строка);
+    }
+  }
+
+  // Открыть переписку и встать на найденное. Поиск внутри чата подхватывает
+  // тот же запрос: стрелки «дальше/назад» работают сразу.
+  async function перейтиКНайденному(кто, idx, запрос) {
+    if (!chats[кто]) return;
+    openChat(кто);
+    openChatSearch();
+    const inp = document.getElementById('chat-search-input');
+    if (inp) inp.value = запрос;
+    await runChatSearch(запрос);
+    const p = chatSearch.hits.indexOf(idx);
+    if (p >= 0) { chatSearch.pos = p; updateSearchCount(); jumpToHit(); }
   }
 
   // ===== МОДАЛКИ НАСТРОЕК =====
@@ -6478,22 +6623,24 @@
     if (базаФайлов) return Promise.resolve(базаФайлов);
     return new Promise((готово, беда) => {
       let зпр;
-      try { зпр = indexedDB.open('void-files', 1); }
+      try { зпр = indexedDB.open('void-files', 2); }
       catch (e) { return беда(e); }
       зпр.onupgradeneeded = () => {
         const б = зпр.result;
         if (!б.objectStoreNames.contains('ждут')) б.createObjectStore('ждут', { keyPath: 'ключ' });
+        // Вложения из восстановленного файла переписки. Сервер их мог уже
+        // забыть — или его может уже не быть, — а здесь они остаются.
+        if (!б.objectStoreNames.contains('архив')) б.createObjectStore('архив', { keyPath: 'id' });
       };
       зпр.onsuccess = () => { базаФайлов = зпр.result; готово(базаФайлов); };
       зпр.onerror = () => беда(зпр.error || new Error('IndexedDB недоступна'));
     });
   }
 
-  function действиеСФайлами(режим, что) {
+  function действиеСФайлами(режим, что, хранилище = 'ждут') {
     return открытьБазуФайлов().then(б => new Promise((готово, беда) => {
-      const сделка = б.transaction('ждут', режим);
-      const хранилище = сделка.objectStore('ждут');
-      const зпр = что(хранилище);
+      const сделка = б.transaction(хранилище, режим);
+      const зпр = что(сделка.objectStore(хранилище));
       сделка.oncomplete = () => готово(зпр ? зпр.result : undefined);
       сделка.onerror = () => беда(сделка.error);
     }));
@@ -6502,6 +6649,8 @@
   const положитьФайл = запись => действиеСФайлами('readwrite', х => х.put(запись));
   const убратьФайл   = ключ   => действиеСФайлами('readwrite', х => х.delete(ключ));
   const всеФайлы     = ()     => действиеСФайлами('readonly',  х => х.getAll());
+  const положитьВАрхив = запись => действиеСФайлами('readwrite', х => х.put(запись), 'архив');
+  const изАрхива       = id     => действиеСФайлами('readonly',  х => х.get(id), 'архив');
 
   // Сколько сейчас занято ждущими файлами
   async function занятоФайлами() {
@@ -9201,6 +9350,14 @@
   // Подгружаем и расшифровываем вложение по требованию
   async function loadBlob(peer, meta) {
     if (blobCache[meta.id]) return blobCache[meta.id];
+    // Сначала своё хранилище: туда ложатся вложения из восстановленного
+    // файла, и они открываются даже когда сервер их давно стёр
+    if (meta.id) {
+      try {
+        const з = await изАрхива(meta.id);
+        if (з && з.байты) { blobCache[meta.id] = з.байты; return з.байты; }
+      } catch (e) {}
+    }
     try {
       const r = await fetch(API + '/api/blob/get', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -9334,6 +9491,287 @@
   // const: обработчики onclick ищут функцию в глобальной области, куда
   // объявление через const не попадает.
   function saveFile(idx) { return saveMedia(idx); }
+
+  // ===== ПЕРЕПИСКА В ФАЙЛ =====
+  // История живёт на устройстве, вложения — на сервере, и оба смертны:
+  // телефон теряется, сервер выключают за неоплату. Файл — третье место,
+  // которое не зависит ни от того, ни от другого.
+  //
+  // Устройство файла: метка «VOIDARC1», соль, дальше записи подряд — четыре
+  // байта длины, двенадцать байт iv, шифротекст. Первая запись — описание
+  // (переписки и сообщения открытым текстом), остальные — по одному вложению.
+  // Каждая запись шифруется отдельно: вложения не надо держать в памяти все
+  // разом, а открывать файл можно по кускам.
+  //
+  // Ключ — из пароля через PBKDF2, триста тысяч кругов. Пароль к файлу
+  // отдельный: мастер-ключ аккаунта не должен покидать устройство ни в каком
+  // виде. Забытый пароль от файла — потерянный файл, лечения нет.
+  const АРХИВ_МЕТКА  = 'VOIDARC1';
+  const АРХИВ_КРУГОВ = 300000;
+
+  async function архивныйКлюч(пароль, соль) {
+    const сырой = await crypto.subtle.importKey('raw', new TextEncoder().encode(пароль), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: соль, iterations: АРХИВ_КРУГОВ, hash: 'SHA-256' },
+                                   сырой, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+
+  async function архивнаяЗапись(ключ, байты) {
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, ключ, байты));
+    const длина = new Uint8Array(4);
+    new DataView(длина.buffer).setUint32(0, ct.byteLength);
+    return [длина, iv, ct];
+  }
+
+  // Сколько есть что сохранять — для подписи в окне
+  function размерПереписки() {
+    let переписок = 0, писем = 0;
+    for (const [кто, чат] of Object.entries(chats)) {
+      if (кто === '__lan__') continue;
+      переписок++; писем += (чат.messages || []).length;
+    }
+    return { переписок, писем };
+  }
+
+  async function собратьАрхив(пароль, сВложениями, ход) {
+    const соль = crypto.getRandomValues(new Uint8Array(16));
+    const ключ = await архивныйКлюч(пароль, соль);
+    const чаты = {}, вложения = [];
+    let писем = 0, нечитаемых = 0;
+    for (const [кто, чат] of Object.entries(chats)) {
+      if (кто === '__lan__') continue;
+      const { messages, ...прочее } = чат;
+      const письма = [];
+      for (const м of (messages || [])) {
+        const { enc, ...остальное } = м;
+        let текст = '';
+        if (!м.system) {
+          текст = await decryptText(enc || { plain: м.text || '' });
+          if (текст === '[не удалось открыть]' || текст === '[недоступно]') { нечитаемых++; continue; }
+          delete остальное.text;
+          // Ждущие и несостоявшиеся — состояние этого устройства, не история
+          delete остальное.pending; delete остальное.файлЖдёт;
+          if (сВложениями && !isRoom(кто)) {
+            const мета = parseFileMeta(stripFwd(текст).body);
+            if (мета?.id && !вложения.some(в => в.id === мета.id)) вложения.push({ id: мета.id, кто, мета });
+          }
+        }
+        письма.push({ ...остальное, текст });
+        писем++;
+      }
+      чаты[кто] = { ...прочее, unread: 0, messages: письма };
+    }
+    const описание = { формат: АРХИВ_МЕТКА, версия: 1, ник: myName, создан: Date.now(), чаты };
+    const части = [new TextEncoder().encode(АРХИВ_МЕТКА), соль,
+                   ...await архивнаяЗапись(ключ, new TextEncoder().encode(JSON.stringify(описание)))];
+
+    // Вложения — по одному: скачал, зашифровал, отпустил. Внутри записи
+    // сначала опознаватель и перевод строки, потом сами байты.
+    let вложений = 0, безВложений = 0;
+    for (let i = 0; i < вложения.length; i++) {
+      ход('Вложение ' + (i + 1) + ' из ' + вложения.length + '…');
+      const былоВКэше = !!blobCache[вложения[i].id];
+      const буф = await loadBlob(вложения[i].кто, вложения[i].мета);
+      if (!буф) { безВложений++; continue; }
+      const шапка = new TextEncoder().encode(вложения[i].id + '\n');
+      const тело = new Uint8Array(шапка.length + буф.byteLength);
+      тело.set(шапка, 0); тело.set(new Uint8Array(буф), шапка.length);
+      части.push(...await архивнаяЗапись(ключ, тело));
+      if (!былоВКэше) delete blobCache[вложения[i].id];
+      вложений++;
+    }
+    return { файл: new Blob(части, { type: 'application/octet-stream' }), писем, нечитаемых, вложений, безВложений };
+  }
+
+  // Отдать файл человеку. На телефоне — системное окно «Поделиться»: там
+  // есть «Сохранить в Файлы». Не вышло — обычное скачивание.
+  async function отдатьФайл(blob, имя) {
+    const file = new File([blob], имя, { type: 'application/octet-stream' });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); return true; }
+      catch (e) { if (e && e.name === 'AbortError') return false; }
+    }
+    const url = URL.createObjectURL(file);
+    const a = document.createElement('a');
+    a.href = url; a.download = имя;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    return true;
+  }
+
+  function показатьВыгрузку() {
+    if (!myName) return;
+    const { переписок, писем } = размерПереписки();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">СОХРАНИТЬ ПЕРЕПИСКУ</div>
+        <div class="modal-text">Переписок: ${переписок}, сообщений: ${писем}. Файл откроется только этим паролем — запиши его, восстановить его нельзя. Сервер файл не видит.</div>
+        <input type="password" class="modal-input" id="arh-parol" placeholder="Пароль к файлу, от 8 знаков" autocomplete="new-password">
+        <label class="modal-check"><input type="checkbox" id="arh-vlozh" checked><span>Вместе с вложениями<small>фото, файлы, голосовые — те, что ещё есть на сервере</small></span></label>
+        <div class="modal-hod" id="arh-hod"></div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+          <button class="btn-primary" id="arh-go" onclick="выгрузитьПереписку()">Сохранить</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('arh-parol')?.focus(), 50);
+  }
+
+  let выгрузкаИдёт = false;
+  async function выгрузитьПереписку() {
+    if (выгрузкаИдёт) return;
+    const ход = т => { const э = document.getElementById('arh-hod'); if (э) э.textContent = т; };
+    const пароль = document.getElementById('arh-parol')?.value || '';
+    if (пароль.length < 8) { ход('Пароль короче восьми знаков'); return; }
+    const сВложениями = !!document.getElementById('arh-vlozh')?.checked;
+    const кнопка = document.getElementById('arh-go');
+    выгрузкаИдёт = true;
+    if (кнопка) кнопка.disabled = true;
+    try {
+      ход('Собираю…');
+      const итог = await собратьАрхив(пароль, сВложениями, ход);
+      ход('Готово: ' + humanSize(итог.файл.size));
+      const имя = 'void-' + myName + '-' + new Date().toISOString().slice(0, 10) + '.voidarc';
+      if (await отдатьФайл(итог.файл, имя)) {
+        let слова = 'Сохранено: сообщений ' + итог.писем + (итог.вложений ? ', вложений ' + итог.вложений : '');
+        if (итог.безВложений) слова += '. Не достались с сервера: ' + итог.безВложений;
+        if (итог.нечитаемых) слова += '. Не открылись: ' + итог.нечитаемых;
+        showToast(слова);
+        document.getElementById('arh-go')?.closest('.modal-overlay')?.remove();
+      } else ход('');
+    } catch (e) {
+      ход('Не вышло: ' + (e.message || e));
+    } finally {
+      выгрузкаИдёт = false;
+      if (кнопка) кнопка.disabled = false;
+    }
+  }
+
+  function показатьВосстановление() {
+    if (!myName) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">ВОССТАНОВИТЬ ИЗ ФАЙЛА</div>
+        <div class="modal-text">Файл, сохранённый из Void, и пароль от него. Что уже есть — не задвоится, недостающее добавится. Вложения из файла останутся на этом устройстве.</div>
+        <input type="file" id="arh-file" style="display:none" onchange="document.getElementById('arh-file-name').textContent = this.files[0] ? this.files[0].name + ' · ' + humanSize(this.files[0].size) : ''">
+        <button class="btn-secondary" style="width:100%" onclick="document.getElementById('arh-file').click()">Выбрать файл</button>
+        <div class="modal-hod" id="arh-file-name"></div>
+        <input type="password" class="modal-input" id="arh-parol2" placeholder="Пароль к файлу" autocomplete="off">
+        <div class="modal-hod" id="arh-hod2"></div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+          <button class="btn-primary" id="arh-go2" onclick="восстановитьПереписку()">Восстановить</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+  }
+
+  let восстановлениеИдёт = false;
+  async function восстановитьПереписку() {
+    if (восстановлениеИдёт) return;
+    const ход = т => { const э = document.getElementById('arh-hod2'); if (э) э.textContent = т; };
+    const файл = document.getElementById('arh-file')?.files?.[0];
+    const пароль = document.getElementById('arh-parol2')?.value || '';
+    if (!файл) { ход('Сначала выбери файл'); return; }
+    if (!пароль) { ход('Введи пароль от файла'); return; }
+    const кнопка = document.getElementById('arh-go2');
+    восстановлениеИдёт = true;
+    if (кнопка) кнопка.disabled = true;
+    try {
+      ход('Читаю файл…');
+      const итог = await разобратьАрхив(new Uint8Array(await файл.arrayBuffer()), пароль, ход);
+      saveState(); renderChatList();
+      if (currentChat) renderMessages();
+      let слова = 'Добавлено сообщений: ' + итог.добавлено + (итог.повторов ? ', уже было: ' + итог.повторов : '');
+      if (итог.вложений) слова += ', вложений: ' + итог.вложений;
+      showToast(слова);
+      document.getElementById('arh-go2')?.closest('.modal-overlay')?.remove();
+    } catch (e) {
+      ход(e.message || String(e));
+    } finally {
+      восстановлениеИдёт = false;
+      if (кнопка) кнопка.disabled = false;
+    }
+  }
+
+  async function разобратьАрхив(б, пароль, ход) {
+    if (б.length < 40 || new TextDecoder().decode(б.subarray(0, 8)) !== АРХИВ_МЕТКА) throw new Error('Это не файл переписки Void');
+    const ключ = await архивныйКлюч(пароль, б.subarray(8, 24));
+    let поз = 24;
+    const читать = async () => {
+      if (поз + 16 > б.length) return null;
+      const длина = new DataView(б.buffer, б.byteOffset + поз, 4).getUint32(0);
+      const iv = б.subarray(поз + 4, поз + 16);
+      const ct = б.subarray(поз + 16, поз + 16 + длина);
+      if (ct.length !== длина) throw new Error('Файл обрезан');
+      поз += 16 + длина;
+      return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, ключ, ct));
+    };
+    // Первая запись под неверным паролем не расшифруется: AES-GCM это
+    // проверяет сам, ничего похожего на текст из чужого ключа не выйдет
+    let первая;
+    try { первая = await читать(); } catch (e) { throw new Error('Пароль не подошёл'); }
+    if (!первая) throw new Error('Файл пуст');
+    const описание = JSON.parse(new TextDecoder().decode(первая));
+    if (описание.формат !== АРХИВ_МЕТКА || !описание.чаты) throw new Error('Файл повреждён');
+    if (acctId(описание.ник) !== acctId(myName)) throw new Error('Это переписка @' + описание.ник + ', а ты вошёл как @' + myName);
+
+    ход('Разбираю сообщения…');
+    const { добавлено, повторов } = await влитьПереписку(описание.чаты);
+
+    // Вложения — на устройство, в своё хранилище. Повреждённый хвост файла
+    // не отменяет уже влитые сообщения: они дороже.
+    let вложений = 0;
+    for (let n = 1; ; n++) {
+      let запись;
+      try { запись = await читать(); } catch (e) { console.warn('[архив] Хвост файла не читается:', e.message); break; }
+      if (!запись) break;
+      ход('Вложение ' + n + '…');
+      const конец = запись.indexOf(10);
+      if (конец === -1) continue;
+      const id = new TextDecoder().decode(запись.subarray(0, конец));
+      const байты = запись.slice(конец + 1).buffer;
+      try { await положитьВАрхив({ id, байты }); blobCache[id] = байты; вложений++; }
+      catch (e) { console.warn('[архив] Вложение не легло:', e.message); }
+    }
+    return { добавлено, повторов, вложений };
+  }
+
+  // Влить переписки из файла в свои. Повтор узнаётся по опознавателю письма,
+  // а у писем без него — по отпечатку: время, чьё, текст.
+  async function влитьПереписку(чаты) {
+    let добавлено = 0, повторов = 0;
+    for (const [кто, чат] of Object.entries(чаты)) {
+      if (кто === '__lan__' || !чат || !Array.isArray(чат.messages)) continue;
+      if (!chats[кто]) {
+        const { messages, ...прочее } = чат;
+        chats[кто] = { ...прочее, unread: 0, messages: [] };
+      }
+      const свои = chats[кто].messages;
+      const естьMid = new Set(свои.filter(м => м.mid).map(м => м.mid));
+      const тексты = await текстыПереписки(кто);
+      const отпечаток = (м, текст) => (м.timestamp || 0) + '|' + (м.own ? 1 : 0) + '|' + (м.system ? (м.text || '') : текст);
+      const отпечатки = new Set(свои.map((м, i) => отпечаток(м, тексты[i])));
+      for (const п of чат.messages) {
+        const { текст, ...остальное } = п;
+        const о = отпечаток(п, текст || '');
+        if ((п.mid && естьMid.has(п.mid)) || отпечатки.has(о)) { повторов++; continue; }
+        const м = { ...остальное };
+        if (!п.system) м.enc = await encryptText(текст || '');
+        свои.push(м); добавлено++;
+        if (п.mid) естьMid.add(п.mid);
+        отпечатки.add(о);
+      }
+      свои.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      delete кэшТекстов[кто];
+    }
+    return { добавлено, повторов };
+  }
 
   // ===== ГРУППОВЫЕ ЧАТЫ =====
   // Сервер про группы ничего не знает: сообщение шифруется отдельно для
