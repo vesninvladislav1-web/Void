@@ -1184,7 +1184,7 @@
         <div class="settings-item-arrow">›</div>
       </div>
 
-      <div class="settings-item" onclick="показатьВосстановление()">
+      <div class="settings-item" onclick="показатьВосстановлениеИзФайла()">
         <div class="settings-item-icon" data-ico="download"></div>
         <div class="settings-item-info">
           <div class="settings-item-name">Восстановить из файла</div>
@@ -1573,8 +1573,8 @@
       localStorage.removeItem('void_pass:' + id);
       localStorage.removeItem('void_e2e:' + id);
       sessionStorage.removeItem('void_sess:' + id);
-      if (wipeChats) localStorage.removeItem('void_chats:' + id);
     } catch(e) {}
+    if (wipeChats) стеретьЧаты(id);
     try { if (localStorage.getItem('void_active') === id) localStorage.removeItem('void_active'); } catch(e) {}
   }
 
@@ -1895,7 +1895,7 @@
     storeSessionPass(token, true);
     cryptoKey = await deriveKey(currentSeed);
     // Переписка этого аккаунта, если он уже был на устройстве
-    try { chats = JSON.parse(localStorage.getItem('void_chats:' + acctId(serverNick))) || {}; } catch(e) { chats = {}; }
+    chats = await прочитатьЧаты(acctId(serverNick));
     currentChat = null;
     restoreProfileFields(serverNick);
     applyPrefs();
@@ -1903,6 +1903,119 @@
   }
 
   async function login() { return loginAnon(); }
+
+  // ===== ПЕРЕПИСКА: INDEXEDDB =====
+  // Раньше вся история лежала в localStorage одной строкой JSON. У него
+  // потолок около пяти мегабайт на сайт, и упор в него выглядел так:
+  // setItem бросает исключение, catch его глотает, и с этой секунды ничего
+  // не сохраняется — а человек ничего не замечает, пока не перезапустит
+  // приложение. Самый тихий способ потерять переписку из возможных.
+  //
+  // IndexedDB: сотни мегабайт, запись не держит страницу, а объект кладётся
+  // как есть, без JSON.stringify всей истории на каждое письмо. Запись
+  // откладывается на треть секунды и склеивается: десять писем подряд —
+  // одна запись. При сворачивании страницы — немедленно.
+  //
+  // localStorage остаётся запасным путём: если IndexedDB недоступна
+  // (некоторые приватные режимы), всё работает как раньше.
+  const ЧАТЫ_ЗАДЕРЖКА = 300;
+  let базаЧатов = null, базаЧатовНет = false;
+  let ждущиеЗаписи = {};      // id → { чаты, таймер }
+  let местоКончилось = false;
+
+  function открытьБазуЧатов() {
+    if (базаЧатов) return Promise.resolve(базаЧатов);
+    if (базаЧатовНет) return Promise.resolve(null);
+    return new Promise(готово => {
+      let зпр;
+      try { зпр = indexedDB.open('void-chats', 1); }
+      catch (e) { базаЧатовНет = true; return готово(null); }
+      зпр.onupgradeneeded = () => {
+        const б = зпр.result;
+        if (!б.objectStoreNames.contains('чаты')) б.createObjectStore('чаты', { keyPath: 'id' });
+      };
+      зпр.onsuccess = () => { базаЧатов = зпр.result; базаЧатов.onclose = () => { базаЧатов = null; }; готово(базаЧатов); };
+      зпр.onerror = () => { базаЧатовНет = true; console.warn('[чаты] IndexedDB недоступна, остаёмся в localStorage:', зпр.error?.message); готово(null); };
+      зпр.onblocked = () => { базаЧатовНет = true; готово(null); };
+    });
+  }
+
+  function сделкаЧатов(режим, что) {
+    return открытьБазуЧатов().then(б => {
+      if (!б) throw new Error('нет базы');
+      return new Promise((готово, беда) => {
+        const сделка = б.transaction('чаты', режим);
+        const зпр = что(сделка.objectStore('чаты'));
+        сделка.oncomplete = () => готово(зпр ? зпр.result : undefined);
+        сделка.onerror = () => беда(сделка.error || new Error('сделка не прошла'));
+        сделка.onabort = () => беда(сделка.error || new Error('сделка отменена'));
+      });
+    });
+  }
+
+  // Прочитать переписку аккаунта. Порядок: IndexedDB, потом localStorage —
+  // старое место. Найденное в старом сразу переносится в новое.
+  async function прочитатьЧаты(id) {
+    let изБазы = null;
+    try { изБазы = await сделкаЧатов('readonly', х => х.get(id)); } catch (e) {}
+    if (изБазы && изБазы.чаты) return изБазы.чаты;
+    let старое = null;
+    try { старое = JSON.parse(localStorage.getItem('void_chats:' + id)); } catch (e) {}
+    if (старое && typeof старое === 'object') {
+      // Переезд. Старая запись сотрётся только после удачной записи новой.
+      if (!базаЧатовНет) запомнитьЧаты(id, старое);
+      return старое;
+    }
+    return {};
+  }
+
+  // Отложенная запись. Держим ссылку на сам объект, а не читаем глобальную
+  // chats при срабатывании: к тому моменту она может указывать уже на
+  // переписку другого аккаунта.
+  function запомнитьЧаты(id, чаты) {
+    const ж = ждущиеЗаписи[id] || (ждущиеЗаписи[id] = {});
+    ж.чаты = чаты;
+    clearTimeout(ж.таймер);
+    ж.таймер = setTimeout(() => записатьЧатыСейчас(id), ЧАТЫ_ЗАДЕРЖКА);
+  }
+
+  async function записатьЧатыСейчас(id) {
+    const ж = ждущиеЗаписи[id];
+    if (!ж) return;
+    clearTimeout(ж.таймер);
+    delete ждущиеЗаписи[id];
+    const чаты = ж.чаты;
+    try {
+      await сделкаЧатов('readwrite', х => х.put({ id, чаты, когда: Date.now() }));
+      try { localStorage.removeItem('void_chats:' + id); } catch (e) {}   // старое место больше не нужно
+      return;
+    } catch (e) {
+      if (!базаЧатовНет && /quota/i.test(String(e?.name || e))) {
+        if (!местоКончилось) { местоКончилось = true; showToast('На устройстве кончилось место — переписка не сохраняется'); }
+        return;
+      }
+      if (!базаЧатовНет) console.warn('[чаты] Запись в IndexedDB не прошла, пишу в localStorage:', e?.message || e);
+    }
+    // Базы нет — запасной путь, как было всегда
+    try { localStorage.setItem('void_chats:' + id, JSON.stringify(чаты)); }
+    catch (e) {
+      if (!местоКончилось) { местоКончилось = true; showToast('На устройстве кончилось место — переписка не сохраняется'); }
+    }
+  }
+
+  // Всё ждущее — на диск немедленно: уход со страницы, смена аккаунта
+  function сброситьЧатыНаДиск() {
+    return Promise.all(Object.keys(ждущиеЗаписи).map(id => записатьЧатыСейчас(id)));
+  }
+
+  async function стеретьЧаты(id) {
+    if (ждущиеЗаписи[id]) { clearTimeout(ждущиеЗаписи[id].таймер); delete ждущиеЗаписи[id]; }
+    try { localStorage.removeItem('void_chats:' + id); } catch (e) {}
+    try { await сделкаЧатов('readwrite', х => х.delete(id)); } catch (e) {}
+  }
+
+  document.addEventListener('visibilitychange', () => { if (document.hidden) сброситьЧатыНаДиск(); });
+  window.addEventListener('pagehide', () => { сброситьЧатыНаДиск(); });
 
   // ===== LOCALSTORAGE =====
   function saveState() {
@@ -1922,10 +2035,10 @@
       localStorage.setItem('void_acct:' + id, JSON.stringify({
         name:myName, avatar:myAvatar, seed:currentSeed, authMode, passwordHash, myStatus, isAdmin
       }));
-      localStorage.setItem('void_chats:' + id, JSON.stringify(chats));
       localStorage.setItem('void_active', id);
       upsertAccount({ id, nick:myName, authMode, avatar:myAvatar, isAdmin });
     } catch(e) {}
+    запомнитьЧаты(id, chats);
   }
 
   function applyPrefs() {
@@ -1953,7 +2066,7 @@
     myStatus = (u && u.myStatus) || '';
   }
 
-  function loadAccountInto(id) {
+  async function loadAccountInto(id) {
     let user = null;
     try { user = JSON.parse(localStorage.getItem('void_acct:' + id)); } catch(e) {}
     if (!user || !user.name) return false;
@@ -1967,18 +2080,18 @@
     // всё равно подтверждает сервер при auth-ok и на каждом запросе
     isAdmin = user.isAdmin === true;
     updateAdminMenuVisibility();
-    try { chats = JSON.parse(localStorage.getItem('void_chats:' + id)) || {}; } catch(e) { chats = {}; }
+    chats = await прочитатьЧаты(id);
     delete chats['__lan__']; // очистка старого формата
     return true;
   }
 
-  function loadState() {
+  async function loadState() {
     try {
       migrateLegacyStorage();
       applyPrefs();
       const id = localStorage.getItem('void_active');
       if (!id) return false;
-      return loadAccountInto(id);
+      return await loadAccountInto(id);
     } catch(e) { return false; }
   }
 
@@ -2114,7 +2227,7 @@
 
   // Автовход при загрузке
   window.addEventListener('DOMContentLoaded', async () => {
-    if (loadState()) {
+    if (await loadState()) {
       clearInterval(neonInterval);
       requestNotifications();
       // Устройство, на которое личность перенесли с телефона: пароля здесь
@@ -3286,7 +3399,7 @@
     passwordHash = await hashPassword(nick, pass);
     cryptoKey = await deriveKey([nick, pass]);
     // Переписка этого аккаунта, если он уже был на устройстве
-    try { chats = JSON.parse(localStorage.getItem('void_chats:' + acctId(nick))) || {}; } catch(e) { chats = {}; }
+    chats = await прочитатьЧаты(acctId(nick));
     currentSeed = [];
     currentChat = null;
     restoreProfileFields(nick);
@@ -7702,7 +7815,7 @@
       } catch (e) {}
       storeSessionPass(пароль, true, д.nick);
       // Переписка этого аккаунта, если она осталась на устройстве
-      try { chats = JSON.parse(localStorage.getItem('void_chats:' + id)) || {}; } catch (e) { chats = {}; }
+      chats = await прочитатьЧаты(id);
       currentSeed = []; currentChat = null;
       document.getElementById('recov-overlay')?.remove();
       restoreProfileFields(д.nick);
@@ -9028,10 +9141,11 @@
   async function switchAccount(id) {
     if (!id || id === acctId(myName)) { document.getElementById('accounts-overlay')?.remove(); return; }
     saveState();                 // не теряем то, что успели написать
+    await сброситьЧатыНаДиск();
     document.getElementById('accounts-overlay')?.remove();
     resetSessionState();
 
-    if (!loadAccountInto(id)) { showToast('Аккаунт не найден'); showAuthScreen(); return; }
+    if (!(await loadAccountInto(id))) { showToast('Аккаунт не найден'); showAuthScreen(); return; }
     try { localStorage.setItem('void_active', id); } catch(e) {}
 
     document.getElementById('profile-nick').textContent = '@' + myName;
@@ -9650,7 +9764,9 @@
     }
   }
 
-  function показатьВосстановление() {
+  // «ИзФайла» в имени не для красоты: показатьВосстановление() уже есть —
+  // это возврат пароля по фразе, и одноимённая функция его перекрывала.
+  function показатьВосстановлениеИзФайла() {
     if (!myName) return;
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
