@@ -81,8 +81,11 @@
   .light body::before, body.light::before { opacity:0.03; }
 
   /* ===== ЭКРАН РЕГИСТРАЦИИ ===== */
+  /* Раньше здесь была своя сплошная заливка поверх колодца и зерна фона —
+     первое, что видит человек, было ровнее и площе всего остального
+     приложения. Убрана: экран теперь стоит на том же фоне, что и всё. */
   #register-screen {
-    position:fixed; inset:0; background:var(--bg);
+    position:fixed; inset:0;
     display:flex; flex-direction:column; align-items:center; justify-content:center;
     gap:36px; z-index:300; transition:opacity 0.5s,transform 0.5s;
   }
@@ -92,14 +95,20 @@
   .neon-letter { display:inline-block; color:#fff; text-shadow:0 0 7px #fff,0 0 18px #fff,0 0 35px var(--accent),0 0 70px var(--accent),0 0 100px var(--accent); transition:color 0.15s,text-shadow 0.15s; }
   .neon-letter.dim { color:var(--bg2); text-shadow:none; }
 
-  .reg-form { display:flex; flex-direction:column; align-items:center; gap:14px; width:300px; }
+  /* Формы стояли прямо на фоне, без единой поверхности под собой — то же
+     самое рассогласование, что было в боковом меню. Теперь это карточка,
+     как модальные окна дальше в приложении: тот же материал с первого экрана. */
+  .reg-form { display:flex; flex-direction:column; align-items:center; gap:14px; width:300px;
+    background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur);
+    border:1px solid var(--glass-border); border-top-color:var(--edge);
+    border-radius:var(--radius-xl); padding:28px 24px; }
   .reg-label { font-size:11px; letter-spacing:3px; color:var(--text3); text-transform:uppercase; font-family:'Space Mono',monospace; align-self:flex-start; }
-  .reg-input { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:14px; padding:14px 18px; color:var(--text); font-size:15px; font-family:'Inter',sans-serif; outline:none; transition:border 0.2s,box-shadow 0.2s; text-align:center; }
+  .reg-input { width:100%; background:var(--bg3); border:1px solid var(--border); border-top-color:var(--edge); border-radius:14px; padding:14px 18px; color:var(--text); font-size:15px; font-family:'Inter',sans-serif; outline:none; transition:border 0.2s,box-shadow 0.2s; text-align:center; }
   .reg-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--shadow); }
   .reg-input::placeholder { color:var(--text3); }
-  .seed-box { width:100%; background:var(--bg3); border:1px solid var(--border); border-radius:14px; padding:14px 16px; }
+  .seed-box { width:100%; background:var(--bg3); border:1px solid var(--border); border-top-color:var(--edge); border-radius:14px; padding:14px 16px; }
   .seed-words { font-family:'Space Mono',monospace; font-size:12px; color:var(--accent); line-height:2; word-break:break-word; letter-spacing:0.5px; }
-  .copy-seed-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; }
+  .copy-seed-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-top-color:var(--edge); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; }
   .copy-seed-btn:hover { border-color:var(--accent); color:var(--accent); }
   .copy-seed-btn.copied { border-color:var(--online); color:var(--online); }
   .reg-hint { font-size:11px; color:var(--text3); text-align:center; line-height:1.6; }
@@ -123,7 +132,7 @@
 
   .primary-btn { background:var(--accent); border:none; color:white; }
   .primary-btn:hover { background:#E55A3C; }
-  .secondary-btn { background:transparent; border:1px solid var(--border); color:var(--text2); }
+  .secondary-btn { background:transparent; border:1px solid var(--border); border-top-color:var(--edge); color:var(--text2); }
   .secondary-btn:hover { border-color:var(--accent); color:var(--text); }
 
   @keyframes fadeInUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:none} }
@@ -920,7 +929,7 @@
     <label class="remember-row"><input type="checkbox" id="sreg-remember" checked><span>Запомнить на этом устройстве</span></label>
     <div class="reg-hint">Минимум 6 символов. Пароль нельзя восстановить.</div>
     <div style="display:flex;gap:10px;width:100%;">
-      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
+      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="registerSimple()">СОЗДАТЬ</button>
     </div>
   </div>
@@ -935,7 +944,7 @@
     <button class="copy-seed-btn" onclick="copySeed()" id="copy-seed-btn"><i data-ico="copy"></i>Скопировать фразу</button>
     <div class="reg-hint">Запиши фразу — нужна для восстановления аккаунта.</div>
     <div style="display:flex;gap:10px;width:100%;">
-      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
+      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="registerAnon()">СОЗДАТЬ</button>
     </div>
   </div>
@@ -945,7 +954,7 @@
     <div class="reg-label">Как входить?</div>
     <button class="start-btn primary-btn" onclick="showSimpleLoginForm()">Обычный вход</button>
     <button class="start-btn secondary-btn" onclick="showAnonLoginForm()">По сид-фразе</button>
-    <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);margin-top:4px;" onclick="showStartScreen()">← Назад</button>
+    <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);margin-top:4px;" onclick="showStartScreen()">← Назад</button>
   </div>
 
   <!-- Простой вход (ник + пароль) -->
@@ -964,7 +973,7 @@
        style="font-size:12px;color:var(--text3);text-decoration:none;align-self:center;
               border-bottom:1px dashed var(--border);">Забыл пароль</a>
     <div style="display:flex;gap:10px;width:100%;">
-      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
+      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="loginSimple()">ВОЙТИ</button>
     </div>
   </div>
@@ -977,7 +986,7 @@
     <div id="unlock-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Неверный пароль</div>
     <label class="remember-row"><input type="checkbox" id="unlock-remember" checked><span>Запомнить на этом устройстве</span></label>
     <button class="reg-btn" style="width:100%;" onclick="doUnlock()">ОТКРЫТЬ</button>
-    <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);width:100%;margin-top:4px;" onclick="doLogout()">Выйти из аккаунта</button>
+    <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);width:100%;margin-top:4px;" onclick="doLogout()">Выйти из аккаунта</button>
   </div>
 
   <!-- Форма входа -->
@@ -1012,7 +1021,7 @@
     <div id="login-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Заполни все 24 слова</div>
     <div class="reg-hint">Введи слова в нужном порядке.<br>Можно вставить всю фразу сразу в первое поле.</div>
     <div style="display:flex;gap:10px;width:100%;">
-      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
+      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="login()">ВОЙТИ</button>
     </div>
   </div>
