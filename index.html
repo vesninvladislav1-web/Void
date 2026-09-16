@@ -454,7 +454,10 @@
 
   /* MODAL */
   .modal-overlay { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index:200; backdrop-filter:blur(4px); }
-  .modal { background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-radius:var(--radius-xl); padding:28px; width:320px; display:flex; flex-direction:column; gap:16px; max-height:85vh; overflow-y:auto; }
+  /* Одна строка — и все всплывающие окна в приложении (их десятки: темы,
+     язык, «О Войде», админка, бан, приглашения, группы, подтверждения)
+     разом получают ту же кромку сверху, что и остальные поверхности. */
+  .modal { background:var(--glass2); backdrop-filter:var(--blur); -webkit-backdrop-filter:var(--blur); border:1px solid var(--glass-border); border-top-color:var(--edge); border-radius:var(--radius-xl); padding:28px; width:320px; display:flex; flex-direction:column; gap:16px; max-height:85vh; overflow-y:auto; }
   .modal-title { font-family:'Space Mono',monospace; font-size:15px; font-weight:700; letter-spacing:2px; }
   /* ===== АДМИН-ПАНЕЛЬ ===== */
   .adm-modal { width:min(94vw,480px); max-height:86vh; display:flex; flex-direction:column; gap:12px; }
@@ -484,7 +487,7 @@
   .adm-tag.adm    { background:rgba(245,158,11,0.15); color:#F59E0B; }
   .adm-meta { font-size:11px; color:var(--text3); }
   .adm-acts { display:flex; gap:7px; flex-wrap:wrap; }
-  .adm-btn { flex:1; min-width:88px; padding:8px 10px; border-radius:10px; border:1px solid var(--border); background:var(--bg2); color:var(--text2); font-size:12px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.15s; }
+  .adm-btn { flex:1; min-width:88px; padding:8px 10px; border-radius:10px; border:1px solid var(--border); border-top-color:var(--edge); background:var(--bg2); color:var(--text2); font-size:12px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.15s; }
   .adm-btn:hover:not(:disabled) { background:var(--glass); color:var(--text); }
   .adm-btn:disabled { opacity:0.45; cursor:not-allowed; }
   .adm-btn.warn { color:#F59E0B; border-color:rgba(245,158,11,0.35); }
@@ -686,7 +689,8 @@
   .capsule-countdown { font-size:11px; color:var(--accent2); font-family:'Space Mono',monospace; margin-top:3px; }
 
   /* ОНБОРДИНГ */
-  .ob-overlay { position:fixed; inset:0; background:var(--bg); z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:60px 30px 40px; }
+  /* Как и у экрана входа — без своей заливки, на общем фоне приложения */
+  .ob-overlay { position:fixed; inset:0; z-index:400; display:flex; flex-direction:column; align-items:center; justify-content:space-between; padding:60px 30px 40px; }
   .ob-content { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:16px; width:100%; max-width:340px; overflow-y:auto; }
   @keyframes obSlideIn { from { opacity:0; transform:translateX(40px); } to { opacity:1; transform:none; } }
   @keyframes obSlideOut { from { opacity:1; transform:none; } to { opacity:0; transform:translateX(-40px); } }
@@ -699,14 +703,15 @@
   .ob-icon { font-size:64px; }
   .ob-title { font-family:'Space Mono',monospace; font-size:18px; font-weight:700; text-align:center; letter-spacing:2px; color:var(--text); }
   .ob-text { font-size:14px; color:var(--text2); text-align:center; line-height:1.8; }
-  .ob-seed-display { background:var(--bg3); border:1px solid var(--border); border-radius:14px; padding:16px; font-family:'Space Mono',monospace; font-size:11px; color:var(--accent); line-height:2; word-break:break-word; text-align:center; width:100%; }
+  .ob-seed-display { background:var(--bg3); border:1px solid var(--border); border-top-color:var(--edge); border-radius:14px; padding:16px; font-family:'Space Mono',monospace; font-size:11px; color:var(--accent); line-height:2; word-break:break-word; text-align:center; width:100%; }
   .ob-warn { font-size:12px; color:var(--accent2); text-align:center; }
   .ob-dots { display:flex; gap:8px; justify-content:center; margin:12px 0; }
   .ob-dot { width:8px; height:8px; border-radius:50%; background:var(--text3); transition:all 0.3s; }
   .ob-dot.active { background:var(--accent); width:24px; border-radius:4px; }
-  .ob-next-btn { width:100%; max-width:340px; padding:15px; background:var(--accent); border:none; border-radius:14px; color:white; font-size:15px; font-family:'Space Mono',monospace; font-weight:700; letter-spacing:3px; cursor:pointer; transition:background 0.2s; }
+  /* Была моноширинной вразрядку — теперь тот же язык кнопок, что и везде */
+  .ob-next-btn { width:100%; max-width:340px; padding:15px; background:var(--accent); border:none; border-radius:14px; color:white; font-size:15px; font-family:'Inter',sans-serif; font-weight:600; letter-spacing:0; cursor:pointer; transition:background 0.2s; }
   .ob-next-btn:hover { background:#E55A3C; opacity:0.85; }
-  .ob-copy-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; }
+  .ob-copy-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-top-color:var(--edge); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; }
   .ob-copy-btn:hover { border-color:var(--accent); color:var(--accent); }
 
   /* ПЕРЕПИСКА БЕЗ СЛЕДА
