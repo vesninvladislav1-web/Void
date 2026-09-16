@@ -2706,13 +2706,25 @@
     connectDmWs();
   }
 
+  // Сервер решает, слать ли push-уведомление, не только по тому, жив ли
+  // сокет — сокет на заблокированном телефоне часто остаётся формально
+  // открытым ещё какое-то время после того, как экран погас. Сообщаем ему
+  // прямо, видно ли сейчас приложение, а не заставляем гадать по обрыву связи.
+  function сообщитьВидимость() {
+    if (dmWs && dmWs.readyState === 1) {
+      try { dmWs.send(JSON.stringify({ type: 'видимость', скрыт: document.hidden })); } catch (e) {}
+    }
+  }
+
   document.addEventListener('visibilitychange', () => {
+    сообщитьВидимость();
     if (document.hidden) return;
     dmWakeCheck();
     if (currentChat) reportRead(currentChat);
   });
   window.addEventListener('online', dmWakeCheck);
   window.addEventListener('focus', dmWakeCheck);
+  window.addEventListener('pagehide', сообщитьВидимость);
 
   // Аккаунт заблокирован или удалён администратором — дальше сидеть в
   // приложении смысла нет, чистим сессию и объясняем что произошло.
@@ -3091,6 +3103,7 @@
           isMod   = !!msg.mod;
           updateAdminMenuVisibility();
           saveState();
+          сообщитьВидимость();       // сервер не должен ждать первой смены вкладки, чтобы узнать
           ensureKeyPair();           // без ключей отправлять будет нечем
           setupPush();               // чтобы достучались и при закрытом приложении
           loadPresenceSetting();

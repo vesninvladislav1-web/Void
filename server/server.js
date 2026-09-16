@@ -500,6 +500,16 @@ function removeOnline(nick, ws) {
 }
 function socketsOf(nick) { return online[nick] ? [...online[nick]] : []; }
 function isOnline(nick) { return !!(online[nick] && online[nick].size); }
+// «Есть кому показать» — не то же самое, что «сокет жив» (см. вызовы ниже).
+// На заблокированном телефоне сокет часто остаётся открытым ещё какое-то
+// время уже после того, как экран погас; push в этот момент нужнее всего,
+// а старая проверка isOnline() как раз в это время его и хоронила.
+function виденНаЭкране(nick) {
+  const set = online[nick];
+  if (!set) return false;
+  for (const ws of set) if (ws.видим) return true;
+  return false;
+}
 function deviceCount(nick) { return online[nick] ? online[nick].size : 0; }
 
 // Заблокировал ли `owner` человека по имени `target`.
@@ -729,10 +739,11 @@ async function sendPush(sub, payload) {
   }
 }
 
-// Уведомляем все устройства человека. Вызывается, только когда его нет
-// на связи: если приложение открыто, оно покажет уведомление само.
+// Уведомляем все устройства человека. Раньше это значило «сокета нет
+// вовсе» — теперь ещё и «сокет есть, но экран не смотрит»: имя не поменял,
+// чтобы не тащить правку по всем вызовам, но смысл шире прежнего.
 async function notifyOffline(nick, payload) {
-  if (!vapidKeys || isOnline(nick)) return;
+  if (!vapidKeys || виденНаЭкране(nick)) return;
   let subs = [];
   try { subs = qPushOf.all(nick); } catch (e) { return; }
   if (!subs.length) return;
@@ -3123,6 +3134,10 @@ const heartbeat = setInterval(() => {
 wss.on('connection', (ws, req) => {
   ws.isAlive = true;
   ws.on('pong', () => { ws.isAlive = true; });
+  // Пока клиент не сказал иначе, считаем его видимым: почти всегда сокет
+  // открывается из активного окна, а сам признак клиент пришлёт следом
+  // сразу после auth-ok
+  ws.видим = true;
 
   const ip = clientIp(req);
   let roomId = null, peerId = null, nick = null;
@@ -3200,6 +3215,11 @@ wss.on('connection', (ws, req) => {
     try {
       // Клиентский keepalive ping — просто игнорируем
       if (msg.type === 'ping') return;
+
+      // Видно ли сейчас приложение человеку. Отдельно от того, жив ли сокет:
+      // на заблокированном телефоне сокет часто остаётся открытым ещё
+      // какое-то время, а показать уведомление уже некому.
+      if (msg.type === 'видимость') { ws.видим = !msg.скрыт; return; }
 
       // --- Авторизация для личных чатов ---
       if (msg.type === 'auth') {
@@ -3366,9 +3386,11 @@ wss.on('connection', (ws, req) => {
 
         qInsertMsg.run(nick, toNick, text, timestamp, live ? 1 : 0, mid);
         console.log(live ? '[dm] Delivered' : '[dm] Stored (offline)', nick, '->', toNick);
-        // Приложение закрыто — доводим до сведения уведомлением.
+        // Экран не смотрит — доводим до сведения уведомлением. Проверяем
+        // всегда, а не только когда сокет мёртв: он может быть формально
+        // жив на заблокированном телефоне, пока человек его не видит.
         // Текст зашифрован и серверу неизвестен, поэтому шлём только имя.
-        if (!live) notifyOffline(toNick, { from: nick, at: timestamp });
+        notifyOffline(toNick, { from: nick, at: timestamp });
         send({ type: 'dm-ack', to: toNick, timestamp, delivered: live ? 1 : 0 });
         return;
       }
