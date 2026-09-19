@@ -123,6 +123,13 @@
   /* Стартовый экран */
   .start-screen { display:flex; flex-direction:column; gap:12px; width:300px; opacity:0; animation:fadeInUp 0.6s ease 1.2s forwards; }
 
+  .server-link { font-size:11px; color:var(--text3); text-decoration:none; text-align:center;
+    border-bottom:1px dashed var(--border); align-self:center; margin-top:4px; padding-bottom:1px; }
+  .server-link:hover { color:var(--accent); border-bottom-color:var(--accent); }
+  /* Когда сервер свой — человек должен видеть это сразу, не заходя в настройки:
+     он живёт на другом острове, и его ник там ничей больше */
+  .server-metka { font-family:'Space Mono',monospace; font-size:11px; color:var(--accent);
+    text-align:center; word-break:break-all; margin-bottom:6px; }
   .start-cherta { display:flex; align-items:center; gap:10px; color:var(--text3); font-size:11px; margin:2px 0; }
   .start-cherta::before, .start-cherta::after { content:''; flex:1; height:1px; background:var(--border); }
   .start-poyasnenie { font-size:11px; color:var(--text3); text-align:center; line-height:1.5; margin-top:-4px; }
@@ -912,6 +919,9 @@
          привычные три кнопки. -->
     <div id="invite-greeting" style="display:none;width:100%;max-width:320px;margin-bottom:18px;
          background:var(--glass);border:1px solid var(--glass-border);border-radius:var(--radius-lg);padding:16px;"></div>
+    <!-- Виден, только когда сервер свой: человек должен понимать, на каком
+         он острове, ещё до того как заведёт аккаунт -->
+    <div class="server-metka" id="server-metka" style="display:none;"></div>
     <button class="start-btn primary-btn" onclick="showSimpleRegForm()">Регистрация</button>
     <button class="start-btn secondary-btn" onclick="showLoginSelect()">Уже есть аккаунт</button>
     <button class="start-btn secondary-btn" onclick="showAnonRegForm()">Анонимно</button>
@@ -921,6 +931,9 @@
     <button class="start-btn secondary-btn" onclick="показатьВходСТелефона()">Войти с телефона</button>
     <button class="start-btn secondary-btn" onclick="начатьБезСледа()">Написать без следа</button>
     <div class="start-poyasnenie">Без ника и пароля. Закрыл вкладку — не осталось ничего.</div>
+    <!-- Войд можно поднять у себя. Ссылка тихая и внизу: большинству это не
+         нужно, а тем, кому нужно, она и так видна. -->
+    <a href="#" class="server-link" id="server-link" onclick="показатьВыборСервера();return false;">Свой сервер</a>
   </div>
 
   <!-- Простая регистрация (ник + пароль) -->
@@ -1585,11 +1598,44 @@
   // Всё, что относится к аккаунту, лежит под своим ключом: void_acct:<ник>,
   // void_chats:<ник>, void_pass:<ник>. Благодаря этому на устройстве может
   // жить несколько аккаунтов, не затирая переписки друг друга.
-  function acctId(nick) { return String(nick || '').trim().toLowerCase(); }
+  // Опознаватель аккаунта в хранилище устройства. Ники на разных серверах
+  // между собой не связаны: «vlad» у себя дома и «vlad» на общем сервере —
+  // разные люди, и складывать их переписку в одну запись нельзя.
+  //
+  // Для сервера по умолчанию формат оставлен прежним (голый ник) намеренно:
+  // иначе у всех, кто уже пользуется, аккаунт «потерялся» бы при обновлении,
+  // потому что ключи в localStorage перестали бы совпадать.
+  function acctId(nick) {
+    const ник = String(nick || '').trim().toLowerCase();
+    if (!ник) return '';
+    const свой = свойСервер();
+    if (!свой) return ник;
+    return свой.replace(/^https?:\/\//, '').replace(/\/+$/, '') + '|' + ник;
+  }
 
+  // Принадлежит ли запись текущему серверу. Опознаватель уже несёт в себе
+  // имя сервера (см. acctId), поэтому достаточно посмотреть на префикс.
+  function нашеГоСервера(id) {
+    const свой = свойСервер();
+    const s = String(id || '');
+    if (!свой) return !s.includes('|');     // на общем сервере — только простые ключи
+    return s.startsWith(свой.replace(/^https?:\/\//, '').replace(/\/+$/, '') + '|');
+  }
+
+  // Список показывает только аккаунты текущего сервера. Иначе переключатель
+  // предлагал бы аккаунт с другого острова — и тот, выбранный, не смог бы
+  // авторизоваться, потому что на этом сервере его попросту нет.
   function loadAccounts() {
-    try { return JSON.parse(localStorage.getItem('void_accounts')) || []; }
+    try { return (JSON.parse(localStorage.getItem('void_accounts')) || []).filter(a => нашеГоСервера(a.id)); }
     catch(e) { return []; }
+  }
+
+  // А сохраняем — вместе с чужими: они принадлежат другому серверу, и стереть
+  // их только потому, что мы сейчас не там, значит потерять их насовсем.
+  function saveAccountsСохранивЧужие(list) {
+    let все = [];
+    try { все = JSON.parse(localStorage.getItem('void_accounts')) || []; } catch (e) {}
+    saveAccounts(все.filter(a => !нашеГоСервера(a.id)).concat(list));
   }
 
   function saveAccounts(list) {
@@ -1599,13 +1645,13 @@
   function upsertAccount(entry) {
     const list = loadAccounts().filter(a => a.id !== entry.id);
     list.push(entry);
-    saveAccounts(list);
+    saveAccountsСохранивЧужие(list);
   }
 
   // wipeChats=false оставляет переписку на устройстве — аккаунт просто
   // перестаёт быть добавленным, но при повторном входе история на месте
   function forgetAccount(id, wipeChats) {
-    saveAccounts(loadAccounts().filter(a => a.id !== id));
+    saveAccountsСохранивЧужие(loadAccounts().filter(a => a.id !== id));
     try {
       localStorage.removeItem('void_acct:' + id);
       localStorage.removeItem('void_pass:' + id);
@@ -2127,9 +2173,19 @@
     try {
       migrateLegacyStorage();
       applyPrefs();
+      // Последний вход мог быть на другом сервере. Поднимать тот аккаунт
+      // здесь нельзя: на этом сервере его нет, и приложение выглядело бы
+      // вошедшим, а на деле бесконечно спотыкалось бы об отказ в авторизации.
+      // Но и сдаваться незачем — берём последний здешний, если он есть.
       const id = localStorage.getItem('void_active');
-      if (!id) return false;
-      return await loadAccountInto(id);
+      let цель = (id && нашеГоСервера(id)) ? id : null;
+      if (!цель) {
+        const свои = loadAccounts();
+        цель = свои.length ? свои[свои.length - 1].id : null;
+        if (цель) { try { localStorage.setItem('void_active', цель); } catch (e) {} }
+      }
+      if (!цель) return false;
+      return await loadAccountInto(цель);
     } catch(e) { return false; }
   }
 
@@ -2263,8 +2319,19 @@
     inp.addEventListener('keydown', e => { if(e.key==='Enter') { e.preventDefault(); inp.blur(); } });
   }
 
+  // Отметка о своём сервере на стартовом экране
+  function показатьМеткуСервера() {
+    const свой = свойСервер();
+    const эл = document.getElementById('server-metka');
+    if (!эл) return;
+    if (!свой) { эл.style.display = 'none'; return; }
+    эл.textContent = 'сервер: ' + свой.replace(/^https?:\/\//, '');
+    эл.style.display = 'block';
+  }
+
   // Автовход при загрузке
   window.addEventListener('DOMContentLoaded', async () => {
+    показатьМеткуСервера();
     if (await loadState()) {
       clearInterval(neonInterval);
       requestNotifications();
@@ -2689,8 +2756,21 @@
   let adminUsers = [];
 
   // ===== СЕРВЕР =====
-  const API = 'https://voidm.site';
-  const WS_URL = 'wss://voidm.site/signal';
+  // Адрес сервера — настройка устройства, а не аккаунта. Войд можно поднять
+  // у себя (server/СВОЙ-СЕРВЕР.md) и указать здесь свой адрес: тогда
+  // переписка, ключи и аккаунты живут на нём, а общий сервер не участвует
+  // вообще. Сервер и так не может прочитать переписку — он передаёт
+  // шифротекст, — но свой снимает и зависимость от чужой машины.
+  const СЕРВЕР_ПО_УМОЛЧАНИЮ = 'https://voidm.site';
+  function свойСервер() {
+    try { const с = (localStorage.getItem('void_server') || '').trim(); return с || null; }
+    catch (e) { return null; }
+  }
+  const СЕРВЕР = свойСервер() || СЕРВЕР_ПО_УМОЛЧАНИЮ;
+  const API = СЕРВЕР;
+  // https → wss, http → ws: одной заменой, чтобы свой сервер без сертификата
+  // на стенде тоже работал
+  const WS_URL = СЕРВЕР.replace(/^http/, 'ws') + '/signal';
   let myRawPass = null;    // пропуск для сервера: производное от пароля, не сам пароль
   let myPassword = null;   // сам пароль. Нужен, чтобы вывести ключ от переписки,
                            // и на сервер не уходит никогда после перевода аккаунта
@@ -5285,6 +5365,74 @@
     document.querySelector('#empty-chats p').innerHTML = t('noChats').replace('\n','<br>');
     document.getElementById('no-messages').textContent = t('noMessages');
     document.getElementById('msg-input').placeholder = t('writeMsg');
+  }
+
+  // ===== СВОЙ СЕРВЕР =====
+  // Перед сохранением адрес проверяется по-настоящему: дёргаем /health и
+  // смотрим, что ответил именно Войд. Иначе человек сохранил бы опечатку и
+  // упёрся в «нет связи», не понимая, что адрес неверный.
+  function показатьВыборСервера() {
+    const текущий = свойСервер();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    // Экран входа стоит выше обычных модалок (z-index 300), поэтому окно,
+    // открытое с него, нужно поднимать над ним — как это уже сделано для
+    // «Забыл пароль». Иначе оно рисуется ПОД экраном и читать его нельзя.
+    overlay.style.zIndex = '760';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">СВОЙ СЕРВЕР</div>
+        <div class="modal-text">Войд можно поднять у себя — тогда переписка,
+          ключи и аккаунты живут на твоей машине. Сервер и так не может прочитать
+          переписку, но свой снимает зависимость от чужой.</div>
+        <input type="text" class="modal-input" id="srv-addr" spellcheck="false" autocapitalize="off"
+               autocomplete="off" placeholder="https://myserver.ru" value="${текущий ? esc(текущий) : ''}">
+        <div class="modal-hod" id="srv-hod"></div>
+        <div class="modal-text" style="font-size:11px;color:var(--text3)">
+          Аккаунты на разных серверах не связаны: на новом сервере тебя ещё нет,
+          там нужно завести аккаунт заново. Переписка со старого никуда не денется.
+        </div>
+        <div class="modal-btns">
+          <button class="btn-secondary" onclick="this.closest('.modal-overlay').remove()">Отмена</button>
+          <button class="btn-primary" id="srv-go" onclick="сохранитьСервер()">Проверить и перейти</button>
+        </div>
+        ${текущий ? '<button class="btn-secondary" style="width:100%" onclick="вернутьОбщийСервер()">Вернуться на общий сервер</button>' : ''}
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('srv-addr')?.focus(), 50);
+  }
+
+  async function сохранитьСервер() {
+    const поле = document.getElementById('srv-addr');
+    const ход = т => { const э = document.getElementById('srv-hod'); if (э) э.textContent = т; };
+    let адрес = (поле?.value || '').trim().replace(/\/+$/, '');
+    if (!адрес) { ход('Введи адрес сервера'); return; }
+    // Без схемы подставляем https: набирать её руками на телефоне мучительно
+    if (!/^https?:\/\//.test(адрес)) адрес = 'https://' + адрес;
+    try { new URL(адрес); } catch (e) { ход('Непохоже на адрес'); return; }
+
+    const кнопка = document.getElementById('srv-go');
+    if (кнопка) кнопка.disabled = true;
+    ход('Проверяю…');
+    try {
+      const о = await fetch(адрес + '/health', { cache: 'no-store' });
+      const д = await о.json().catch(() => null);
+      if (!о.ok || !д || д.ok !== true) throw new Error('это не сервер Войда');
+    } catch (e) {
+      ход('Не отвечает как сервер Войда: ' + (e.message || e));
+      if (кнопка) кнопка.disabled = false;
+      return;
+    }
+    try { localStorage.setItem('void_server', адрес); } catch (e) { ход('Не удалось сохранить'); return; }
+    ход('Готово, перезапускаю…');
+    // Адреса вычисляются один раз при загрузке — проще перезагрузить
+    // страницу, чем переподключать всё вручную
+    setTimeout(() => location.reload(), 600);
+  }
+
+  function вернутьОбщийСервер() {
+    try { localStorage.removeItem('void_server'); } catch (e) {}
+    location.reload();
   }
 
   function showSeedModal() {
@@ -11409,7 +11557,9 @@
   loadStickers();
 
   // ===== LAN ЧАТ (WebRTC + WebSocket signaling, топология звезда) =====
-  const SIGNAL_URL = 'wss://voidm.site/signal';
+  // Тот же сервер, что и для переписки: он тут только сводит устройства,
+  // дальше они говорят напрямую
+  const SIGNAL_URL = WS_URL;
   let lanRoom = null;
   // { id, name, isHost, myLabel, myPeerId, peers:[{pc,dc,label,peerId,active}], ws }
 
