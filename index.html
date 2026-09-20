@@ -123,6 +123,15 @@
   /* Стартовый экран */
   .start-screen { display:flex; flex-direction:column; gap:12px; width:300px; opacity:0; animation:fadeInUp 0.6s ease 1.2s forwards; }
 
+  /* Ссылка вместо кнопки там, где действие второстепенное: кнопка требует
+     решения, ссылка просто есть на случай, если нужна */
+  .start-ssylka { font-size:14px; color:var(--text2); text-decoration:none; text-align:center;
+    padding:6px 0; border-bottom:1px dashed var(--border); align-self:center; }
+  .start-ssylka:hover { color:var(--accent); border-bottom-color:var(--accent); }
+  .reg-ssylka { font-size:12px; color:var(--text3); text-decoration:none; text-align:center;
+    align-self:center; border-bottom:1px dashed var(--border); padding-bottom:1px; }
+  .reg-ssylka:hover { color:var(--accent); border-bottom-color:var(--accent); }
+  .reg-ssylki { display:flex; flex-direction:column; gap:9px; align-items:center; margin-top:2px; }
   .server-link { font-size:11px; color:var(--text3); text-decoration:none; text-align:center;
     border-bottom:1px dashed var(--border); align-self:center; margin-top:4px; padding-bottom:1px; }
   .server-link:hover { color:var(--accent); border-bottom-color:var(--accent); }
@@ -922,14 +931,17 @@
     <!-- Виден, только когда сервер свой: человек должен понимать, на каком
          он острове, ещё до того как заведёт аккаунт -->
     <div class="server-metka" id="server-metka" style="display:none;"></div>
-    <button class="start-btn primary-btn" onclick="showSimpleRegForm()">Регистрация</button>
-    <button class="start-btn secondary-btn" onclick="showLoginSelect()">Уже есть аккаунт</button>
-    <button class="start-btn secondary-btn" onclick="showAnonRegForm()">Анонимно</button>
+    <!-- Два действия, и всё. Раньше здесь стояло пять кнопок подряд, и
+         человеку на входе приходилось выбирать из пяти вариантов, не зная
+         ещё ни одного из них. Остальные способы никуда не делись — они
+         переехали туда, где становятся понятны: анонимный аккаунт внутрь
+         регистрации, вход с телефона и по фразе — внутрь входа. -->
+    <button class="start-btn primary-btn" onclick="showSimpleLoginForm()">Войти</button>
+    <button class="start-btn secondary-btn" onclick="showSimpleRegForm()">Зарегистрироваться</button>
     <!-- Единственное, что работает вообще без аккаунта. Поэтому и стоит
-         отдельно, за чертой: это не четвёртый способ зарегистрироваться. -->
+         отдельно, за чертой: это не третий способ завести аккаунт. -->
     <div class="start-cherta"><span>или</span></div>
-    <button class="start-btn secondary-btn" onclick="показатьВходСТелефона()">Войти с телефона</button>
-    <button class="start-btn secondary-btn" onclick="начатьБезСледа()">Написать без следа</button>
+    <a href="#" class="start-ssylka" onclick="начатьБезСледа();return false;">Написать без следа</a>
     <div class="start-poyasnenie">Без ника и пароля. Закрыл вкладку — не осталось ничего.</div>
     <!-- Войд можно поднять у себя. Ссылка тихая и внизу: большинству это не
          нужно, а тем, кому нужно, она и так видна. -->
@@ -950,6 +962,10 @@
       <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="registerSimple()">СОЗДАТЬ</button>
     </div>
+    <!-- Анонимный аккаунт — это тоже регистрация, просто без пароля.
+         На стартовом экране он выглядел третьим непонятным вариантом,
+         здесь — понятной альтернативой тому, что человек уже читает. -->
+    <a href="#" class="reg-ssylka" id="sreg-anon" onclick="showAnonRegForm();return false;">Анонимно, без пароля</a>
   </div>
 
   <!-- Анонимная регистрация (сид-фраза) -->
@@ -967,13 +983,8 @@
     </div>
   </div>
 
-  <!-- Выбор способа входа -->
-  <div class="reg-form" id="login-select" style="display:none;opacity:0;">
-    <div class="reg-label">Как входить?</div>
-    <button class="start-btn primary-btn" onclick="showSimpleLoginForm()">Обычный вход</button>
-    <button class="start-btn secondary-btn" onclick="showAnonLoginForm()">По сид-фразе</button>
-    <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);margin-top:4px;" onclick="showStartScreen()">← Назад</button>
-  </div>
+  <!-- Экрана «как входить?» больше нет: он стоял лишним шагом перед формой,
+       которая нужна почти всем. Редкие способы — ссылками в самой форме. -->
 
   <!-- Простой вход (ник + пароль) -->
   <div class="reg-form" id="simple-login-form" style="display:none;opacity:0;">
@@ -987,11 +998,15 @@
            class="reg-input" id="slogin-code" placeholder="код из приложения" style="display:none;">
     <div id="slogin-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Неверный ник или пароль</div>
     <label class="remember-row"><input type="checkbox" id="slogin-remember" checked><span>Запомнить на этом устройстве</span></label>
-    <a href="#" onclick="показатьВосстановление();return false;"
-       style="font-size:12px;color:var(--text3);text-decoration:none;align-self:center;
-              border-bottom:1px dashed var(--border);">Забыл пароль</a>
+    <!-- Остальные способы входа переехали сюда со стартового экрана: здесь
+         человек уже знает, что входит, и выбирает только «как» -->
+    <div class="reg-ssylki">
+      <a href="#" class="reg-ssylka" id="slogin-forgot" onclick="показатьВосстановление();return false;">Забыл пароль</a>
+      <a href="#" class="reg-ssylka" id="slogin-seed" onclick="showAnonLoginForm();return false;">Войти по сид-фразе</a>
+      <a href="#" class="reg-ssylka" id="slogin-phone" onclick="показатьВходСТелефона();return false;">Войти с телефона</a>
+    </div>
     <div style="display:flex;gap:10px;width:100%;">
-      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
+      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="loginSimple()">ВОЙТИ</button>
     </div>
   </div>
@@ -1039,7 +1054,7 @@
     <div id="login-error" style="color:var(--accent2);font-size:12px;display:none;align-self:flex-start;">Заполни все 24 слова</div>
     <div class="reg-hint">Введи слова в нужном порядке.<br>Можно вставить всю фразу сразу в первое поле.</div>
     <div style="display:flex;gap:10px;width:100%;">
-      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showLoginSelect()">←</button>
+      <button class="reg-btn" style="background:var(--bg3);border:1px solid var(--border);border-top-color:var(--edge);color:var(--text2);flex:0 0 auto;width:44px;font-size:20px;" onclick="showStartScreen()">←</button>
       <button class="reg-btn" style="flex:1;" onclick="login()">ВОЙТИ</button>
     </div>
   </div>
@@ -1898,7 +1913,6 @@
 
   function showSimpleRegForm() { showForm('simple-reg-form','sreg-nick'); }
   function showAnonRegForm() { showForm('reg-form','reg-nick'); }
-  function showLoginSelect() { showForm('login-select'); }
   function showSimpleLoginForm() { showForm('simple-login-form','slogin-nick'); }
   function showAnonLoginForm() {
     // Сбрасываем поля перед показом формы
