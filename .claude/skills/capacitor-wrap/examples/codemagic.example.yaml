@@ -1,0 +1,304 @@
+# Codemagic CI/CD Configuration Example for Capacitor 8
+# This is a battle-tested configuration based on real-world deployments
+# Replace placeholders with your actual values
+#
+# IMPORTANT: iOS and Android Bundle IDs
+# - iOS uses: IOS_BUNDLE_ID (e.g., app.company.ios or ai.carouselcards.app)
+# - Android uses: ANDROID_PACKAGE_NAME (e.g., com.company.app)
+# - These CAN and SHOULD be different to follow platform conventions
+
+workflows:
+  # iOS App Store Release
+  ios-release:
+    name: iOS App Store Release
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: "YOUR-INTEGRATION-NAME"  # Must match exactly!
+
+    environment:
+      # IMPORTANT: NO ios_signing block! It conflicts with manual signing
+      vars:
+        BUNDLE_ID: "app.example.ios"  # Your iOS bundle ID (NOT Android package name!)
+        VITE_REVENUECAT_IOS_API_KEY: $REVENUECAT_IOS_API_KEY  # Optional
+      node: 22  # Capacitor 8 requires Node 22+
+      xcode: latest
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+
+    scripts:
+      - name: Install npm dependencies
+        script: npm install
+
+      - name: Build web app
+        script: npm run build
+
+      - name: Sync Capacitor
+        script: npx cap sync ios
+
+      - name: Fetch signing files
+        script: |
+          set -exo pipefail
+          CERT_KEY_PATH="$CM_BUILD_DIR/cert_key.pem"
+
+          # Check if certificate private key exists in environment
+          if [ -n "${FCI_CERTIFICATE_PRIVATE_KEY:-}" ]; then
+            echo "Using stored certificate private key from environment"
+            echo "$FCI_CERTIFICATE_PRIVATE_KEY" | base64 -d > "$CERT_KEY_PATH"
+          else
+            echo "WARNING: No stored certificate found. Generating NEW certificate (one-time setup)"
+            openssl genrsa -out "$CERT_KEY_PATH" 2048
+            echo ""
+            echo "=========================================="
+            echo "IMPORTANT: Save this as environment variable FCI_CERTIFICATE_PRIVATE_KEY"
+            echo "=========================================="
+            cat "$CERT_KEY_PATH" | base64
+            echo "=========================================="
+          fi
+
+          echo "Fetching signing files for bundle ID: $BUNDLE_ID"
+
+          # Run with explicit error capture
+          set +e  # Don't exit on error
+          OUTPUT=$(app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create \
+            --certificate-key=@file:"$CERT_KEY_PATH" \
+            --verbose 2>&1)
+          EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+
+          echo "$OUTPUT"
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo ""
+            echo "=========================================="
+            echo "ERROR: fetch-signing-files failed with exit code $EXIT_CODE"
+            echo "=========================================="
+            echo "$OUTPUT" | grep -i "error\|failed\|certificate\|409" || echo "No specific error found in output"
+            exit $EXIT_CODE
+          fi
+
+      - name: Set up keychain
+        script: |
+          keychain initialize
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Set bundle version
+        script: |
+          cd ios/App
+          BUILD_NUMBER=$(date +%Y%m%d%H%M%S)
+          echo "Setting build number to: $BUILD_NUMBER"
+          # Set in Info.plist directly
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $BUILD_NUMBER" App/Info.plist
+          # Also update project settings
+          agvtool new-version -all "$BUILD_NUMBER"
+          # Verify
+          echo "Current build number:"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" App/Info.plist
+
+      - name: Build iOS app
+        script: |
+          cd ios/App
+          xcode-project build-ipa \
+            --project "App.xcodeproj" \
+            --scheme "App"
+
+    artifacts:
+      - ios/App/build/ios/ipa/*.ipa
+      - ios/App/*.ipa
+      - ios/App/build/ios/xcarchive/*.xcarchive
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Upload only - manual submission via App Store Connect allows you to
+        # fill in metadata (screenshots, description, privacy info) before review
+        submit_to_app_store: false
+
+  # iOS TestFlight Build
+  ios-testflight:
+    name: iOS TestFlight
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: "YOUR-INTEGRATION-NAME"
+
+    environment:
+      vars:
+        BUNDLE_ID: "app.example.ios"  # Your iOS bundle ID (same as above)
+        VITE_REVENUECAT_IOS_API_KEY: $REVENUECAT_IOS_API_KEY
+      node: 22
+      xcode: latest
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: develop
+          include: true
+
+    scripts:
+      - name: Install npm dependencies
+        script: npm install
+
+      - name: Build web app
+        script: npm run build
+
+      - name: Sync Capacitor
+        script: npx cap sync ios
+
+      - name: Set bundle version
+        script: |
+          cd ios/App
+          agvtool new-version -all $(($(app-store-connect get-latest-testflight-build-number "$BUNDLE_ID") + 1))
+
+      - name: Build iOS app
+        script: |
+          cd ios/App
+          xcode-project build-ipa \
+            --workspace "App.xcworkspace" \
+            --scheme "App" \
+            --config Release
+
+    artifacts:
+      - ios/App/build/ios/ipa/*.ipa
+      - ios/App/*.ipa
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        beta_groups:
+          - Internal Testers
+
+  # Android Release Build
+  android-release:
+    name: Android Release
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    environment:
+      android_signing:
+        - myapp_keystore  # Configure in Codemagic dashboard
+      vars:
+        PACKAGE_NAME: "com.example.app"  # Your Android package name (NOT iOS bundle ID!)
+        MYAPP_KEYSTORE_PATH: $CM_KEYSTORE_PATH
+        MYAPP_KEYSTORE_PASSWORD: $CM_KEYSTORE_PASSWORD
+        MYAPP_KEY_ALIAS: $CM_KEY_ALIAS
+        MYAPP_KEY_PASSWORD: $CM_KEY_PASSWORD
+        VITE_REVENUECAT_ANDROID_API_KEY: $REVENUECAT_ANDROID_API_KEY
+      node: 22
+      java: 21  # Capacitor 8 requires Java 21
+
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
+
+    scripts:
+      - name: Install npm dependencies
+        script: npm install
+
+      - name: Build web app
+        script: npm run build
+
+      - name: Sync Capacitor
+        script: npx cap sync android
+
+      - name: Build Android AAB
+        script: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew bundleRelease
+
+    artifacts:
+      - android/app/build/outputs/**/*.aab
+      - android/app/build/outputs/**/*.apk
+
+    publishing:
+      google_play:
+        credentials: $GCLOUD_SERVICE_ACCOUNT_CREDENTIALS
+        track: internal
+
+  # Android Debug Build (for testing)
+  android-debug:
+    name: Android Debug
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+
+    environment:
+      vars:
+        VITE_REVENUECAT_ANDROID_API_KEY: $REVENUECAT_ANDROID_API_KEY
+      node: 22
+      java: 21
+
+    triggering:
+      events:
+        - pull_request
+
+    scripts:
+      - name: Install npm dependencies
+        script: npm install
+
+      - name: Build web app
+        script: npm run build
+
+      - name: Sync Capacitor
+        script: npx cap sync android
+
+      - name: Build debug APK
+        script: |
+          cd android
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
+
+    artifacts:
+      - android/app/build/outputs/**/*.apk
+
+# Key Configuration Notes:
+#
+# 1. Bundle IDs (CRITICAL):
+#    - iOS uses IOS_BUNDLE_ID: app.example.ios or ai.carouselcards.app
+#    - Android uses ANDROID_PACKAGE_NAME: com.example.app
+#    - These MUST be different to follow platform conventions
+#    - Set iOS bundle ID in Xcode manually (see SKILL.md Phase 8.1)
+#    - Set Android package name in build.gradle (namespace and applicationId)
+#    - Bundle IDs are PERMANENT - cannot change after app store submission
+#
+# 2. iOS Signing Certificate Reuse:
+#    - Generate certificate key ONCE: openssl genrsa -out cert_key.pem 2048
+#    - Encode: cat cert_key.pem | base64
+#    - Add to Codemagic team environment variables as FCI_CERTIFICATE_PRIVATE_KEY
+#    - This prevents hitting Apple's 2-certificate-per-team limit
+#
+# 3. Build Numbers:
+#    - iOS Release: Timestamp-based (always unique)
+#    - iOS TestFlight: Auto-incremented from latest
+#
+# 4. Publishing Modes:
+#    - submit_to_app_store: false (recommended) - Upload only, manual submission
+#    - submit_to_app_store: true - Auto-submit (requires all metadata configured)
+#    - submit_to_testflight: true - Auto-submit to TestFlight beta
+#
+# 5. Capacitor 8 Requirements:
+#    - Node 22+ (NOT 18)
+#    - Java 21 (NOT 17) for Android
+#    - Uses Swift Package Manager (SPM), NOT CocoaPods
+#    - Always reference .xcodeproj, NEVER .xcworkspace
+#
+# 6. Environment Variables Needed:
+#    - FCI_CERTIFICATE_PRIVATE_KEY (team level, for certificate reuse)
+#    - REVENUECAT_IOS_API_KEY (if using RevenueCat, iOS-specific)
+#    - REVENUECAT_ANDROID_API_KEY (if using RevenueCat, Android-specific)
+#    - Android signing vars (keystore details)

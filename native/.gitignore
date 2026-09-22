@@ -1,0 +1,15 @@
+# Устанавливается командой npm install
+node_modules/
+
+# Сборочный мусор: пересоздаётся при каждой сборке
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/capacitor-cordova-android-plugins/
+
+# Готовые сборки и ключ подписи — в репозитории им не место
+*.apk
+*.aab
+*.keystore
+*.jks
