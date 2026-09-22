@@ -108,7 +108,10 @@
   .reg-input::placeholder { color:var(--text3); }
   .seed-box { width:100%; background:var(--bg3); border:1px solid var(--border); border-top-color:var(--edge); border-radius:14px; padding:14px 16px; }
   .seed-words { font-family:'Space Mono',monospace; font-size:12px; color:var(--accent); line-height:2; word-break:break-word; letter-spacing:0.5px; }
-  .copy-seed-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-top-color:var(--edge); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; }
+  /* Значок и подпись — в один ряд. Без flex значок вставал отдельной
+     строкой над текстом, и кнопка выглядела сломанной. */
+  .copy-seed-btn { width:100%; padding:10px; background:var(--bg3); border:1px solid var(--border); border-top-color:var(--edge); border-radius:12px; color:var(--text2); font-size:13px; font-family:'Inter',sans-serif; cursor:pointer; transition:all 0.2s; display:flex; align-items:center; justify-content:center; gap:8px; }
+  .copy-seed-btn svg { width:15px; height:15px; flex:0 0 auto; }
   .copy-seed-btn:hover { border-color:var(--accent); color:var(--accent); }
   .copy-seed-btn.copied { border-color:var(--online); color:var(--online); }
   .reg-hint { font-size:11px; color:var(--text3); text-align:center; line-height:1.6; }
@@ -1206,6 +1209,15 @@
         <div class="settings-item-info">
           <div class="settings-item-name">Сменить пароль</div>
           <div class="settings-item-sub">Переписка сохранится</div>
+        </div>
+        <div class="settings-item-arrow">›</div>
+      </div>
+
+      <div class="settings-item" id="link-item" onclick="показатьСсылкуВхода()">
+        <div class="settings-item-icon" data-ico="globe"></div>
+        <div class="settings-item-info">
+          <div class="settings-item-name">Ссылка для входа</div>
+          <div class="settings-item-sub">Открыть свой аккаунт в другом браузере</div>
         </div>
         <div class="settings-item-arrow">›</div>
       </div>
@@ -2343,9 +2355,57 @@
     эл.style.display = 'block';
   }
 
+  // Ссылку для входа часто вставляют в браузер, где Void уже открыт на том же
+  // адресе. Смена одного лишь хвоста страницу не перезагружает — а значит
+  // DOMContentLoaded больше не случится, и вход бы молча не сработал.
+  // Перезагружаемся сами: дальше всё пойдёт обычным путём и с чистого
+  // состояния, без остатков прежнего аккаунта в памяти.
+  window.addEventListener('hashchange', () => {
+    if (/^#v=[0-9a-f]{32}\./.test(location.hash || '')) location.reload();
+  });
+
   // Автовход при загрузке
   window.addEventListener('DOMContentLoaded', async () => {
     показатьМеткуСервера();
+
+    // Открыли ссылку для входа. Проверяем до автовхода: в этом браузере
+    // может уже сидеть другой аккаунт, и ссылка должна перебить его, а не
+    // молча ничего не сделать. Хвост стираем из адреса сразу — чтобы ключ
+    // не остался в истории браузера и не уехал в чужие руки вместе со
+    // скриншотом адресной строки.
+    const пВх = /^#v=([0-9a-f]{32})\.([A-Za-z0-9_-]{40,50})(?:\.([A-Za-z0-9_-]{4,300}))?$/
+      .exec(location.hash || '');
+    if (пВх) {
+      // Третий кусок — адрес сервера, на котором лежит свёрток; он есть
+      // только когда сервер не общий. Без него перенос со своего сервера
+      // уводил бы человека не на тот остров: аккаунты разных серверов друг
+      // о друге ничего не знают, и вход просто не сработал бы.
+      const чей = (() => {
+        if (!пВх[3]) return СЕРВЕР_ПО_УМОЛЧАНИЮ;
+        try {
+          const а = atob(пВх[3].replace(/-/g, '+').replace(/_/g, '/'));
+          return /^https?:\/\/[^\s]+$/.test(а) ? а.replace(/\/+$/, '') : СЕРВЕР;
+        } catch (e) { return СЕРВЕР; }
+      })();
+      if (чей.replace(/\/+$/, '') !== СЕРВЕР.replace(/\/+$/, '')) {
+        let переключено = false;
+        try {
+          if (чей === СЕРВЕР_ПО_УМОЛЧАНИЮ) localStorage.removeItem('void_server');
+          else localStorage.setItem('void_server', чей);
+          переключено = (свойСервер() || СЕРВЕР_ПО_УМОЛЧАНИЮ).replace(/\/+$/, '')
+                        === чей.replace(/\/+$/, '');
+        } catch (e) {}
+        // Перезагружаемся, только если запись правда легла: иначе в браузере
+        // с запретом на хранилище вышел бы вечный круг перезагрузок. Хвост
+        // при перезагрузке сохраняется сам — без ключа входить было бы нечем.
+        if (переключено) { location.reload(); return; }
+      }
+      history.replaceState(null, '', location.pathname);
+      clearInterval(neonInterval);
+      await принятьСсылкуВхода(пВх[1], пВх[2]);
+      return;
+    }
+
     if (await loadState()) {
       clearInterval(neonInterval);
       requestNotifications();
@@ -7412,12 +7472,135 @@
     }, 1000);
   }
 
+  // ===== ПЕРЕНОС АККАУНТА ССЫЛКОЙ =====
+  // «Войти с телефона» требует двух экранов одновременно. Ссылка — для
+  // случая, когда второго экрана рядом нет: скопировал, переслал себе,
+  // открыл где угодно.
+  //
+  // Устройство простое и намеренно такое: свёрток с личностью шифруется
+  // случайным ключом, шифротекст уходит на сервер, а КЛЮЧ кладётся в хвост
+  // ссылки после #. Браузер хвост после # на сервер не отправляет никогда —
+  // значит сервер держит у себя шифротекст, от которого у него нет ключа.
+  //
+  // Ссылка одноразовая и живёт пять минут: сервер отдаёт свёрток ровно раз
+  // и тут же забывает.
+  async function создатьСсылкуВхода() {
+    if (!мастерБайты || !myRawPass) throw new Error('Ключ ещё не готов, попробуй через секунду');
+    const сырой = crypto.getRandomValues(new Uint8Array(32));
+    const ключ = await crypto.subtle.importKey('raw', сырой, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+    // Аватара тут нарочно нет. Картинка весит до 90 КБ, а свёрток должен
+    // влезть в лимит тела запроса (16 КБ) — с аватаром перенос просто
+    // отлетал бы с «Неверные данные». Он и не нужен: аватар лежит на
+    // сервере под этим же ником, и syncAvatars() подтянет его сразу после
+    // входа.
+    const пакет = await завернуть(new TextEncoder().encode(JSON.stringify({
+      ник: myName, пропуск: myRawPass, режим: authMode, статус: myStatus,
+      мастер: btoa(String.fromCharCode(...мастерБайты))
+    })), ключ);
+    const r = await fetch(API + '/api/perenos/new', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nick: myName, password: myRawPass, пакет })
+    });
+    const д = await r.json().catch(() => ({}));
+    if (!r.ok || !д.id) throw new Error(д.error || 'Сервер не принял');
+    const вБ64 = б => btoa(б).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    const ключБ64 = вБ64(String.fromCharCode(...сырой));
+    // Страницу берём отсюда же, а не из СЕРВЕР: приложение могут раздавать
+    // с одного адреса, а сервер держать на другом. Адрес сервера в таком
+    // случае едет третьим куском — но только если он не общий, чтобы
+    // обычная ссылка оставалась покороче.
+    const свой = СЕРВЕР.replace(/\/+$/, '') !== СЕРВЕР_ПО_УМОЛЧАНИЮ.replace(/\/+$/, '')
+      ? '.' + вБ64(СЕРВЕР.replace(/\/+$/, '')) : '';
+    return { ссылка: location.origin + location.pathname + '#v=' + д.id + '.' + ключБ64 + свой,
+             срок: д.срок || 300 };
+  }
+
+  async function показатьСсылкуВхода() {
+    closeSidebar();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-title">ССЫЛКА ДЛЯ ВХОДА</div>
+        <!-- Про старую переписку говорим сразу. Она лежит только на этом
+             устройстве, и обещать её на новом было бы враньём. -->
+        <div class="modal-text">Открой её в любом браузере — и там будет твой аккаунт:
+          ник, ключи, новые сообщения. Старая переписка останется здесь, она хранится
+          только на этом устройстве — перенести её можно отдельно, через «Сохранить
+          в файл».</div>
+        <div class="modal-hod" id="ssyl-hod">Готовлю…</div>
+        <div id="ssyl-telo" style="display:none;">
+          <div class="seed-box" style="margin-bottom:10px;"><div class="seed-words"
+               id="ssyl-text" style="font-size:11px;">—</div></div>
+          <button class="copy-seed-btn" id="ssyl-copy" onclick="скопироватьСсылкуВхода(this)">
+            <i data-ico="copy"></i>Скопировать</button>
+        </div>
+        <!-- Говорим прямо. Эта ссылка — и есть аккаунт: у кого она, тот и ты. -->
+        <div class="modal-text" style="font-size:11px;color:var(--sos-text);line-height:1.5;">
+          Кто откроет ссылку — войдёт в твой аккаунт: сможет писать от твоего имени
+          и читать всё, что тебе приходит. Не пересылай её там, где её увидят чужие.
+          Работает один раз и только 5 минут.
+        </div>
+        <div class="modal-btns">
+          <button class="btn-primary" style="width:100%"
+                  onclick="this.closest('.modal-overlay').remove()">Закрыть</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    try {
+      const { ссылка, срок } = await создатьСсылкуВхода();
+      const ход = document.getElementById('ssyl-hod');
+      const тело = document.getElementById('ssyl-telo');
+      const текст = document.getElementById('ssyl-text');
+      if (!ход || !тело || !текст) return;
+      текст.textContent = ссылка;
+      ход.textContent = 'Живёт ' + Math.round(срок / 60) + ' мин, открыть можно один раз';
+      тело.style.display = 'block';
+      paintIcons(тело);
+    } catch (e) {
+      const ход = document.getElementById('ssyl-hod');
+      if (ход) ход.textContent = 'Не вышло: ' + (e.message || e);
+    }
+  }
+
+  function скопироватьСсылкуВхода(кнопка) {
+    const т = document.getElementById('ssyl-text')?.textContent || '';
+    navigator.clipboard.writeText(т).then(() => {
+      кнопка.classList.add('copied');
+      кнопка.textContent = 'Скопировано';
+    }).catch(() => { кнопка.textContent = 'Выдели и скопируй вручную'; });
+  }
+
+  // Открыли ссылку: забираем свёрток и становимся этим человеком
+  async function принятьСсылкуВхода(ид, ключБ64) {
+    try {
+      const r = await fetch(API + '/api/perenos/take', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: ид })
+      });
+      const д = await r.json().catch(() => ({}));
+      if (!r.ok || !д.пакет) throw new Error(д.error || 'Ссылка не сработала');
+      const сырой = Uint8Array.from(
+        atob(ключБ64.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+      const ключ = await crypto.subtle.importKey('raw', сырой, { name: 'AES-GCM' }, false, ['decrypt']);
+      const открытое = await развернуть(д.пакет, ключ);
+      await статьЭтимЧеловеком(JSON.parse(new TextDecoder().decode(открытое)));
+      setTimeout(() => showToast('Вошли по ссылке'), 700);
+    } catch (e) {
+      showToast(e.message || 'Ссылка не сработала');
+    }
+  }
+
   // Расшифровать то, что прислал телефон, и стать этим человеком
   async function принятьПакетСТелефона(д, дело) {
     const общий = await общийКлючСДругим(дело.пара.privateKey, д.publicKey);
     const открытое = await развернуть(д.payload, общий);
-    const данные = JSON.parse(new TextDecoder().decode(открытое));
+    await статьЭтимЧеловеком(JSON.parse(new TextDecoder().decode(открытое)));
+  }
 
+  // Общая часть для обоих переносов — с компьютера и по ссылке. Свёрток
+  // один и тот же, различается только дорога, которой он пришёл.
+  async function статьЭтимЧеловеком(данные) {
     myName = данные.ник;
     myRawPass = данные.пропуск;
     authMode = данные.режим || 'simple';
@@ -7530,9 +7713,10 @@
       const з = (д0.requests || []).find(з => з.code === код);
       if (!з) { showToast('Заявка устарела'); return; }
       const общий = await общийКлючСДругим(пара.privateKey, з.publicKey);
+      // Без аватара — см. создатьСсылкуВхода(): картинка не влезает в лимит
+      // тела запроса, и раньше перенос с аватаром тихо ломался.
       const пакет = await завернуть(new TextEncoder().encode(JSON.stringify({
-        ник: myName, пропуск: myRawPass, режим: authMode,
-        аватар: myAvatar, статус: myStatus,
+        ник: myName, пропуск: myRawPass, режим: authMode, статус: myStatus,
         мастер: btoa(String.fromCharCode(...мастерБайты))
       })), общий);
       const r = await fetch(API + '/api/link/approve', {
@@ -9336,6 +9520,10 @@
   function updateAuthMenus() {
     const cp = document.getElementById('change-pass-item');
     if (cp) cp.style.display = (authMode === 'anon' || !myName) ? 'none' : 'flex';
+    // Ссылка для входа складывается на сервере, а он узнаёт человека по
+    // паролю. У «без следа» пароля нет — значит и пункта быть не должно.
+    const ln = document.getElementById('link-item');
+    if (ln) ln.style.display = (authMode === 'anon' || !myName) ? 'none' : 'flex';
     const dv = document.getElementById('devices-item');
     if (dv) dv.style.display = myName ? 'flex' : 'none';
     renderPresenceSetting();
