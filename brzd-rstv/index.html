@@ -8982,6 +8982,250 @@ window.ДЕТАЛИ.push(['акт 3', function (API) {
 
 </script>
 <script>
+// Шторм — разработчик этой игры (камео автора). Стоит у своего самодельного спутника
+// «ШТОРМ-1» в поле за посёлком. В спутник можно сесть: внутри кабина — полукругом
+// десятки живых экранов (радар, Земля, карта посёлка, телеметрия, дев-консоль с кодом
+// самой игры, камеры на Яшу и посёлок, звёздная карта, системы…) и пульт с кнопками:
+// ЗАПУСК/ПОСАДКА, СОРТИР (салют из сортира в посёлке), ЯША, КУРИЦА, НОЧЬ, ГИПЕРПРЫЖОК,
+// тумблеры, рычаг и красная «НЕ НАЖИМАТЬ» под колпачком.
+// Кабина — отдельная сцена; в иллюминатор, на экраны-камеры мир рисуется в текстуры.
+window.ДЕТАЛИ.push(['Шторм и спутник', function (API) {
+  const { THREE, сцена } = API;
+  const В = API.землиВысота, ц = API.цвет, сл = Math.random;
+  const Я = () => window.__бахЯдро, подск = () => window.__подсказки;
+  function холст(w, h, рис) { const к = document.createElement('canvas'); к.width = w; к.height = h; рис && рис(к.getContext('2d'), w, h); const т = API.цветнаяТекстура(к); т.anisotropy = API.АНИЗ; т.__к = к; return т; }
+  const мат = (цвет, доп = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: ц(цвет), roughness: 0.6, metalness: 0 }, доп));
+  const ящик = (w, h, d, м, x = 0, y = 0, z = 0) => { const о = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), м); о.position.set(x, y, z); о.castShadow = true; return о; };
+  const звукВкл = () => { try { return localStorage.getItem('бороздиновский.звук') !== 'нет'; } catch (e) { return true; } };
+  function голос(т, высота = 1) { if (!звукВкл() || !window.speechSynthesis) return; try { const у = new SpeechSynthesisUtterance(т.replace(/[«»—]/g, '')); у.lang = 'ru-RU'; у.pitch = высота; у.rate = 1.05; speechSynthesis.speak(у); } catch (e) {} }
+  const ctx = () => { const к = Я() && Я().звук(); return к && к.state === 'running' ? к : null; };
+  function бип(частоты, длит = 0.06, гр = 0.07, тип = 'square') { const к = ctx(); if (!к) return; let t = к.currentTime; for (const f of [].concat(частоты)) { const о = к.createOscillator(), g = к.createGain(); о.type = тип; о.frequency.value = f; g.gain.setValueAtTime(гр, t); g.gain.exponentialRampToValueAtTime(0.0001, t + длит); о.connect(g); g.connect(Я().выход()); о.start(t); о.stop(t + длит + 0.02); t += длит; } }
+
+  // ===================== ГДЕ: поле недалеко от дома игрока =====================
+  const Д = API.КАРТА.дом_игрока, [ox, oz] = Д ? Д.о : [0, 0];
+  let SX = ox + 60, SZ = oz + 60;
+  поиск: for (let r = 60; r < 260; r += 10) for (let k = 0; k < 24; k++) {
+    const а = k / 24 * 6.28 + r * 0.1, x = ox + Math.cos(а) * r, z = oz + Math.sin(а) * r; let ок = true;
+    for (const [dx, dz] of [[0, 0], [9, 0], [-9, 0], [0, 9], [0, -9]]) { const px = x + dx, pz = z + dz, д = API.ближайшаяДорога(px, pz); if (API.вДоме(px, pz, 3) || API.вВоде(px, pz) || API.вДворе(px, pz, 2) || (д && д.d < 10) || Math.abs(px) > API.ШИР / 2 - 30 || Math.abs(pz) > API.ГЛУБ / 2 - 30) { ок = false; break; } }
+    if (ок) { SX = x; SZ = z; break поиск; }
+  }
+  const SY = В(SX, SZ);
+  API.безДеревьев && API.безДеревьев.push([[SX - 12, SZ - 12], [SX + 12, SZ - 12], [SX + 12, SZ + 12], [SX - 12, SZ + 12]]);
+
+  // ===================== СПУТНИК СНАРУЖИ =====================
+  const спутник = new THREE.Group(); спутник.position.set(SX, SY, SZ); сцена.add(спутник);
+  const фольга = new THREE.MeshStandardMaterial({ map: холст(256, 256, (с, w, h) => { const г = с.createLinearGradient(0, 0, w, h); г.addColorStop(0, '#B8892A'); г.addColorStop(0.5, '#F2CC6A'); г.addColorStop(1, '#9A6A1E'); с.fillStyle = г; с.fillRect(0, 0, w, h); for (let i = 0; i < 120; i++) { с.strokeStyle = `rgba(${сл() < 0.5 ? '255,240,190' : '90,60,10'},${0.2 + сл() * 0.3})`; с.lineWidth = 1 + сл() * 2; с.beginPath(); const x = сл() * w, y = сл() * h; с.moveTo(x, y); с.lineTo(x + (сл() - 0.5) * 80, y + (сл() - 0.5) * 80); с.stroke(); } }), roughness: 0.25 });
+  const панельМ = new THREE.MeshStandardMaterial({ map: холст(256, 128, (с, w, h) => { с.fillStyle = '#0A1A40'; с.fillRect(0, 0, w, h); с.strokeStyle = '#3A6AC8'; с.lineWidth = 2; for (let x = 0; x <= w; x += 21) { с.beginPath(); с.moveTo(x, 0); с.lineTo(x, h); с.stroke(); } for (let y = 0; y <= h; y += 21) { с.beginPath(); с.moveTo(0, y); с.lineTo(w, y); с.stroke(); } }), roughness: 0.2, side: THREE.DoubleSide, emissive: ц('#0A1430') });
+  const корпус = new THREE.Group(); корпус.position.y = 1.9; спутник.add(корпус);
+  { const т = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.35, 2.6, 24), фольга); т.castShadow = true; корпус.add(т);
+    const верх = new THREE.Mesh(new THREE.ConeGeometry(1.25, 1.1, 24), мат('#D8DCE0', { roughness: 0.4 })); верх.position.y = 1.85; корпус.add(верх);
+    const таре = new THREE.Mesh(new THREE.SphereGeometry(0.75, 20, 10, 0, 6.28, 0, 1.0), мат('#EEEEEA', { side: THREE.DoubleSide })); таре.position.set(0, 2.5, 0); таре.rotation.x = Math.PI; корпус.add(таре);
+    корпус.add(ящик(0.04, 0.9, 0.04, мат('#8A8C90'), 0, 2.6, 0));
+    for (const s of [-1, 1]) { const крыло = new THREE.Group(); крыло.position.set(s * 1.3, 0.2, 0); корпус.add(крыло); крыло.add(ящик(0.9, 0.08, 0.08, мат('#8A8C90'), s * 0.45, 0, 0));
+      for (let k = 0; k < 3; k++) { const п = new THREE.Mesh(new THREE.PlaneGeometry(1.3, 1.9), панельМ); п.position.set(s * (1.6 + k * 1.35), 0, 0); п.rotation.x = -Math.PI / 2 + 0.4; крыло.add(п); } }
+    const люк = ящик(0.9, 1.3, 0.06, мат('#C8CCD0', { roughness: 0.3 }), 0, -0.3, 1.3); корпус.add(люк);
+    const ил = new THREE.Mesh(new THREE.CircleGeometry(0.22, 20), мат('#1A2A40', { roughness: 0.05, emissive: ц('#1A4A8A') })); ил.position.set(0, 0, 1.34); корпус.add(ил);
+    const надп = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 0.4), new THREE.MeshStandardMaterial({ map: холст(512, 128, (с, w, h) => { с.clearRect(0, 0, w, h); с.fillStyle = '#B81E24'; с.font = 'bold 84px Arial'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillText('ШТОРМ-1', w / 2, h / 2 + 4); }), transparent: true, roughness: 0.4 }));
+    надп.position.set(0, 0.85, 1.36); корпус.add(надп);
+    for (const [x, z] of [[-0.9, -0.9], [0.9, -0.9], [-0.9, 0.9], [0.9, 0.9]]) { const н = ящик(0.12, 1.3, 0.12, мат('#5A5C60'), x, -1.6, z); н.rotation.set(z * 0.25, 0, -x * 0.25); корпус.add(н); }
+    const сопло = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.7, 0.6, 16, 1, true), мат('#2A2A2C', { side: THREE.DoubleSide })); сопло.position.y = -1.6; корпус.add(сопло); }
+  // площадка, провода, стол с ноутбуком
+  спутник.add(ящик(5, 0.15, 5, мат('#9A9890', { map: API.текс('beton') }), 0, 0.07, 0));
+  const стол = new THREE.Group(); стол.position.set(3.4, 0, 1.5); спутник.add(стол);
+  стол.add(ящик(1.2, 0.05, 0.6, мат('#8A6A4A'), 0, 0.75, 0)); for (const [x, z] of [[-0.55, -0.25], [0.55, -0.25], [-0.55, 0.25], [0.55, 0.25]]) стол.add(ящик(0.05, 0.75, 0.05, мат('#3A3A3C'), x, 0.37, z));
+  const ноут = new THREE.Group(); ноут.position.set(0, 0.78, 0); стол.add(ноут); ноут.add(ящик(0.4, 0.02, 0.28, мат('#2A2A30'), 0, 0, 0));
+  const экрНоута = холст(256, 160); const эн = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.26), new THREE.MeshBasicMaterial({ map: экрНоута, toneMapped: false })); эн.position.set(0, 0.13, -0.13); эн.rotation.x = -0.25; ноут.add(эн);
+  API.добавитьПрепятствие([[SX - 2.5, SZ - 2.5], [SX + 2.5, SZ - 2.5], [SX + 2.5, SZ + 2.5], [SX - 2.5, SZ + 2.5]], 'спутник');
+  // подпись над спутником
+  const метка = new THREE.Sprite(new THREE.SpriteMaterial({ map: холст(512, 96, (с, w, h) => { с.fillStyle = 'rgba(10,14,30,0.75)'; с.fillRect(0, 0, w, h); с.fillStyle = '#F2CC6A'; с.font = 'bold 44px Arial'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillText('ШТОРМ-1 · разработчик', w / 2, h / 2); }), depthTest: false, transparent: true }));
+  метка.scale.set(5, 0.95, 1); метка.position.set(SX, SY + 7.5, SZ); сцена.add(метка);
+
+  // ===================== ШТОРМ =====================
+  const шторм = new THREE.Group(); шторм.position.set(SX + 3.4, SY, SZ + 2.4); шторм.rotation.y = Math.PI; сцена.add(шторм);
+  const наушники = new THREE.Group(); наушники.add(new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.015, 6, 16, Math.PI), мат('#1A1A1C')));
+  for (const s of [-1, 1]) { const ч = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.04, 12), мат('#1A1A1C')); ч.rotation.z = Math.PI / 2; ч.position.set(s * 0.11, 0, 0); наушники.add(ч); }
+  (window.__герои3д = window.__герои3д || []).push({ группа: шторм, причёска: 'hair_buzzed', волосы: '#2A2420', кожа: '#E6BC9E',
+    одежда: { верх: '#14161C', низ: '#2E3A4E', обувь: '#E8E8E8', рукав: 0.68 },
+    аним: () => (ст.говорит > 0 ? 'Idle_Talking_Loop' : 'Idle_Loop') });
+  // наушники цепляем на голову, когда модель появится
+  let наушНадеты = false;
+  const ст = { внутри: false, говорит: 0, сказал: 0, t: 0, высота: 0, цельВыс: 0, ночь: false, тревога: 0, прыжок: 0, нажатий: 0, был: false };
+  const фразы = ['— О, дошёл. Я, кстати, эту игру сделал.', '— Это «Штурм-1». Тьфу. «ШТОРМ-1». Мой спутник. Садись.', '— Только красную не нажимай. Серьёзно.'];
+  const сказать = (т, сек = 3.5) => { window.__кино && window.__кино.подпись('Шторм: ' + т, сек); голос(т, 0.95); ст.говорит = сек; };
+
+  // ===================== КАБИНА =====================
+  const каб = new THREE.Scene(); каб.background = new THREE.Color(0x05070C);
+  const кКам = new THREE.PerspectiveCamera(68, 1, 0.05, 50); кКам.position.set(0, 1.15, 0.55);
+  каб.add(new THREE.HemisphereLight(0x8899BB, 0x101018, 0.6));
+  const лампа = new THREE.PointLight(0x9AB8FF, 1.2, 6); лампа.position.set(0, 2.3, 0.2); каб.add(лампа);
+  const тревЛ = new THREE.PointLight(0xFF2020, 0, 6); тревЛ.position.set(0, 2.1, -0.5); каб.add(тревЛ);
+  // стены — цилиндр изнутри с панелями
+  { const стены = new THREE.Mesh(new THREE.CylinderGeometry(2.4, 2.4, 3, 32, 1, true), new THREE.MeshStandardMaterial({ map: холст(512, 256, (с, w, h) => { с.fillStyle = '#20242C'; с.fillRect(0, 0, w, h); с.strokeStyle = '#0E1014'; с.lineWidth = 3; for (let x = 0; x < w; x += 64) { с.beginPath(); с.moveTo(x, 0); с.lineTo(x, h); с.stroke(); } for (let y = 0; y < h; y += 64) { с.beginPath(); с.moveTo(0, y); с.lineTo(w, y); с.stroke(); } с.fillStyle = '#5A606A'; for (let x = 8; x < w; x += 32) for (let y = 8; y < h; y += 32) { с.beginPath(); с.arc(x, y, 2, 0, 6.28); с.fill(); } }), side: THREE.BackSide, roughness: 0.7 }));
+    стены.position.y = 1.2; каб.add(стены);
+    const пол = new THREE.Mesh(new THREE.CircleGeometry(2.4, 32).rotateX(-Math.PI / 2), мат('#15171C')); пол.position.y = -0.3; каб.add(пол);
+    const пот = new THREE.Mesh(new THREE.CircleGeometry(2.4, 32).rotateX(Math.PI / 2), мат('#15171C')); пот.position.y = 2.7; каб.add(пот);
+    // кресло
+    каб.add(ящик(0.7, 0.12, 0.6, мат('#2A2A2E'), 0, 0.35, 0.8), ящик(0.7, 0.9, 0.12, мат('#2A2A2E'), 0, 0.85, 1.12));
+    for (let k = 0; k < 8; k++) { const тр = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 3, 6), мат(['#C83A2A', '#3A6AC8', '#E8C040', '#3A3A3A'][k % 4])); тр.position.set(Math.cos(k * 0.8 + 2) * 2.3, 1.2, Math.sin(k * 0.8 + 2) * 2.3); каб.add(тр); } }
+  // иллюминатор: вид наружу (мир рисуется в текстуру)
+  const RTокно = new THREE.WebGLRenderTarget(API.телефон ? 640 : 960, API.телефон ? 360 : 540); RTокно.texture.encoding = THREE.sRGBEncoding;
+  const внешКам = new THREE.PerspectiveCamera(60, 16 / 9, 0.3, 4000);
+  { const окно = new THREE.Mesh(new THREE.PlaneGeometry(2.2, 1.0), new THREE.MeshBasicMaterial({ map: RTокно.texture, toneMapped: false })); окно.position.set(0, 2.0, -1.95); окно.rotation.x = 0.15; каб.add(окно);
+    const рамка = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.06, 6, 40), мат('#5A606A', { roughness: 0.3 })); рамка.scale.set(1, 0.5, 1); рамка.position.copy(окно.position); рамка.rotation.x = 0.15; каб.add(рамка); }
+
+  // экраны — каждый со своей рисовалкой
+  const экраны = [];
+  function экран(имя, x, y, z, ry, w, h, рис, rt) {
+    const т = rt ? null : холст(256, Math.round(256 * h / w));
+    const м = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: rt ? rt.texture : т, toneMapped: false }));
+    const гр = new THREE.Group(); гр.position.set(x, y, z); гр.rotation.y = ry; гр.add(м);
+    гр.add(ящик(w + 0.06, h + 0.06, 0.04, мат('#0E1014', { roughness: 0.4 }), 0, 0, -0.025));
+    const п = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.06), new THREE.MeshBasicMaterial({ map: холст(256, 16, (с, W, H) => { с.fillStyle = '#0E1014'; с.fillRect(0, 0, W, H); с.fillStyle = '#7FD0FF'; с.font = 'bold 12px monospace'; с.fillText(имя, 4, 12); }) })); п.position.set(0, h / 2 + 0.06, 0); гр.add(п);
+    каб.add(гр); экраны.push({ имя, т, рис, rt }); return гр;
+  }
+  // раскладка: дуга, два ряда
+  const R = 1.75, ряды = [0.95, 1.42];
+  const рисовалки = [];
+  const РАД = (с, w, h, t) => { с.fillStyle = '#001408'; с.fillRect(0, 0, w, h); const cx = w / 2, cy = h / 2, r = h * 0.45; с.strokeStyle = '#0F5'; с.globalAlpha = 0.4; for (let k = 1; k < 4; k++) { с.beginPath(); с.arc(cx, cy, r * k / 3, 0, 6.28); с.stroke(); } с.globalAlpha = 1; const а = t * 2; const г = с.createRadialGradient(cx, cy, 0, cx, cy, r); г.addColorStop(0, 'rgba(0,255,90,0.6)'); г.addColorStop(1, 'rgba(0,255,90,0)'); с.fillStyle = г; с.beginPath(); с.moveTo(cx, cy); с.arc(cx, cy, r, а - 0.5, а); с.fill(); с.fillStyle = '#9F9'; for (let k = 0; k < 6; k++) { const b = k * 1.7 + 0.3, d = r * (0.3 + (k % 3) * 0.2); с.globalAlpha = 0.4 + 0.6 * Math.max(0, Math.cos(а - b)); с.fillRect(cx + Math.cos(b) * d, cy + Math.sin(b) * d, 4, 4); } с.globalAlpha = 1; с.fillStyle = '#0F5'; с.font = '11px monospace'; с.fillText('ОБЪЕКТОВ: 6 (5 сортиров, 1 курица)', 6, h - 6); };
+  const ЗЕМЛЯ = (с, w, h, t) => { с.fillStyle = '#000'; с.fillRect(0, 0, w, h); for (let i = 0; i < 40; i++) { с.fillStyle = '#FFF'; с.fillRect((i * 97) % w, (i * 53) % h, 1, 1); } const cx = w / 2, cy = h / 2, r = h * 0.4; const г = с.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r); г.addColorStop(0, '#5AA0F0'); г.addColorStop(1, '#0A2A6A'); с.fillStyle = г; с.beginPath(); с.arc(cx, cy, r, 0, 6.28); с.fill(); с.save(); с.beginPath(); с.arc(cx, cy, r, 0, 6.28); с.clip(); с.fillStyle = '#3A8A4A'; for (let k = 0; k < 7; k++) { const x = cx - r + ((k * 61 + t * 30) % (2 * r + 60)) - 30, y = cy - r * 0.6 + (k % 4) * r * 0.35; с.beginPath(); с.ellipse(x, y, 22 + k * 3, 12 + (k % 3) * 6, k, 0, 6.28); с.fill(); } с.restore(); с.strokeStyle = '#F2CC6A'; с.beginPath(); с.ellipse(cx, cy, r * 1.3, r * 0.4, -0.3, 0, 6.28); с.stroke(); const а = t * 0.8; с.fillStyle = '#F2CC6A'; с.beginPath(); с.arc(cx + Math.cos(а) * r * 1.3 * Math.cos(-0.3) - Math.sin(а) * r * 0.4 * Math.sin(-0.3), cy + Math.cos(а) * r * 1.3 * Math.sin(-0.3) + Math.sin(а) * r * 0.4 * Math.cos(-0.3), 4, 0, 6.28); с.fill(); с.fillStyle = '#9CF'; с.font = '11px monospace'; с.fillText('ОРБИТА: ' + (ст.высота > 5 ? 'НИЗКАЯ' : 'НА ЗЕМЛЕ (огород)'), 6, 14); };
+  const КАРТА = (с, w, h) => { с.fillStyle = '#081018'; с.fillRect(0, 0, w, h); const k = Math.min(w / API.ШИР, h / API.ГЛУБ) * 1.6, X = x => w / 2 + (x - SX) * k * 0.6, Z = z => h / 2 + (z - SZ) * k * 0.6; с.strokeStyle = '#E8C060'; с.lineWidth = 1.2; for (const д of API.дороги) { с.beginPath(); д.п.forEach(([x, z], i) => i ? с.lineTo(X(x), Z(z)) : с.moveTo(X(x), Z(z))); с.stroke(); } с.fillStyle = '#5A6A80'; for (const д of API.дома) if (д.cx !== undefined) с.fillRect(X(д.cx) - 1, Z(д.cz) - 1, 2, 2); с.fillStyle = '#F33'; с.beginPath(); с.arc(X(SX), Z(SZ), 4, 0, 6.28); с.fill(); с.fillStyle = '#7FD0FF'; с.font = '11px monospace'; с.fillText('БОРОЗДИНОВСКИЙ · вы здесь', 6, h - 6); };
+  const граф = []; for (let i = 0; i < 64; i++) граф.push([0.5, 0.5, 0.5]);
+  const ТЕЛЕМ = (с, w, h, t) => { граф.push([0.5 + Math.sin(t * 2) * 0.3 + (сл() - 0.5) * 0.1, 0.4 + ст.высота / 1500 + (сл() - 0.5) * 0.05, 0.6 + Math.sin(t * 0.7) * 0.2]); граф.shift(); с.fillStyle = '#0A0A10'; с.fillRect(0, 0, w, h); ['#F55', '#5F5', '#59F'].forEach((цв, j) => { с.strokeStyle = цв; с.beginPath(); граф.forEach((g, i) => { const x = i / 63 * w, y = h - 14 - g[j] * (h - 24); i ? с.lineTo(x, y) : с.moveTo(x, y); }); с.stroke(); }); с.fillStyle = '#CCC'; с.font = '11px monospace'; с.fillText('ВЫС ' + Math.round(ст.высота) + 'м  T° 21  V ' + (ст.высота > 5 ? '7.8 км/с' : '0'), 6, h - 3); };
+  const код = (window.ДЕТАЛИ || []).map(([имя, ф]) => '// модуль: ' + имя + '\n' + String(ф).slice(0, 1600)).join('\n').split('\n').filter(s => s.trim()).map(s => s.slice(0, 46));
+  const ДЕВ = (с, w, h, t) => { с.fillStyle = '#0B0E14'; с.fillRect(0, 0, w, h); с.font = '10px monospace'; const n = Math.floor(t * 6); for (let i = 0; i < 14; i++) { const s = код[(n + i) % код.length] || ''; с.fillStyle = s.startsWith('//') ? '#6A8A6A' : /function|const|let|=>/.test(s) ? '#C8A0F0' : '#A8C8E8'; с.fillText(s, 4, 22 + i * 11); } с.fillStyle = '#F2CC6A'; с.fillRect(0, 0, w, 12); с.fillStyle = '#000'; с.fillText('BRZD-RSTV · dev: ШТОРМ · build 46', 4, 9); };
+  const ЗВЁЗДЫ = (с, w, h, t) => { с.fillStyle = '#02030A'; с.fillRect(0, 0, w, h); for (let i = 0; i < 90; i++) { с.globalAlpha = 0.3 + 0.7 * Math.abs(Math.sin(t * (1 + i % 5) + i)); с.fillStyle = '#FFF'; с.fillRect((i * 131) % w, (i * 71) % h, 1.5, 1.5); } с.globalAlpha = 1; const ковш = [[40, 40], [70, 34], [96, 42], [120, 52], [126, 80], [160, 84], [166, 56]]; с.strokeStyle = '#7FD0FF'; с.beginPath(); ковш.forEach(([x, y], i) => i ? с.lineTo(x, y) : с.moveTo(x, y)); с.lineTo(120, 52); с.stroke(); с.fillStyle = '#FFF'; for (const [x, y] of ковш) { с.beginPath(); с.arc(x, y, 2.5, 0, 6.28); с.fill(); } с.fillStyle = '#F2CC6A'; с.beginPath(); с.arc(220, 30, 3, 0, 6.28); с.fill(); с.fillStyle = '#7FD0FF'; с.font = '11px monospace'; с.fillText('Б. МЕДВЕДИЦА · Полярная →', 6, h - 6); };
+  const СИСТ = (с, w, h, t) => { с.fillStyle = '#0A0C10'; с.fillRect(0, 0, w, h); const п = [['ТОПЛИВО', 0.82, '#5F5'], ['КИСЛОРОД', 0.97, '#5CF'], ['ВАЙФАЙ', 0.08, '#F55'], ['САМОГОН', 0.6 + Math.sin(t) * 0.05, '#FC5'], ['ЩИТЫ', ст.тревога > 0 ? 0.1 : 0.7, '#C8F'], ['НЕРВЫ ВАНИ', 0.35, '#F95']]; с.font = '11px monospace'; п.forEach(([н, v, цв], i) => { const y = 10 + i * 19; с.fillStyle = '#AAA'; с.fillText(н, 6, y + 9); с.fillStyle = '#222'; с.fillRect(96, y, w - 104, 11); с.fillStyle = цв; с.fillRect(96, y, (w - 104) * v, 11); }); };
+  const ОСЦ = (с, w, h, t) => { с.fillStyle = '#001010'; с.fillRect(0, 0, w, h); с.strokeStyle = '#0FC'; с.lineWidth = 2; с.beginPath(); for (let x = 0; x < w; x++) { const y = h / 2 + Math.sin(x * 0.08 + t * 6) * h * 0.25 * Math.sin(t * 0.7) + Math.sin(x * 0.3 + t * 11) * 6; x ? с.lineTo(x, y) : с.moveTo(x, y); } с.stroke(); с.strokeStyle = 'rgba(0,255,200,0.15)'; с.lineWidth = 1; for (let x = 0; x < w; x += 32) { с.beginPath(); с.moveTo(x, 0); с.lineTo(x, h); с.stroke(); } };
+  const ЧАТ_СТРОКИ = ['Ozon: заказ ждёт вас 2:00', 'Ярик: чё, как?', 'Ваня: где провод', 'Люба: Я ЛЕЧУ-У-У', 'Яша: мяу', 'Курица: ко.', 'Никита: заезжайте ко мне', 'Богдан: ПОЕХАЛИ!', 'Пылесос: …не моё дело', 'ЦУП: Шторм, вы там живы?'];
+  const СВЯЗЬ = (с, w, h, t) => { с.fillStyle = '#0C0A14'; с.fillRect(0, 0, w, h); с.font = '11px monospace'; const n = Math.floor(t / 1.6); for (let i = 0; i < 7; i++) { const s = ЧАТ_СТРОКИ[(n + i) % ЧАТ_СТРОКИ.length]; с.fillStyle = i === 6 ? '#FFF' : '#9A8AC8'; с.fillText('> ' + s, 6, 16 + i * 16); } };
+  const КУРЫ = (с, w, h, t) => { с.fillStyle = '#140C06'; с.fillRect(0, 0, w, h); с.fillStyle = '#FC8'; с.font = 'bold 14px monospace'; с.fillText('ТРЕКЕР КУРИЦ', 6, 18); с.font = '11px monospace'; с.fillText('обнаружено: 1', 6, 36); с.fillText('статус: недовольна', 6, 52); с.fillText('угроза: «Ко.»', 6, 68); const x = w / 2 + Math.sin(t * 1.3) * 60, y = h - 30 + Math.abs(Math.sin(t * 6)) * -6; с.fillStyle = '#F4F1EA'; с.beginPath(); с.ellipse(x, y, 14, 10, 0, 0, 6.28); с.fill(); с.beginPath(); с.arc(x + 12, y - 10, 6, 0, 6.28); с.fill(); с.fillStyle = '#C62828'; с.fillRect(x + 10, y - 19, 4, 5); };
+  const ПРОИЗВ = (с, w, h, t) => { const и = API.рендер.info.render; с.fillStyle = '#0A0A0A'; с.fillRect(0, 0, w, h); с.fillStyle = '#5F5'; с.font = 'bold 22px monospace'; с.fillText((window.__мир && window.__мир.fps || 0) + ' FPS', 8, 30); с.font = '11px monospace'; с.fillStyle = '#AAA'; с.fillText('треугольников: ' + (и.triangles / 1000 | 0) + 'k', 8, 52); с.fillText('отрисовок: ' + и.calls, 8, 68); с.fillText('домов: ' + API.дома.length, 8, 84); с.fillText('багов: 0 (это фичи)', 8, 100); };
+  const ПОГОДА = (с, w, h, t) => { с.fillStyle = '#0A1420'; с.fillRect(0, 0, w, h); с.fillStyle = '#FFF'; с.font = 'bold 26px Arial'; с.fillText('+14°', 10, 40); с.font = '12px Arial'; с.fillText('Бороздиновский', 10, 60); с.fillText('ветер: 3 м/с', 10, 78); с.fillText('осадки: сортиры (возможно)', 10, 96); с.fillStyle = '#F2CC6A'; с.beginPath(); с.arc(w - 40, 34, 18, 0, 6.28); с.fill(); };
+  const ТРЕВОГА = (с, w, h, t) => { с.fillStyle = Math.sin(t * 12) > 0 ? '#600' : '#200'; с.fillRect(0, 0, w, h); с.fillStyle = '#FFF'; с.font = 'bold 24px Arial'; с.textAlign = 'center'; с.fillText('ЗАЧЕМ', w / 2, h / 2); с.font = '12px Arial'; с.fillText('я же написал: не нажимать', w / 2, h / 2 + 20); с.textAlign = 'left'; };
+  // живые камеры (мир в текстуру)
+  const RTяша = new THREE.WebGLRenderTarget(256, 160), RTсверху = new THREE.WebGLRenderTarget(256, 160);
+  RTяша.texture.encoding = RTсверху.texture.encoding = THREE.sRGBEncoding;
+  const камЯша = new THREE.PerspectiveCamera(50, 1.6, 0.05, 400), камСверху = new THREE.PerspectiveCamera(50, 1.6, 1, 3000);
+  const список = [['РАДАР', РАД], ['ЗЕМЛЯ', ЗЕМЛЯ], ['КАРТА', КАРТА], ['ТЕЛЕМЕТРИЯ', ТЕЛЕМ], ['DEV-КОНСОЛЬ', ДЕВ], ['КАМЕРА: ЯША', null, RTяша], ['КАМЕРА: ПОСЁЛОК', null, RTсверху],
+    ['ЗВЁЗДНАЯ КАРТА', ЗВЁЗДЫ], ['СИСТЕМЫ', СИСТ], ['ОСЦИЛЛОГРАФ', ОСЦ], ['СВЯЗЬ', СВЯЗЬ], ['ТРЕКЕР КУРИЦ', КУРЫ], ['ПРОИЗВОДИТЕЛЬНОСТЬ', ПРОИЗВ], ['ПОГОДА', ПОГОДА]];
+  список.forEach(([имя, рис, rt], i) => { const ряд = i % 2, k = Math.floor(i / 2), N = Math.ceil(список.length / 2), а = (k / (N - 1) - 0.5) * 2.5; экран(имя, Math.sin(а) * R, ряды[ряд], 0.5 - Math.cos(а) * R, -а, 0.62, 0.38, рис, rt); });
+  // пульт с кнопками
+  const пульт = new THREE.Group(); пульт.position.set(0, 0.62, -0.55); пульт.rotation.x = -0.75; каб.add(пульт);
+  пульт.add(ящик(2.2, 0.75, 0.08, мат('#2A2E36', { roughness: 0.5 }), 0, 0, -0.04));
+  const кнопки = [];
+  function кнопка(имя, x, y, цв, действие, w = 0.2) {
+    const т = холст(128, 48, (с, W, H) => { с.fillStyle = цв; с.fillRect(0, 0, W, H); с.fillStyle = 'rgba(0,0,0,0.25)'; с.fillRect(0, H - 6, W, 6); с.fillStyle = '#FFF'; с.font = 'bold ' + (имя.length > 9 ? 13 : 17) + 'px Arial'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillText(имя, W / 2, H / 2); });
+    const м = new THREE.Mesh(new THREE.BoxGeometry(w, w * 0.4, 0.05), [мат(цв), мат(цв), мат(цв), мат(цв), new THREE.MeshBasicMaterial({ map: т, toneMapped: false }), мат(цв)]);
+    м.position.set(x, y, 0.03); пульт.add(м); const к = { м, действие, имя, нажата: 0 }; м.userData.кнопка = к; кнопки.push(к); return к;
+  }
+  // мелкие лампочки и тумблеры
+  const лампы = []; for (let i = 0; i < 28; i++) { const л = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 4), new THREE.MeshBasicMaterial({ color: [0xFF3030, 0x30FF60, 0xFFC020, 0x30A0FF][i % 4] })); л.position.set(-1 + (i % 14) * 0.15, 0.32 - Math.floor(i / 14) * 0.05, 0.03); пульт.add(л); лампы.push(л); }
+  const тумблеры = []; for (let i = 0; i < 10; i++) { const т = ящик(0.02, 0.08, 0.02, мат('#C8CCD0', { roughness: 0.2 }), -0.9 + i * 0.2, -0.3, 0.06); т.rotation.x = 0.5; пульт.add(т); т.userData.кнопка = { м: т, действие: () => { т.rotation.x = -т.rotation.x; бип(1800, 0.03); }, имя: 'тумблер' }; кнопки.push(т.userData.кнопка); тумблеры.push(т); }
+
+  // ===================== ДЕЙСТВИЯ КНОПОК =====================
+  const подпись = т => window.__кино && window.__кино.подпись(т, 2.5);
+  кнопка('ЗАПУСК', -0.85, 0.16, '#2A8A3A', () => { if (ст.цельВыс > 5) return подпись('Уже летим.'); ст.цельВыс = 900; бип([300, 400, 600, 900], 0.12); Я() && Я().тряхнуть(0.5); подпись('ПОЕХАЛИ! (Богдан одобряет)'); }, 0.26);
+  кнопка('ПОСАДКА', -0.55, 0.16, '#8A6A2A', () => { ст.цельВыс = 0; бип([700, 500, 300], 0.12); подпись('Садимся в огород.'); }, 0.26);
+  кнопка('СОРТИР', -0.25, 0.16, '#6A4A2A', () => { const о = window.__особые; if (о && о.салют) { о.салют(); подпись('Запуск сортира с салютом. Смотри на камеру посёлка.'); } else подпись('Сортиры кончились.'); бип([200, 150], 0.2, 0.1, 'sawtooth'); });
+  кнопка('ЯША', 0.05, 0.16, '#C87830', () => { мяу(); подпись('Яша на связи. Недоволен.'); });
+  кнопка('КУРИЦА', 0.35, 0.16, '#C8C0A8', () => { кудах(); подпись('Ко.'); });
+  кнопка('НОЧЬ', 0.65, 0.16, '#2A3A8A', () => { ст.ночь = !ст.ночь; бип(ст.ночь ? [500, 300] : [300, 500], 0.08); подпись(ст.ночь ? 'Звёзды включены.' : 'Солнце обратно.'); });
+  кнопка('ГИПЕРПРЫЖОК', -0.6, -0.08, '#6A2AA8', () => { ст.прыжок = 1.6; бип([200, 400, 800, 1600, 3200], 0.08, 0.06, 'sawtooth'); Я() && Я().тряхнуть(0.8); подпись('Гиперпрыжок в… Бороздиновский. Опять.'); }, 0.34);
+  кнопка('СВЕТ', -0.15, -0.08, '#3A6A8A', () => { лампа.intensity = лампа.intensity > 0.5 ? 0.15 : 1.2; бип(1200, 0.04); });
+  кнопка('МУЗЫКА', 0.25, -0.08, '#2A6A6A', () => { бип([523, 659, 784, 1047, 784, 659, 523], 0.12, 0.05, 'triangle'); подпись('Космическая музыка (своя).'); });
+  const красная = кнопка('НЕ НАЖИМАТЬ', 0.75, -0.08, '#B01818', () => { ст.тревога = 6; ст.нажатий++; бип([880, 660, 880, 660, 880, 660], 0.18, 0.08, 'sawtooth'); Я() && Я().тряхнуть(0.6); setTimeout(() => сказать(ст.нажатий > 1 ? '— Ты нажал. Опять. Ладно, я добавлю это в патч.' : '— Я же написал: НЕ нажимать.', 3.5), 600); }, 0.34);
+  { const колпак = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.17, 0.08), new THREE.MeshStandardMaterial({ color: 0xFF8080, transparent: true, opacity: 0.35, roughness: 0.1 })); колпак.position.set(0.75, -0.08, 0.08); пульт.add(колпак); }
+  // рычаг
+  const рычаг = new THREE.Group(); рычаг.position.set(1.0, -0.28, 0.03); пульт.add(рычаг); рычаг.add(ящик(0.03, 0.03, 0.22, мат('#C8CCD0'), 0, 0, 0.11)); { const ш = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), мат('#C82020')); ш.position.z = 0.22; рычаг.add(ш); ш.userData.кнопка = { м: ш, действие: () => { рычаг.rotation.x = рычаг.rotation.x ? 0 : -0.8; бип([150, 120], 0.15, 0.1, 'sawtooth'); подпись(рычаг.rotation.x ? 'Тяга: максимум. Ничего не происходит.' : 'Тяга: 0.'); }, имя: 'рычаг' }; кнопки.push(ш.userData.кнопка); }
+  // табличка разработчика
+  { const т = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.15), new THREE.MeshBasicMaterial({ map: холст(256, 64, (с, w, h) => { с.fillStyle = '#C8A040'; с.fillRect(0, 0, w, h); с.fillStyle = '#1A1A1A'; с.font = 'bold 16px Arial'; с.textAlign = 'center'; с.fillText('СОБРАНО ШТОРМОМ', w / 2, 26); с.font = '12px Arial'; с.fillText('разработчик BRZD-RSTV · voidm.site', w / 2, 48); }) }));
+    т.position.set(-0.75, -0.3, 0.04); пульт.add(т); }
+  function мяу() { const к = ctx(); if (!к) return; const t = к.currentTime, о = к.createOscillator(), ф = к.createBiquadFilter(), g = к.createGain(); о.type = 'sawtooth'; о.frequency.setValueAtTime(520, t); о.frequency.linearRampToValueAtTime(780, t + 0.18); о.frequency.linearRampToValueAtTime(430, t + 0.5); ф.type = 'bandpass'; ф.frequency.value = 1400; ф.Q.value = 4; g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16, t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55); о.connect(ф); ф.connect(g); g.connect(Я().выход()); о.start(t); о.stop(t + 0.6); }
+  function кудах() { const к = ctx(); if (!к) return; let t = к.currentTime; for (let i = 0; i < 4; i++) { const о = к.createOscillator(), g = к.createGain(); о.type = 'square'; const f = 600 + сл() * 300; о.frequency.setValueAtTime(f, t); о.frequency.exponentialRampToValueAtTime(f * 0.7, t + 0.09); g.gain.setValueAtTime(0.1, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.11); о.connect(g); g.connect(Я().выход()); о.start(t); о.stop(t + 0.12); t += 0.12; } }
+
+  // ===================== ВХОД / ВЫХОД =====================
+  const стиль = document.createElement('style');
+  стиль.textContent = `body.кабина #кнопки, body.кабина #миникарта, body.кабина #компас, body.кабина #цель, body.кабина #совет, body.кабина #шестерня, body.кабина #джойстик, body.кабина #метка, body.кабина #улица { display: none !important; }
+    #кн-шторм { position: fixed; left: 50%; bottom: calc(22px + env(safe-area-inset-bottom,0px)); transform: translateX(-50%); z-index: 8; display: none; height: 52px; padding: 0 26px; border: 0; border-radius: 14px; background: #F2CC6A; color: #1A1A1A; font: 800 16px system-ui,sans-serif; letter-spacing: 1px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+    #выход-каб { position: fixed; top: calc(12px + env(safe-area-inset-top,0px)); left: calc(12px + env(safe-area-inset-left,0px)); z-index: 9; display: none; height: 44px; padding: 0 18px; border: 0; border-radius: 12px; background: rgba(20,24,34,.85); color: #F2CC6A; font: 800 14px system-ui,sans-serif; letter-spacing: 1px; }
+    body.кабина #выход-каб { display: block; }`;
+  document.head.appendChild(стиль);
+  const кн = document.createElement('button'); кн.id = 'кн-шторм'; кн.textContent = 'СЕСТЬ В СПУТНИК'; document.body.appendChild(кн);
+  const выход = document.createElement('button'); выход.id = 'выход-каб'; выход.textContent = '← ВЫЙТИ'; document.body.appendChild(выход);
+  const взгляд = { рыск: 0, тангаж: 0.12 };
+  function войти() { ст.внутри = true; window.__управлениеСтоп = true; document.body.classList.add('кабина'); кн.style.display = 'none'; бип([400, 800], 0.08); взгляд.рыск = 0; взгляд.тангаж = 0.12; размер(); }
+  function выйти() { ст.внутри = false; ст.цельВыс = 0; ст.высота = 0; window.__управлениеСтоп = false; document.body.classList.remove('кабина'); бип([800, 400], 0.08); setTimeout(() => сказать(ст.нажатий ? '— Красную всё-таки нажал, да? Я видел.' : '— Ну как? Багов не нашёл? Если нашёл — это фичи.', 3.5), 600); }
+  кн.addEventListener('click', войти); выход.addEventListener('click', выйти);
+  function размер() { const w = innerWidth, h = innerHeight; кКам.aspect = w / h; кКам.fov = w / h > 1.3 ? 62 : 75; кКам.updateProjectionMatrix(); }
+  addEventListener('resize', размер);
+  // касания внутри кабины: тянуть — осматриваться, тап — нажать
+  const холстИгры = API.рендер.domElement, луч = new THREE.Raycaster(), т2 = new THREE.Vector2();
+  let тач = null;
+  холстИгры.addEventListener('pointerdown', e => { if (!ст.внутри) return; тач = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY }; });
+  холстИгры.addEventListener('pointermove', e => { if (!ст.внутри || !тач) return; взгляд.рыск = Math.max(-1.3, Math.min(1.3, взгляд.рыск - (e.clientX - тач.x) * 0.005)); взгляд.тангаж = Math.max(-0.9, Math.min(0.6, взгляд.тангаж - (e.clientY - тач.y) * 0.004)); тач.x = e.clientX; тач.y = e.clientY; });
+  холстИгры.addEventListener('pointerup', e => { if (!ст.внутри || !тач) return; const сдвиг = Math.hypot(e.clientX - тач.x0, e.clientY - тач.y0); тач = null; if (сдвиг > 12) return;
+    const р = холстИгры.getBoundingClientRect(); т2.set((e.clientX - р.left) / р.width * 2 - 1, -((e.clientY - р.top) / р.height) * 2 + 1); луч.setFromCamera(т2, кКам);
+    const цели = кнопки.map(к => к.м), п = луч.intersectObjects(цели, false)[0]; if (п) { const к = п.object.userData.кнопка; к.нажата = 0.2; к.действие && к.действие(); if (к.имя !== 'тумблер' && к.имя !== 'рычаг') бип(1000 + сл() * 800, 0.04, 0.05); } });
+
+  // ===================== РЕНДЕР: в кабине рисуем кабину, мир — в иллюминатор и камеры =====================
+  const рендер = API.рендер, исходный = рендер.render.bind(рендер);
+  let кадрN = 0;
+  const пСп = new THREE.Vector3();
+  рендер.render = (сц, кам) => {
+    if (!ст.внутри || сц !== сцена) return исходный(сц, кам);
+    кадрN++;
+    const цел = рендер.getRenderTarget();
+    // иллюминатор: вид из спутника наружу
+    спутник.getWorldPosition(пСп);
+    внешКам.position.set(пСп.x, пСп.y + 4.2 + Math.sin(ст.t * 0.5) * 0.05, пСп.z);
+    const наз = ст.высота > 30 ? 1 : 0;
+    внешКам.rotation.set(-0.2 - наз * 1.0 + взгляд.тангаж * 0.4, Math.PI + взгляд.рыск * 0.8 + ст.t * 0.03 * наз, 0, 'YXZ');
+    if (ст.прыжок > 0) внешКам.fov = 60 + ст.прыжок * 40; else внешКам.fov = 60; внешКам.updateProjectionMatrix();
+    рендер.setRenderTarget(RTокно); исходный(сцена, внешКам);
+    if (кадрN % 3 === 0) { const я = window.__яша && window.__яша.яша; if (я) { камЯша.position.set(я.position.x + Math.sin(я.rotation.y) * 1.2, я.position.y + 0.6, я.position.z + Math.cos(я.rotation.y) * 1.2); камЯша.lookAt(я.position.x, я.position.y + 0.35, я.position.z); рендер.setRenderTarget(RTяша); исходный(сцена, камЯша); } }
+    if (кадрN % 3 === 1) { камСверху.position.set(пСп.x + 80, пСп.y + 220, пСп.z + 80); камСверху.lookAt(пСп.x, пСп.y, пСп.z); рендер.setRenderTarget(RTсверху); исходный(сцена, камСверху); }
+    рендер.setRenderTarget(цел);
+    кКам.rotation.set(взгляд.тангаж, взгляд.рыск, Math.sin(ст.t * 25) * 0.004 * (ст.прыжок > 0 || ст.высота > 5 && ст.высота < ст.цельВыс - 5 ? 1 : 0), 'YXZ');
+    исходный(каб, кКам);
+  };
+
+  // ===================== КАЖДЫЙ КАДР =====================
+  let таймЭкранов = 0;
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt) return;
+    ст.t += dt; if (ст.говорит > 0) ст.говорит -= dt;
+    // наушники Шторму
+    if (!наушНадеты) { let гол = null; шторм.traverse(о => { if (о.isBone && о.name === 'Head') гол = о; }); if (гол) { наушники.position.set(0, 0.11, 0); гол.add(наушники); наушНадеты = true; } }
+    // ноутбук на столе: код
+    if ((ст.t * 4 | 0) !== (ст.ноутТ | 0)) { ст.ноутТ = ст.t * 4; ДЕВ(экрНоута.__к.getContext('2d'), 256, 160, ст.t); экрНоута.needsUpdate = true; }
+    // Шторм разговаривает, когда подходишь
+    const d = Math.hypot(поз.x - шторм.position.x, поз.z - шторм.position.z);
+    шторм.rotation.y = d < 10 ? Math.atan2(поз.x - шторм.position.x, поз.z - шторм.position.z) : Math.PI;
+    if (d < 6 && ст.сказал < фразы.length && ст.говорит <= 0 && !ст.внутри) { сказать(фразы[ст.сказал++], 3.5); }
+    const дСп = Math.hypot(поз.x - SX, поз.z - SZ);
+    if (!ст.внутри) { кн.style.display = дСп < 5.5 && ст.высота < 1 ? 'block' : 'none'; }
+    // полёт спутника
+    ст.высота += (ст.цельВыс - ст.высота) * Math.min(1, dt * (ст.цельВыс > ст.высота ? 0.25 : 0.4));
+    корпус.position.y = 1.9 + ст.высота; корпус.rotation.y += dt * (ст.высота > 5 ? 0.15 : 0);
+    if (ст.высота > 1 && ст.высота < ст.цельВыс - 5 && Я()) { const p = корпус.getWorldPosition(new THREE.Vector3()); for (let i = 0; i < 3; i++) Я().огонь.пуск({ p: [p.x, p.y - 1.8, p.z], v: [(сл() - 0.5) * 2, -14, (сл() - 0.5) * 2], жизнь: 0.4, р0: 1.4, р1: 2.5, ц0: [1, 0.85, 0.45, 1], ц1: [0.7, 0.15, 0.02, 0], тормоз: 2 }); }
+    метка.position.y = SY + 7.5 + ст.высота;
+    if (ст.прыжок > 0) ст.прыжок -= dt;
+    if (ст.тревога > 0) { ст.тревога -= dt; тревЛ.intensity = Math.sin(ст.t * 14) > 0 ? 3 : 0.3; } else тревЛ.intensity = 0;
+    // небо: ночь по кнопке
+    if (window.__кино && window.__кино.небо && ст.внутри) { if (ст.ночь !== ст.ночьБыло) { ст.ночьБыло = ст.ночь; window.__кино.небо(ст.ночь ? 1.2 : 0); } }
+    if (!ст.внутри) return;
+    // экраны и лампочки
+    for (const к of кнопки) { if (к.нажата > 0) { к.нажата -= dt; к.м.position.z = 0.03 - 0.015; } else if (к.м.position.z < 0.03 && к.имя !== 'тумблер' && к.имя !== 'рычаг') к.м.position.z = 0.03; }
+    for (let i = 0; i < лампы.length; i++) лампы[i].visible = ст.тревога > 0 ? Math.sin(ст.t * 14 + i) > 0 : Math.sin(ст.t * (1 + i % 5) + i * 1.7) > -0.3;
+    таймЭкранов -= dt;
+    if (таймЭкранов <= 0) { таймЭкранов = 0.12;
+      for (const э of экраны) { if (!э.т) continue; const с = э.т.__к.getContext('2d'); (ст.тревога > 0 && э.имя !== 'DEV-КОНСОЛЬ' ? ТРЕВОГА : э.рис)(с, э.т.__к.width, э.т.__к.height, ст.t); э.т.needsUpdate = true; } }
+  });
+  window.__шторм = { ст, войти, выйти, SX, SZ, кнопки, спутник };
+}]);
+
+</script>
+<script>
 // Подсказки: что делать игроку. Вверху слева — текущая цель, внизу —
 // короткие советы по управлению (каждый — пока не выполнил, и больше не
 // надоедает), метка на экране — куда идти (со стрелкой у края, если цель
