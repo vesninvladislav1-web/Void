@@ -9122,10 +9122,42 @@ window.ДЕТАЛИ.push(['Шторм и спутник', function (API) {
   const лампы = []; for (let i = 0; i < 28; i++) { const л = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 4), new THREE.MeshBasicMaterial({ color: [0xFF3030, 0x30FF60, 0xFFC020, 0x30A0FF][i % 4] })); л.position.set(-1 + (i % 14) * 0.15, 0.32 - Math.floor(i / 14) * 0.05, 0.03); пульт.add(л); лампы.push(л); }
   const тумблеры = []; for (let i = 0; i < 10; i++) { const т = ящик(0.02, 0.08, 0.02, мат('#C8CCD0', { roughness: 0.2 }), -0.9 + i * 0.2, -0.3, 0.06); т.rotation.x = 0.5; пульт.add(т); т.userData.кнопка = { м: т, действие: () => { т.rotation.x = -т.rotation.x; бип(1800, 0.03); }, имя: 'тумблер' }; кнопки.push(т.userData.кнопка); тумблеры.push(т); }
 
+  // ===================== КОСМОС =====================
+  // Земля — снимок NASA «Blue Marble» (общественное достояние), облака, свечение атмосферы,
+  // звёзды, Луна, Солнце. Отметка «Бороздиновский» на настоящих координатах.
+  const космос = new THREE.Scene(); космос.background = new THREE.Color(0x000004);
+  const ЗR = 100;
+  const земля = new THREE.Mesh(new THREE.SphereGeometry(ЗR, 96, 64), new THREE.MeshStandardMaterial({ map: API.текс('zemlya'), roughness: 0.85, metalness: 0 }));
+  космос.add(земля);
+  const облака = new THREE.Mesh(new THREE.SphereGeometry(ЗR * 1.006, 64, 48), new THREE.MeshStandardMaterial({ map: (() => { const т = холст(1024, 512, (с, w, h) => { с.clearRect(0, 0, w, h); for (let i = 0; i < 1400; i++) { const x = сл() * w, y = h * (0.1 + сл() * 0.8), r = 6 + сл() * 26; const г = с.createRadialGradient(x, y, 0, x, y, r); г.addColorStop(0, 'rgba(255,255,255,0.55)'); г.addColorStop(1, 'rgba(255,255,255,0)'); с.fillStyle = г; с.beginPath(); с.ellipse(x, y, r * 2.2, r, 0, 0, 6.28); с.fill(); } }); т.wrapS = THREE.RepeatWrapping; return т; })(), transparent: true, depthWrite: false, roughness: 1 }));
+  земля.add(облака);
+  const атмосфера = new THREE.Sprite(new THREE.SpriteMaterial({ map: холст(256, 256, (с, w, h) => { const г = с.createRadialGradient(w / 2, h / 2, w * 0.36, w / 2, h / 2, w / 2); г.addColorStop(0, 'rgba(90,160,255,0.0)'); г.addColorStop(0.06, 'rgba(110,180,255,0.75)'); г.addColorStop(0.25, 'rgba(60,120,255,0.25)'); г.addColorStop(1, 'rgba(0,0,0,0)'); с.fillStyle = г; с.fillRect(0, 0, w, h); }), blending: THREE.AdditiveBlending, transparent: true, depthWrite: false }));
+  атмосфера.scale.set(ЗR * 2.8, ЗR * 2.8, 1); космос.add(атмосфера);
+  const солнце = new THREE.DirectionalLight(0xFFF4E6, 2.2); солнце.position.set(-300, 120, 200); космос.add(солнце); космос.add(new THREE.AmbientLight(0x1A2238, 0.5));
+  const солнцеСпр = new THREE.Sprite(new THREE.SpriteMaterial({ map: холст(128, 128, (с, w, h) => { const г = с.createRadialGradient(64, 64, 0, 64, 64, 64); г.addColorStop(0, 'rgba(255,255,240,1)'); г.addColorStop(0.15, 'rgba(255,240,200,0.9)'); г.addColorStop(1, 'rgba(255,200,120,0)'); с.fillStyle = г; с.fillRect(0, 0, w, h); }), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true }));
+  солнцеСпр.position.copy(солнце.position).multiplyScalar(3); солнцеСпр.scale.set(160, 160, 1); космос.add(солнцеСпр);
+  { const N = 4000, p = new Float32Array(N * 3), c = new Float32Array(N * 3); for (let i = 0; i < N; i++) { const u = сл() * 2 - 1, а = сл() * 6.28, r = 1800, q = Math.sqrt(1 - u * u); p.set([Math.cos(а) * q * r, u * r, Math.sin(а) * q * r], i * 3); const b = 0.5 + сл() * 0.5; c.set([b, b, b * (0.85 + сл() * 0.3)], i * 3); }
+    const г = new THREE.BufferGeometry(); г.setAttribute('position', new THREE.BufferAttribute(p, 3)); г.setAttribute('color', new THREE.BufferAttribute(c, 3)); космос.add(new THREE.Points(г, new THREE.PointsMaterial({ size: 1.6, sizeAttenuation: false, vertexColors: true }))); }
+  const луна = new THREE.Mesh(new THREE.SphereGeometry(27, 32, 24), new THREE.MeshStandardMaterial({ map: холст(256, 128, (с, w, h) => { с.fillStyle = '#9A9A96'; с.fillRect(0, 0, w, h); for (let i = 0; i < 160; i++) { с.fillStyle = `rgba(${сл() < 0.5 ? '60,60,58' : '190,190,184'},${0.2 + сл() * 0.3})`; с.beginPath(); с.arc(сл() * w, сл() * h, 2 + сл() * 10, 0, 6.28); с.fill(); } }), roughness: 1 }));
+  луна.position.set(380, 140, -520); космос.add(луна);
+  // где на шаре Бороздиновский (51.21° с. ш., 41.34° в. д.)
+  const наШаре = (lat, lon, r) => { const ф = (lon + 180) / 360 * Math.PI * 2, т = (90 - lat) / 180 * Math.PI; return new THREE.Vector3(-Math.cos(ф) * Math.sin(т) * r, Math.cos(т) * r, Math.sin(ф) * Math.sin(т) * r); };
+  const точкаБ = наШаре(51.21, 41.34, ЗR * 1.002);
+  { const пин = new THREE.Sprite(new THREE.SpriteMaterial({ map: холст(256, 96, (с, w, h) => { с.fillStyle = '#FF3020'; с.beginPath(); с.arc(18, 48, 12, 0, 6.28); с.fill(); с.fillStyle = 'rgba(0,0,0,0.6)'; с.fillRect(36, 26, 214, 44); с.fillStyle = '#FFF'; с.font = 'bold 26px Arial'; с.textBaseline = 'middle'; с.fillText('Бороздиновский', 44, 49); }), depthTest: false, transparent: true }));
+    пин.center.set(0.07, 0.5); пин.scale.set(12, 4.5, 1); пин.position.copy(точкаБ); земля.add(пин); }
+  const космКам = new THREE.PerspectiveCamera(60, 16 / 9, 0.5, 6000);
+  // ракетный подъём: 0 — на земле, 1 — в космосе
+  ст.космос = 0; ст.пуск = 0; ст.вКосмосе = false;
+  function вКосмос() {
+    if (ст.пуск > 0 || ст.вКосмосе) return;
+    ст.пуск = 0.001; ст.отсчёт = 3; бип([440], 0.2, 0.08);
+    сказать('— Ну всё. Ты нажал. Держись — летим в космос.', 3.5);
+  }
+
   // ===================== ДЕЙСТВИЯ КНОПОК =====================
   const подпись = т => window.__кино && window.__кино.подпись(т, 2.5);
   кнопка('ЗАПУСК', -0.85, 0.16, '#2A8A3A', () => { if (ст.цельВыс > 5) return подпись('Уже летим.'); ст.цельВыс = 900; бип([300, 400, 600, 900], 0.12); Я() && Я().тряхнуть(0.5); подпись('ПОЕХАЛИ! (Богдан одобряет)'); }, 0.26);
-  кнопка('ПОСАДКА', -0.55, 0.16, '#8A6A2A', () => { ст.цельВыс = 0; бип([700, 500, 300], 0.12); подпись('Садимся в огород.'); }, 0.26);
+  кнопка('ПОСАДКА', -0.55, 0.16, '#8A6A2A', () => { if (ст.вКосмосе) { ст.спуск = 4; бип([700, 500, 300, 200], 0.15); подпись('Вход в атмосферу. Будет жарко.'); return; } ст.цельВыс = 0; бип([700, 500, 300], 0.12); подпись('Садимся в огород.'); }, 0.26);
   кнопка('СОРТИР', -0.25, 0.16, '#6A4A2A', () => { const о = window.__особые; if (о && о.салют) { о.салют(); подпись('Запуск сортира с салютом. Смотри на камеру посёлка.'); } else подпись('Сортиры кончились.'); бип([200, 150], 0.2, 0.1, 'sawtooth'); });
   кнопка('ЯША', 0.05, 0.16, '#C87830', () => { мяу(); подпись('Яша на связи. Недоволен.'); });
   кнопка('КУРИЦА', 0.35, 0.16, '#C8C0A8', () => { кудах(); подпись('Ко.'); });
@@ -9133,7 +9165,7 @@ window.ДЕТАЛИ.push(['Шторм и спутник', function (API) {
   кнопка('ГИПЕРПРЫЖОК', -0.6, -0.08, '#6A2AA8', () => { ст.прыжок = 1.6; бип([200, 400, 800, 1600, 3200], 0.08, 0.06, 'sawtooth'); Я() && Я().тряхнуть(0.8); подпись('Гиперпрыжок в… Бороздиновский. Опять.'); }, 0.34);
   кнопка('СВЕТ', -0.15, -0.08, '#3A6A8A', () => { лампа.intensity = лампа.intensity > 0.5 ? 0.15 : 1.2; бип(1200, 0.04); });
   кнопка('МУЗЫКА', 0.25, -0.08, '#2A6A6A', () => { бип([523, 659, 784, 1047, 784, 659, 523], 0.12, 0.05, 'triangle'); подпись('Космическая музыка (своя).'); });
-  const красная = кнопка('НЕ НАЖИМАТЬ', 0.75, -0.08, '#B01818', () => { ст.тревога = 6; ст.нажатий++; бип([880, 660, 880, 660, 880, 660], 0.18, 0.08, 'sawtooth'); Я() && Я().тряхнуть(0.6); setTimeout(() => сказать(ст.нажатий > 1 ? '— Ты нажал. Опять. Ладно, я добавлю это в патч.' : '— Я же написал: НЕ нажимать.', 3.5), 600); }, 0.34);
+  const красная = кнопка('НЕ НАЖИМАТЬ', 0.75, -0.08, '#B01818', () => { ст.нажатий++; if (!ст.вКосмосе && ст.пуск <= 0) { ст.тревога = 3; вКосмос(); return; } ст.тревога = 6; бип([880, 660, 880, 660, 880, 660], 0.18, 0.08, 'sawtooth'); Я() && Я().тряхнуть(0.6); setTimeout(() => сказать(ст.нажатий > 1 ? '— Ты нажал. Опять. Ладно, я добавлю это в патч.' : '— Я же написал: НЕ нажимать.', 3.5), 600); }, 0.34);
   { const колпак = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.17, 0.08), new THREE.MeshStandardMaterial({ color: 0xFF8080, transparent: true, opacity: 0.35, roughness: 0.1 })); колпак.position.set(0.75, -0.08, 0.08); пульт.add(колпак); }
   // рычаг
   const рычаг = new THREE.Group(); рычаг.position.set(1.0, -0.28, 0.03); пульт.add(рычаг); рычаг.add(ящик(0.03, 0.03, 0.22, мат('#C8CCD0'), 0, 0, 0.11)); { const ш = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 8), мат('#C82020')); ш.position.z = 0.22; рычаг.add(ш); ш.userData.кнопка = { м: ш, действие: () => { рычаг.rotation.x = рычаг.rotation.x ? 0 : -0.8; бип([150, 120], 0.15, 0.1, 'sawtooth'); подпись(рычаг.rotation.x ? 'Тяга: максимум. Ничего не происходит.' : 'Тяга: 0.'); }, имя: 'рычаг' }; кнопки.push(ш.userData.кнопка); }
@@ -9181,7 +9213,21 @@ window.ДЕТАЛИ.push(['Шторм и спутник', function (API) {
     const наз = ст.высота > 30 ? 1 : 0;
     внешКам.rotation.set(-0.2 - наз * 1.0 + взгляд.тангаж * 0.4, Math.PI + взгляд.рыск * 0.8 + ст.t * 0.03 * наз, 0, 'YXZ');
     if (ст.прыжок > 0) внешКам.fov = 60 + ст.прыжок * 40; else внешКам.fov = 60; внешКам.updateProjectionMatrix();
-    рендер.setRenderTarget(RTокно); исходный(сцена, внешКам);
+    рендер.setRenderTarget(RTокно);
+    if (ст.вКосмосе) {
+      const над = точкаБ.clone().normalize(), выс = ЗR + 16 + Math.sin(ст.t * 0.1) * 0.5;
+      const тангенс = new THREE.Vector3(0, 1, 0).cross(над).normalize();
+      космКам.position.copy(над).multiplyScalar(выс).applyAxisAngle(new THREE.Vector3(0, 1, 0), земля.rotation.y);
+      const А = 0.62, впер = над.clone().multiplyScalar(-Math.cos(А)).add(тангенс.multiplyScalar(Math.sin(А))).applyAxisAngle(new THREE.Vector3(0, 1, 0), земля.rotation.y);   // ~48° от надира: Земля внизу, горизонт и звёзды сверху
+      const цельВзгл = космКам.position.clone().add(впер);
+      космКам.up.copy(над).applyAxisAngle(new THREE.Vector3(0, 1, 0), земля.rotation.y);
+      космКам.lookAt(цельВзгл); космКам.rotateY(взгляд.рыск * 0.8);
+      атмосфера.position.set(0, 0, 0);
+      { const бок = new THREE.Vector3().crossVectors(космКам.up, космКам.getWorldDirection(new THREE.Vector3())).normalize();   // солнце — сбоку-сзади: день под нами, красивый терминатор вдали
+        солнце.position.copy(космКам.position).normalize().multiplyScalar(250).addScaledVector(бок, 260).add(космКам.getWorldDirection(new THREE.Vector3()).multiplyScalar(120));
+        солнцеСпр.position.copy(солнце.position).normalize().multiplyScalar(1500); }
+      исходный(космос, космКам);
+    } else исходный(сцена, внешКам);
     if (кадрN % 3 === 0) { const я = window.__яша && window.__яша.яша; if (я) { камЯша.position.set(я.position.x + Math.sin(я.rotation.y) * 1.2, я.position.y + 0.6, я.position.z + Math.cos(я.rotation.y) * 1.2); камЯша.lookAt(я.position.x, я.position.y + 0.35, я.position.z); рендер.setRenderTarget(RTяша); исходный(сцена, камЯша); } }
     if (кадрN % 3 === 1) { камСверху.position.set(пСп.x + 80, пСп.y + 220, пСп.z + 80); камСверху.lookAt(пСп.x, пСп.y, пСп.z); рендер.setRenderTarget(RTсверху); исходный(сцена, камСверху); }
     рендер.setRenderTarget(цел);
@@ -9210,6 +9256,13 @@ window.ДЕТАЛИ.push(['Шторм и спутник', function (API) {
     if (ст.высота > 1 && ст.высота < ст.цельВыс - 5 && Я()) { const p = корпус.getWorldPosition(new THREE.Vector3()); for (let i = 0; i < 3; i++) Я().огонь.пуск({ p: [p.x, p.y - 1.8, p.z], v: [(сл() - 0.5) * 2, -14, (сл() - 0.5) * 2], жизнь: 0.4, р0: 1.4, р1: 2.5, ц0: [1, 0.85, 0.45, 1], ц1: [0.7, 0.15, 0.02, 0], тормоз: 2 }); }
     метка.position.y = SY + 7.5 + ст.высота;
     if (ст.прыжок > 0) ст.прыжок -= dt;
+    if (ст.пуск > 0 && !ст.вКосмосе) {
+      if (ст.отсчёт > 0) { const было = Math.ceil(ст.отсчёт); ст.отсчёт -= dt; if (Math.ceil(ст.отсчёт) !== было && ст.отсчёт > 0) бип([440], 0.2, 0.08); window.__кино && window.__кино.подпись(String(Math.max(1, Math.ceil(ст.отсчёт))) + '…', 0.5); if (ст.отсчёт <= 0) { ст.цельВыс = 3000; бип([200, 300, 500, 900, 1400], 0.12, 0.08, 'sawtooth'); } }
+      else { ст.пуск += dt; Я() && Я().тряхнуть(0.25); ст.высота += dt * dt * 0 + Math.min(600, 60 * ст.пуск * ст.пуск) * dt;
+        if (ст.высота > 1400) { ст.вКосмосе = true; ст.пуск = 0; ст.вспышка = 1; ст.тревога = 0; window.__кино && window.__кино.подпись('КОСМОС. Невесомость. Яша недоволен.', 4); взгляд.тангаж = 0.42; взгляд.рыск = 0; бип([1047, 1319, 1568, 2093], 0.15, 0.05, 'triangle'); setTimeout(() => сказать('— Видишь точку? Это Бороздиновский. Отсюда даже красиво.', 4.5), 2500); } }
+    }
+    if (ст.вКосмосе) { земля.rotation.y += dt * 0.012; облака.rotation.y += dt * 0.004; ст.высота = 1500;
+      if (ст.спуск > 0) { ст.спуск -= dt; Я() && Я().тряхнуть(0.5); тревЛ.intensity = 2 + Math.sin(ст.t * 30); тревЛ.color.set(0xFF7020); if (ст.спуск <= 0) { ст.вКосмосе = false; ст.высота = 600; ст.цельВыс = 0; тревЛ.color.set(0xFF2020); подпись('С возвращением в Бороздиновский.'); } } }
     if (ст.тревога > 0) { ст.тревога -= dt; тревЛ.intensity = Math.sin(ст.t * 14) > 0 ? 3 : 0.3; } else тревЛ.intensity = 0;
     // небо: ночь по кнопке
     if (window.__кино && window.__кино.небо && ст.внутри) { if (ст.ночь !== ст.ночьБыло) { ст.ночьБыло = ст.ночь; window.__кино.небо(ст.ночь ? 1.2 : 0); } }
@@ -9221,7 +9274,7 @@ window.ДЕТАЛИ.push(['Шторм и спутник', function (API) {
     if (таймЭкранов <= 0) { таймЭкранов = 0.12;
       for (const э of экраны) { if (!э.т) continue; const с = э.т.__к.getContext('2d'); (ст.тревога > 0 && э.имя !== 'DEV-КОНСОЛЬ' ? ТРЕВОГА : э.рис)(с, э.т.__к.width, э.т.__к.height, ст.t); э.т.needsUpdate = true; } }
   });
-  window.__шторм = { ст, войти, выйти, SX, SZ, кнопки, спутник };
+  window.__шторм = { ст, войти, выйти, SX, SZ, кнопки, спутник, космос, космКам, земля };
 }]);
 
 </script>
