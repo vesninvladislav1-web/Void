@@ -5275,7 +5275,7 @@ window.ДЕТАЛИ.push(['босс', function (API) {
   }
   богдан.visible = false; сцена.add(богдан);
   // настоящая 3D-модель (подставит модуль «люди 3D»): очки, цепочка, чёрная футболка с львом
-  (window.__герои3д = window.__герои3д || []).push({ группа: богдан, причёска: 'hair_buzzed', волосы: '#3A2E26', кожа: '#E2B596',
+  (window.__герои3д = window.__герои3д || []).push({ группа: богдан, мх: 'bogdan', принт: ['лев', /t-shirt/], причёска: 'hair_buzzed', волосы: '#3A2E26', кожа: '#E2B596',
     одежда: { верх: '#1C1C1E', низ: '#2E3A4E', обувь: '#1E1C1A', рукав: 0.33, стиль: 1 }, очки: true, цепь: true });
 
   // ===================== ЗВУК И СУБТИТРЫ =====================
@@ -5710,7 +5710,7 @@ window.ДЕТАЛИ.push(['пылесос', function (API) {
   }
   егор.position.set(вход.x - вход.нx * 1.1, входY(), вход.z - вход.нz * 1.1); егор.rotation.y = Math.atan2(вход.нx, вход.нz);
   егор.visible = false; сцена.add(егор);
-  (window.__герои3д = window.__герои3д || []).push({ группа: егор, причёска: 'hair_simpleparted', волосы: '#3A2E26', кожа: '#E6BC9E', рост: 0.9,
+  (window.__герои3д = window.__герои3д || []).push({ группа: егор, мх: 'egor', причёска: 'hair_simpleparted', волосы: '#3A2E26', кожа: '#E6BC9E', рост: 0.9,
     одежда: { верх: '#F2F2EE', низ: '#2A2E36', обувь: '#1E1C1A', рукав: 0.68, стиль: 3 }, аним: () => 'Idle_Talking_Loop', наПол: true });
 
   // ===================== ИНТЕРФЕЙС =====================
@@ -7040,7 +7040,7 @@ window.ДЕТАЛИ.push(['Ярик', function (API) {
   я.rotation.y = Math.atan2(-О.нx, -О.нz);
   сцена.add(я);
   // 3D-модель: развалился на лавке, глянцевый чёрный пуховик, белые широкие штаны, светлая чёлка
-  (window.__герои3д = window.__герои3д || []).push({ группа: я, причёска: 'hair_simpleparted', волосы: '#C8A870', кожа: '#E8C0A2',
+  (window.__герои3д = window.__герои3д || []).push({ группа: я, мх: 'yarik', причёска: 'hair_simpleparted', волосы: '#C8A870', кожа: '#E8C0A2',
     одежда: { верх: '#141416', низ: '#E6E4DE', обувь: '#0C0C0E', рукав: 0.7, стиль: 2, толщВерх: 0.05, толщНиз: 0.035 },
     сумка: true, аним: () => 'Sitting_Idle_Loop', голова: () => голова.rotation.y, y: 0.14, z: 0.32 });
 
@@ -7071,18 +7071,19 @@ window.ДЕТАЛИ.push(['Ярик', function (API) {
 
 </script>
 <script>
-// Нормальные люди: настоящие 3D-модели со скелетом и анимациями (Quaternius,
-// «Universal Base Characters» + «Universal Animation Library», лицензия CC0).
-// Одежда рисуется шейдером по «позе покоя»: куртка/футболка, штаны, обувь,
-// у бабушек — платок. Ближайшие к игроку сельчане (и сам игрок) — модели,
-// дальние остаются простыми фигурками (их издалека не отличить).
+// Люди: реалистичные модели MakeHuman (MPFB2; ассеты CC0 и CC-BY — список авторов в src/avtory.md),
+// анимации — Universal Animation Library (Quaternius, CC0), перенесённые на скелет MakeHuman.
+// Каждый персонаж — свой файл lyudi/mh_<имя>.js, грузится, только когда впервые нужен.
+// Принты на одежде (лев Богдана, полоски Вани и Любы, «void» Шторма) рисуются шейдером
+// по позе покоя (T-поза), обвес (очки, цепь, чокер, сумка, гарнитура) — по костям.
+// Шторм — «глитч»: тело сбоит кусками, вместо лица экран с рожицами.
 window.ДЕТАЛИ.push(['люди 3D', function (API) {
   const { THREE, сцена } = API;
   if (!THREE.GLTFLoader || !THREE.SkeletonUtils) { console.warn('нет GLTFLoader'); return; }
   const В = API.землиВысота;
   const грузчик = new THREE.GLTFLoader();
   // артефакты не раздают .glb, поэтому модель лежит в lyudi/<имя>.js (base64),
-  // а текстуры — отдельными .jpg рядом; собираем обратно здесь
+  // а текстуры — отдельными картинками рядом; собираем обратно здесь
   const тексЗагр = new THREE.TextureLoader();
   const скрипт = имя => new Promise((ok, нет) => {
     if (window.__glb && window.__glb[имя]) return ok(window.__glb[имя]);
@@ -7097,225 +7098,240 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     грузчик.parse(б.buffer, '', г => {
       г.scene.traverse(о => {
         if (!о.isMesh || !д.карты[о.material.name]) return;
-        const т = тексЗагр.load('lyudi/' + д.карты[о.material.name]); т.flipY = false; т.encoding = THREE.sRGBEncoding;
+        const т = тексЗагр.load('lyudi/' + д.карты[о.material.name]); т.flipY = false; т.encoding = THREE.sRGBEncoding; т.anisotropy = 4;
         о.material.map = т; о.material.needsUpdate = true;
       });
       ok(г);
     }, нет);
   }));
-  const ПУЛ = API.УЛЬТРА ? 18 : 12;                     // сколько моделей одновременно
+  const ПУЛ = API.УЛЬТРА ? 16 : 10;                     // сколько сельчан-моделей одновременно
   const ц = API.цвет;
 
-  // ===================== ОДЕЖДА ШЕЙДЕРОМ =====================
-  // Модель в позе «T»: руки в стороны на высоте 1.45 м, кисти дальше |x| > 0.68.
-  // По координатам позы покоя красим: обувь, штаны, верх (рукав длинный или короткий), платок.
-  function одеть(мат, о) {
-    мат.onBeforeCompile = ш => {
-      Object.assign(ш.uniforms, {
-        uTop: { value: ц(о.верх) }, uBot: { value: ц(о.низ) }, uShoe: { value: ц(о.обувь || '#1E1C1A') }, uScarf: { value: ц(о.платок || '#000000') },
-        uSleeve: { value: о.рукав || 0.68 }, uScarfOn: { value: о.платок ? 1 : 0 }, uWaist: { value: о.талия || 0.98 }, uNeck: { value: о.ворот || 1.52 },
-        uStyle: { value: о.стиль || 0 }, uTopT: { value: о.толщВерх || 0.022 }, uBotT: { value: о.толщНиз || 0.012 },
-      });
-      // одежда — не «краска по телу»: в позе покоя сглаживаем рельеф мышц/груди
-      // и раздуваем ткань наружу по нормали (куртка толще, штаны тоньше)
-      ш.vertexShader = 'uniform float uSleeve; uniform float uWaist; uniform float uNeck; uniform float uTopT; uniform float uBotT;\nvarying vec3 vBind;\n' + ш.vertexShader.replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>
-  {
-    // ткань не повторяет мышцы: нормаль тянем к «цилиндрической» (туловище, ноги, руки)
-    float ax = abs(position.x), y = position.y;
-    vec3 rad;
-    if (ax > 0.24 && y > 1.2) rad = vec3(0.0, position.y - 1.43, position.z);
-    else if (y < 0.94 && y > 0.11) rad = vec3(position.x - sign(position.x) * 0.1, 0.0, position.z);
-    else rad = vec3(position.x, 0.0, position.z * 1.3);
-    float cl = step(0.11, y) * step(y, mix(uNeck, 1.62, smoothstep(0.085, 0.11, ax))) * step(ax, uSleeve);
-    if (length(rad) > 0.001) objectNormal = normalize(mix(normal, normalize(rad), 0.7 * cl));
-    if (y < 0.14) objectNormal = normalize(mix(normal, normalize(vec3((ax - 0.12) * sign(position.x), 0.12 - y + 0.05, position.z * 0.5)), 0.75));
-  }`).replace('#include <begin_vertex>', `#include <begin_vertex>
-  vBind = position;
-  {
-    float ax = abs(position.x), y = position.y;
-    float chest = smoothstep(1.02, 1.12, y) * (1.0 - smoothstep(1.42, 1.5, y)) * (1.0 - smoothstep(0.16, 0.24, ax));
-    if (transformed.z > 0.05) transformed.z = mix(transformed.z, 0.05 + (transformed.z - 0.05) * 0.35, chest);
-    float arm = smoothstep(0.2, 0.3, ax) * step(1.15, y);
-    transformed.yz = mix(transformed.yz, vec2(1.43, -0.02) + (transformed.yz - vec2(1.43, -0.02)) * 0.78, arm);
-    float torso = (1.0 - arm) * step(0.95, y) * (1.0 - smoothstep(1.5, 1.58, y));
-    transformed.x *= 1.0 - 0.1 * torso * smoothstep(0.08, 0.22, ax);
-    float leg = step(y, 0.95) * step(0.12, y);
-    transformed.x = mix(transformed.x, sign(position.x) * 0.1 + (transformed.x - sign(position.x) * 0.1) * 0.88, leg);
-    transformed.z *= 1.0 - 0.1 * leg;
-    float neckY = mix(uNeck, 1.62, smoothstep(0.085, 0.11, ax));
-    float top = step(uWaist, y) * step(y, neckY) * step(ax, uSleeve);
-    float bot = step(0.11, y) * step(y, uWaist);
-    float shoe = 1.0 - step(0.13, y);
-    if (shoe > 0.5 && position.z > 0.04) transformed.y = mix(transformed.y, max(transformed.y, 0.035 * smoothstep(0.13, 0.04, position.z) + 0.01), 0.8);
-    transformed += normal * (top * uTopT + bot * uBotT + shoe * 0.024);
-    if (shoe > 0.5 && transformed.y < 0.0) transformed.y -= 0.005;
-  }`);
-      ш.fragmentShader = 'uniform vec3 uTop; uniform vec3 uBot; uniform vec3 uShoe; uniform vec3 uScarf; uniform float uSleeve; uniform float uScarfOn; uniform float uWaist; uniform float uNeck; uniform float uStyle;\nvarying vec3 vBind;\n' +
-        ш.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
-          float ax = abs(vBind.x), y = vBind.y;
-          float fab = 0.9 + 0.1 * fract(sin(dot(floor(vBind.xy * 180.0), vec2(12.9898, 78.233))) * 43758.5453);
-          vec3 cloth = vec3(-1.0); float gloss = 0.0; float isCloth = 0.0;
-          if (y < 0.13 || (y < 0.17 && vBind.z > 0.03)) cloth = uShoe * (y < 0.015 ? 0.5 : 1.0);
-          else if (y < uWaist) cloth = uBot * (1.0 - 0.25 * step(ax, 0.006) * step(uWaist - 0.25, y));
-          else if (y < mix(uNeck, 1.62, smoothstep(0.085, 0.11, ax)) && ax < uSleeve) {
-            cloth = uTop;
-            if (uSleeve > 0.5 && vBind.z > 0.0 && ax < 0.008) cloth *= 0.55;
-            if (y < uWaist + 0.05) cloth *= 0.8;
-            if (y > uNeck - 0.05 && ax < 0.2) cloth *= 0.8;
-            if (abs(ax - uSleeve) < 0.03 && ax > 0.25) cloth *= 0.8;
-            float front = step(0.03, vBind.z);
-            if (uStyle > 0.5 && uStyle < 1.5 && front > 0.5) {
-              // чёрная футболка: белый лев в круге и красная полоса
-              float d = length(vec2(vBind.x, y - 1.29));
-              if (d < 0.085) cloth = vec3(0.84, 0.84, 0.8) * (abs(d - 0.05) < 0.008 ? 0.45 : 1.0) * (d < 0.022 && y < 1.3 ? 0.5 : 1.0);
-              if (y > 1.16 && y < 1.19 && ax < 0.13) cloth = vec3(0.48, 0.02, 0.03);
-            }
-            if (uStyle > 1.5 && uStyle < 2.5) {
-              // пуховик: стёжка полосами, ремень сумки наискосок
-              if (abs(fract(y * 9.0) - 0.5) > 0.44) cloth *= 0.55;
-              if (ax < 0.26 && abs(vBind.x - (y - 1.25) * 0.9) < 0.022) cloth = vec3(0.004);
-              gloss = 1.0;
-            }
-            if (uStyle > 3.5 && ax > 0.24 && abs(vBind.y - 1.47) < 0.03 && abs(vBind.y - 1.47) > 0.008) cloth = vec3(0.88);   // олимпийка: белые полосы по рукавам
-            if (uStyle > 3.5 && ax < 0.012 && front > 0.5) cloth *= 0.6;                                                     // молния
-            if (uStyle > 2.5 && uStyle < 3.5 && front > 0.5) {
-              // рубашка: планка, пуговицы, воротник
-              if (ax < 0.014) cloth *= 0.88;
-              if (ax < 0.006 && fract(y * 12.0) < 0.18) cloth *= 0.6;
-            }
-          }
-          if (uScarfOn > 0.5 && y > 1.55 && !(vBind.z > 0.045 && y > 1.56 && y < 1.77 && ax < 0.066)) cloth = uScarf * (y < 1.6 ? 0.85 : 1.0);
-          if (cloth.x >= 0.0) {
-            float fold = 0.86 + 0.14 * smoothstep(0.0, 0.6, abs(sin(y * 38.0 + ax * 11.0 + sin(vBind.z * 30.0))));
-            diffuseColor.rgb = cloth * fab * fold; isCloth = 1.0;
-          }`)
-        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = mix(mix(0.85, 1.0, isCloth), 0.28, gloss);')
-        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\n  reflectedLight.directSpecular *= mix(1.0, mix(0.2, 1.0, gloss), isCloth);\n  reflectedLight.indirectSpecular *= mix(1.0, mix(0.2, 1.0, gloss), isCloth);');
-    };
-    мат.customProgramCacheKey = () => 'одежда';
+  // ===================== ЗАГРУЗКА ПО ТРЕБОВАНИЮ =====================
+  const МХ = {};            // имя -> { сцена, тазY, глаза, рост } | 'грузится' | 'ошибка'
+  function мх(имя) {
+    if (МХ[имя] && typeof МХ[имя] === 'object') return МХ[имя];
+    if (!МХ[имя]) {
+      МХ[имя] = 'грузится';
+      загрузить('mh_' + имя).then(г => {
+        const сц = г.scene; сц.updateMatrixWorld(true);
+        const кость = н => { let к = null; сц.traverse(о => { if (о.isBone && о.name === н) к = о; }); return к; };
+        const тазY = кость('pelvis').getWorldPosition(new THREE.Vector3()).y;
+        const глазаБ = new THREE.Box3(), всё = new THREE.Box3();
+        сц.traverse(о => { if (!о.isMesh) return; о.geometry.computeBoundingBox(); const б = о.geometry.boundingBox.clone(); всё.union(б); if (/_eyes_/.test(о.material.name)) глазаБ.union(б); });
+        const плечо = кость('upperarm_l').getWorldPosition(new THREE.Vector3());
+        МХ[имя] = { сцена: сц, тазY, глаза: глазаБ.isEmpty() ? null : глазаБ.getCenter(new THREE.Vector3()), рост: всё.max.y, рукаY: плечо.y, плечоX: плечо.x };
+      }).catch(e => { console.warn('модель не загрузилась', имя, e); МХ[имя] = 'ошибка'; });
+    }
+    return null;
   }
+  // анимации: один набор на всех; перемещение таза масштабируем под рост
+  let клипы = null, тазЭталон = 1;
+  загрузить('mh_anim').then(г => {
+    клипы = {}; for (const к of г.animations) клипы[к.name] = к;
+    г.scene.updateMatrixWorld(true);
+    г.scene.traverse(о => { if (о.name === 'pelvis') тазЭталон = о.getWorldPosition(new THREE.Vector3()).y; });
+  }).catch(e => console.warn('анимации не загрузились', e));
+  const клипыКэш = {};
+  function клипыДля(k) {
+    const ключ = k.toFixed(2); if (клипыКэш[ключ]) return клипыКэш[ключ];
+    const н = {};
+    for (const [имя, к] of Object.entries(клипы)) {
+      const копия = к.clone();
+      for (const т of копия.tracks) if (/^pelvis\.position$/.test(т.name)) { т.values = Float32Array.from(т.values, v => v * k); }
+      н[имя] = копия;
+    }
+    return (клипыКэш[ключ] = н);
+  }
+  const готово = () => !!клипы;
 
-  // ===================== ЗАГРУЗКА =====================
-  const ПРИЧЁСКИ = ['hair_simpleparted', 'hair_buzzed', 'hair_buns', 'hair_long', 'hair_beard'];
-  let готово = false, база = {}, клипы = {}, волосы = {};
-  Promise.all([загрузить('muzh'), загрузить('zhen'), загрузить('anim'), ...ПРИЧЁСКИ.map(п => загрузить(п))])
-    .then(([м, ж, ан, ...пр]) => {
-      база.муж = м.scene; база.жен = ж.scene;
-      for (const к of ан.animations) клипы[к.name] = к;
-      ПРИЧЁСКИ.forEach((п, i) => { волосы[п] = пр[i].scene; });
-      готово = true; собрать();
-    }).catch(e => console.warn('люди 3D не загрузились', e));
+  // ===================== ПРИНТЫ И ГЛИТЧ =====================
+  const времяШтормa = { value: 0 }, сбой = { value: 0 };
+  const текстVoid = (() => { const к = document.createElement('canvas'); к.width = 256; к.height = 96; const с = к.getContext('2d');
+    с.fillStyle = '#000'; с.fillRect(0, 0, 256, 96); с.fillStyle = '#fff'; с.font = 'bold 72px monospace'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillText('void', 128, 50);
+    const т = new THREE.CanvasTexture(к); return т; })();
+  // мат — материал одежды; вид: 'лев' | 'полоски' | 'олимпийка' | 'void'; И — сведения о модели
+  function принт(мат, вид, И) {
+    мат.onBeforeCompile = ш => {
+      Object.assign(ш.uniforms, { uH: { value: И.рост }, uArmY: { value: И.рукаY }, uShX: { value: И.плечоX }, uVoid: { value: текстVoid } });
+      ш.vertexShader = 'varying vec3 vBind;\n' + ш.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBind = position;');
+      const ВИД = { лев: 1, полоски: 2, олимпийка: 3, void: 4 }[вид];
+      ш.fragmentShader = 'varying vec3 vBind; uniform float uH; uniform float uArmY; uniform float uShX; uniform sampler2D uVoid;\n' + ш.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    float ax = abs(vBind.x), y = vBind.y; bool front = vBind.z > 0.02;
+    ${ВИД === 1 ? `// чёрная футболка: белый лев в круге и красная полоса
+    float d = length(vec2(vBind.x, y - uH * 0.735));
+    if (front && d < 0.075) diffuseColor.rgb = vec3(0.8, 0.8, 0.76) * (abs(d - 0.045) < 0.007 ? 0.4 : 1.0) * (d < 0.02 ? 0.55 : 1.0);
+    if (front && abs(y - uH * 0.66) < 0.012 && ax < 0.12) diffuseColor.rgb = vec3(0.5, 0.03, 0.04);` : ''}
+    ${ВИД === 2 ? `// майка в сине-белую полоску
+    if (fract(y / 0.045) < 0.5) diffuseColor.rgb *= vec3(0.16, 0.26, 0.62);` : ''}
+    ${ВИД === 3 ? `// олимпийка: по две белые полосы вдоль рукавов и молния
+    if (ax > uShX + 0.03 && abs(vBind.z) < 0.03 && vBind.y > uArmY && abs(abs(vBind.z) - 0.012) < 0.006) diffuseColor.rgb = vec3(0.9);
+    if (front && ax < 0.006 && y < uH * 0.8 && y > uH * 0.52) diffuseColor.rgb = vec3(0.5);` : ''}
+    ${ВИД === 4 ? `// худи с надписью void
+    vec2 uv = vec2((vBind.x + 0.11) / 0.22, (y - uH * 0.7) / (uH * 0.05));
+    if (front && uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92), texture2D(uVoid, vec2(1.0 - uv.x, uv.y)).r);` : ''}
+  }`);
+    };
+    мат.customProgramCacheKey = () => 'принт-' + вид;
+  }
+  function глитч(мат) {
+    const старый = мат.onBeforeCompile;
+    мат.onBeforeCompile = (ш, р) => {
+      if (старый) старый(ш, р);
+      ш.uniforms.uT = времяШтормa;
+      if (!/varying vec3 vBind/.test(ш.vertexShader)) ш.vertexShader = 'varying vec3 vBind;\n' + ш.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBind = position;');
+      ш.vertexShader = 'uniform float uT; uniform float uСбой;\n'.replace('uСбой', 'uGl') + ш.vertexShader.replace('#include <project_vertex>', `
+  {
+    // куски тела по высоте иногда съезжают вбок
+    float полоса = floor(vBind.y * 16.0), такт = floor(uT * 9.0);
+    float r = fract(sin(полоса * 91.3 + такт * 17.1) * 43758.5453);
+    float сдвиг = step(0.9 - uGl * 0.4, r) * (r - 0.95) * 0.9;
+    transformed.x += сдвиг; transformed.z += сдвиг * 0.4 * sin(такт);
+  }
+  #include <project_vertex>`).replace(/полоса/g, 'gB').replace(/такт/g, 'gT').replace(/сдвиг/g, 'gS');
+      ш.uniforms.uGl = сбой;
+      ш.fragmentShader = 'uniform float uT; uniform float uGl;\n' + (/varying vec3 vBind/.test(ш.fragmentShader) ? '' : 'varying vec3 vBind;\n') + ш.fragmentShader.replace('#include <dithering_fragment>', `#include <dithering_fragment>
+  {
+    // рассыпается на пиксели и мигает цветом
+    vec3 кл = floor(vBind * 38.0);
+    float r = fract(sin(dot(кл, vec3(12.9898, 78.233, 37.719)) + floor(uT * 12.0) * 3.1) * 43758.5453);
+    if (r < 0.012 + uGl * 0.3) discard;
+    if (uGl > 0.3 && r > 0.99 - uGl * 0.08) gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.1, 1.0, 0.9), 0.8);
+    float скан = step(0.985, fract(vBind.y * 2.0 - uT * 0.5)) * step(0.2, uGl);
+    gl_FragColor.rgb += vec3(0.0, 0.25, 0.3) * скан;
+  }`.replace(/кл/g, 'gC').replace(/скан/g, 'gK'));
+    };
+    мат.customProgramCacheKey = () => 'глитч-' + (старый ? 'п' : '');
+  }
+  // экран вместо лица
+  const лица = [];
+  function экранЛицо() {
+    const к = document.createElement('canvas'); к.width = 128; к.height = 96; const т = new THREE.CanvasTexture(к);
+    const м = new THREE.Mesh(new THREE.PlaneGeometry(0.2, 0.15), new THREE.MeshBasicMaterial({ map: т, toneMapped: false }));
+    const рамка = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.17, 0.02), new THREE.MeshStandardMaterial({ color: ц('#111214'), roughness: 0.4 })); рамка.position.z = -0.012; м.add(рамка);
+    const л = { м, к, т, текст: '^_^', до: 0 }; лица.push(л); рисоватьЛицо(л); return м;
+  }
+  function рисоватьЛицо(л) {
+    const с = л.к.getContext('2d'); с.fillStyle = '#04100C'; с.fillRect(0, 0, 128, 96);
+    с.fillStyle = л.текст === 'ERROR' ? '#FF4A3A' : '#5CFFC8'; с.font = (л.текст.length > 4 ? 'bold 26px' : 'bold 44px') + ' monospace'; с.textAlign = 'center'; с.textBaseline = 'middle';
+    с.fillText(л.текст, 64, 50); с.fillStyle = 'rgba(92,255,200,0.08)'; for (let y = 0; y < 96; y += 3) с.fillRect(0, y, 128, 1);
+    л.т.needsUpdate = true;
+  }
+  const РОЖИ = ['^_^', '^_^', 'o_o', '>_<', '-_-', '^o^', '¬_¬', 'x_x', 'owo', '0_0'];
+  window.__штормЛицо = (текст, сек = 3) => { for (const л of лица) { л.текст = текст; л.до = сек; рисоватьЛицо(л); } };
 
-  // модель: клон скелета + одежда + причёска
-  function модель(пол, одежда, причёска, волосыЦвет, кожа) {
-    const корень = THREE.SkeletonUtils.clone(база[пол]);
+  // ===================== МОДЕЛЬ =====================
+  // г: { мх: 'bogdan', принт, глитч, очки, цепь, чокер, сумка, вРуке, гарнитура, банка, тон }
+  function модель(г) {
+    const И = мх(г.мх); if (!И || !клипы) return null;
+    const корень = THREE.SkeletonUtils.clone(И.сцена);
     const кости = {}; корень.traverse(о => { if (о.isBone) кости[о.name] = о; });
+    кости.Head = кости.head;                                    // старое имя кости — для модулей сюжета
     корень.traverse(о => {
       if (!о.isMesh) return;
       о.castShadow = true; о.frustumCulled = false;
       о.material = о.material.clone();
-      if (/Hair/.test(о.material.name)) о.material.color = ц(волосыЦвет || '#3A2A1E').multiplyScalar(0.6);
-      if (/Superhero/.test(о.material.name)) { одеть(о.material, одежда); if (кожа) о.material.color = ц(кожа).lerp(new THREE.Color(1, 1, 1), 0.55); }
+      const имя = о.material.name;
+      if (/_clothes_/.test(имя) && г.тон) о.material.color.multiplyScalar(г.тон);
+      if (г.принт && г.принт[1].test(имя)) принт(о.material, г.принт[0], И);
+      if (г.глитч && !/_eyes_|_eyelashes_|_eyebrows_/.test(имя)) глитч(о.material);
+      if (г.глитч && /_eyes_|_eyelashes_|_eyebrows_/.test(имя)) о.visible = false;
     });
-    if (причёска && волосы[причёска]) {
-      const пр = THREE.SkeletonUtils.clone(волосы[причёска]);
-      пр.traverse(о => {
-        if (!о.isSkinnedMesh) return;
-        const кк = о.skeleton.bones.map(b => кости[b.name] || b);
-        о.bind(new THREE.Skeleton(кк, о.skeleton.boneInverses), о.bindMatrix);
-        о.material = о.material.clone(); о.material.color = ц(волосыЦвет || '#3A2A1E'); о.castShadow = true; о.frustumCulled = false;
-        корень.add(о);
-      });
-    }
-    const плечи = ['upperarm_l', 'upperarm_r'].map(н => кости[н]).filter(Boolean);
     const миксер = new THREE.AnimationMixer(корень), действия = {};
-    for (const [имя, клип] of Object.entries(клипы)) действия[имя] = миксер.clipAction(клип);
+    for (const [имя, клип] of Object.entries(клипыДля(И.тазY / тазЭталон))) действия[имя] = миксер.clipAction(клип);
     корень.visible = false; сцена.add(корень);
-    return { корень, миксер, действия, текущее: null, плечи, кости };
+    const м = { корень, миксер, действия, текущее: null, кости, И };
+    обвес(м, г);
+    return м;
   }
-  const ОСЬ = new THREE.Vector3(...(window.__рукиОсь || [0, 0, 1])), кв = new THREE.Quaternion();
-  function обновить(м, dt) {
-    м.миксер.update(dt);
-    if (window.__рукиОсь) ОСЬ.set(...window.__рукиОсь);
-    const у = window.__рукиУгол !== undefined ? window.__рукиУгол : -0.5;
-    if (у) м.плечи.forEach((к, i) => { кв.setFromAxisAngle(ОСЬ, i ? -у : у); к.quaternion.multiply(кв); });
-  }
+  function обновить(м, dt) { м.миксер.update(dt); }
   function играть(м, имя, скорость = 1) {
-    const д = м.действия[имя]; if (!д) return;
+    const д = м.действия[имя] || м.действия.Idle_Loop; if (!д) return;
     if (м.текущее !== д) { д.reset().fadeIn(0.25).play(); if (м.текущее) м.текущее.fadeOut(0.25); м.текущее = д; }
     д.timeScale = скорость;
   }
-  // ===================== ИГРОК =====================
-  let игрокМ = null, пул = [], отложено;
-  function стандартный() {
-    const м0 = модель('муж', { верх: '#C24A3A', низ: '#2E3F5E', обувь: '#1E1E1E', рукав: 0.33 }, 'hair_buzzed', '#3A2A1E');
-    const кепка = new THREE.Group();
-    const м = new THREE.MeshStandardMaterial({ color: ц('#2B2B2B'), roughness: 0.8 });
-    const купол = new THREE.Mesh(new THREE.SphereGeometry(0.105, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), м); купол.scale.set(1, 0.75, 1.1);
-    const козырёк = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.012, 0.11), м); козырёк.position.set(0, 0.005, 0.13);
-    кепка.add(купол, козырёк); кепка.position.set(0, 0.2, 0.01);
-    м0.корень.traverse(о => { if (о.isBone && о.name === 'Head') о.add(кепка); });
-    return м0;
-  }
-  function собрать() {
-    // игрок: красная футболка (короткий рукав), тёмные джинсы, стрижка, кепка
-    игрокМ = стандартный();
-    if (отложено !== undefined) переодеть(отложено);
-    // блочного человечка прячем (группа остаётся — по ней ходит камера)
-
-    герои();
-    // пул сельчан
-    const ВОЛОСЫ = ['#3A2A1E', '#5A4030', '#8A6A48', '#2A2420', '#B0A090', '#C8B89A'];
-    for (let i = 0; i < ПУЛ; i++) {
-      const жен = i % 3 === 1;
-      пул.push({ м: null, жен, i, ч: null, ВОЛОСЫ });
-    }
-  }
-  // ===================== ГЕРОИ =====================
-  // Богдан, Егор, Ярик регистрируются в window.__герои3д из своих модулей;
-  // модель встаёт внутрь их группы, блочная фигура прячется.
-  const героиМ = [];
+  // прицепить к кости: позиция — в координатах модели в позе покоя (T-поза, лицом к +Z)
   function прицепить(м, кость, объект, x, y, z) {
     const к = м.кости[кость]; if (!к) return;
-    м.корень.updateMatrixWorld(true);
+    const p = м.корень.position.clone(), r = м.корень.rotation.clone(), s = м.корень.scale.clone(), род = м.корень.parent;
+    if (род) род.remove(м.корень);
+    м.корень.position.set(0, 0, 0); м.корень.rotation.set(0, 0, 0); м.корень.scale.set(1, 1, 1); м.корень.updateMatrixWorld(true);
     объект.position.set(x, y, z); м.корень.add(объект); м.корень.updateMatrixWorld(true);
     к.attach(объект);
+    м.корень.position.copy(p); м.корень.rotation.copy(r); м.корень.scale.copy(s); if (род) род.add(м.корень);
   }
   function обвес(м, г) {
+    const И = м.И, гл = И.глаза || new THREE.Vector3(0, И.рост * 0.93, 0.08);
+    const шея = м.кости.neck_01 ? (м.корень.updateMatrixWorld(true), м.кости.neck_01.getWorldPosition(new THREE.Vector3())) : new THREE.Vector3(0, И.рост * 0.84, 0);
     if (г.очки) {
-      const оп = new THREE.MeshStandardMaterial({ color: ц('#101012'), roughness: 0.3 }), ст = new THREE.MeshStandardMaterial({ color: ц('#1A1E24'), roughness: 0.1, transparent: true, opacity: 0.55 });
+      const оп = new THREE.MeshStandardMaterial({ color: ц('#2A2A2E'), roughness: 0.3, metalness: 0.4 }), ст = new THREE.MeshStandardMaterial({ color: ц('#AFC4D0'), roughness: 0.05, transparent: true, opacity: 0.18 });
       const о = new THREE.Group();
       for (const s of [-1, 1]) {
-        const рамка = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.036, 0.006), оп); рамка.position.set(s * 0.033, 0, 0);
-        const линза = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.028, 0.007), ст); линза.position.set(s * 0.033, 0, 0.001);
-        const дужка = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.006, 0.1), оп); дужка.position.set(s * 0.06, 0.005, -0.05);
+        const рамка = new THREE.Mesh(new THREE.TorusGeometry(0.019, 0.0018, 4, 20), оп); рамка.scale.set(1.25, 0.9, 1); рамка.position.set(s * 0.032, 0, 0);
+        const линза = new THREE.Mesh(new THREE.CircleGeometry(0.019, 16), ст); линза.scale.set(1.25, 0.9, 1); линза.position.set(s * 0.032, 0, 0.001);
+        const дужка = new THREE.Mesh(new THREE.BoxGeometry(0.002, 0.003, 0.095), оп); дужка.position.set(s * 0.066, 0.003, -0.047);
         о.add(рамка, линза, дужка);
       }
-      const мост = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.005, 0.005), оп); мост.position.y = 0.01; о.add(мост);
-      прицепить(м, 'Head', о, 0, 1.70, 0.095);
+      const мост = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.002, 0.002), оп); мост.position.y = 0.006; о.add(мост);
+      прицепить(м, 'head', о, 0, гл.y + 0.002, гл.z + 0.02);
     }
     if (г.цепь) {
-      const ц0 = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.005, 5, 28), new THREE.MeshStandardMaterial({ color: ц('#C8C8C8'), roughness: 0.25, metalness: 0 }));
-      ц0.rotation.x = Math.PI / 2 - 0.5; ц0.scale.set(1, 0.85, 1);
-      прицепить(м, 'spine_03', ц0, 0, 1.49, 0.03);
+      const ц0 = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.0035, 5, 32), new THREE.MeshStandardMaterial({ color: ц('#D0D0D0'), roughness: 0.2, metalness: 0.9 }));
+      ц0.rotation.x = Math.PI / 2 - 0.75; ц0.scale.set(0.95, 1.15, 1);
+      прицепить(м, 'spine_03', ц0, 0, шея.y - 0.06, шея.z + 0.07);
     }
     if (г.чокер) {
-      const ч = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.006, 5, 24), new THREE.MeshStandardMaterial({ color: ц('#0C0C0E'), roughness: 0.4 }));
-      ч.rotation.x = Math.PI / 2; прицепить(м, 'neck_01', ч, 0, 1.5, 0.005);
+      const ч = new THREE.Mesh(new THREE.TorusGeometry(0.047, 0.006, 5, 24), new THREE.MeshStandardMaterial({ color: ц('#0C0C0E'), roughness: 0.4 }));
+      ч.rotation.x = Math.PI / 2; ч.scale.set(1, 1.05, 1); прицепить(м, 'neck_01', ч, 0, шея.y + 0.035, шея.z + 0.012);
     }
-    if (г.вРуке) прицепить(м, 'hand_r', г.вРуке, -0.72, 1.42, 0.05);
+    if (г.вРуке) прицепить(м, 'hand_r', г.вРуке, -И.плечоX - 0.55 * И.рост / 1.75, И.рукаY - 0.02, 0.05);
     if (г.сумка) {
-      const с = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.26), new THREE.MeshStandardMaterial({ color: ц('#0C0C0E'), roughness: 0.6 }));
-      прицепить(м, 'pelvis', с, -0.24, 0.98, 0.02);
+      const с = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.2, 0.26), new THREE.MeshStandardMaterial({ color: ц('#0C0C0E'), roughness: 0.6 }));
+      прицепить(м, 'pelvis', с, -0.2, И.тазY + 0.02, 0.02);
+      const ремень = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.62, 0.012), с.material); ремень.rotation.z = -0.62;
+      прицепить(м, 'spine_03', ремень, -0.02, И.тазY + 0.36, 0.11);
+    }
+    if (г.гарнитура) {
+      const тм = new THREE.MeshStandardMaterial({ color: ц('#16171A'), roughness: 0.5 }), св = new THREE.MeshBasicMaterial({ color: ц('#5CFFC8') });
+      const о = new THREE.Group();
+      const дуга = new THREE.Mesh(new THREE.TorusGeometry(0.1, 0.008, 6, 24, Math.PI), тм); дуга.rotation.z = 0; дуга.position.y = 0.02; о.add(дуга);
+      for (const s of [-1, 1]) { const ч = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.03, 16), тм); ч.rotation.z = Math.PI / 2; ч.position.set(s * 0.1, 0.0, 0); о.add(ч);
+        const огонь = new THREE.Mesh(new THREE.CircleGeometry(0.018, 12), св); огонь.position.set(s * 0.116, 0, 0); огонь.rotation.y = s * Math.PI / 2; о.add(огонь); }
+      const штанга = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.13, 6), тм); штанга.rotation.x = Math.PI / 2; штанга.rotation.y = 0.4; штанга.position.set(-0.075, -0.045, 0.06); о.add(штанга);
+      const микр = new THREE.Mesh(new THREE.SphereGeometry(0.012, 8, 6), тм); микр.position.set(-0.05, -0.05, 0.12); о.add(микр);
+      прицепить(м, 'head', о, 0, гл.y + 0.0, гл.z - 0.08);
+    }
+    if (г.глитч) прицепить(м, 'head', экранЛицо(), 0, гл.y - 0.015, гл.z + 0.06);
+    if (г.банка) {
+      const б = new THREE.Group();
+      const тело = new THREE.Mesh(new THREE.CylinderGeometry(0.033, 0.033, 0.16, 16), new THREE.MeshStandardMaterial({ color: ц('#1E1E22'), roughness: 0.3, metalness: 0.7 }));
+      const полоса = new THREE.Mesh(new THREE.CylinderGeometry(0.0335, 0.0335, 0.05, 16), new THREE.MeshStandardMaterial({ color: ц('#7CFF3A'), roughness: 0.4 })); полоса.position.y = 0.01;
+      б.add(тело, полоса);
+      прицепить(м, 'hand_r', б, -И.плечоX - 0.58 * И.рост / 1.75, И.рукаY - 0.03, 0.04);
     }
   }
+
+  // ===================== ИГРОК =====================
+  let игрокМ = null, пул = [], образ = null;
+  const ИГРОК = { мх: 'igrok' };
+  function стандартный() { return модель(ИГРОК); }
+  // переодеть игрока под роль (null — обратно в свою одежду)
+  function переодеть(г) { образ = г || null; if (игрокМ) { сцена.remove(игрокМ.корень); игрокМ.миксер.stopAllAction(); } игрокМ = null; }
+  for (let i = 0; i < ПУЛ; i++) пул.push({ м: null, i, ч: null });
+
+  // ===================== ГЕРОИ =====================
+  // модули сюжета регистрируются в window.__герои3д; модель встаёт внутрь их группы, блочная фигура прячется
+  const героиМ = [];
   function герои() {
     for (const г of window.__герои3д || []) {
-      if (г.__модель) continue; г.__модель = true;                 // модули могут регистрироваться и после загрузки моделей
-      const м = модель(г.пол || 'муж', г.одежда, г.причёска, г.волосы, г.кожа);
+      if (г.__модель) continue;
+      if (!г.мх) г.мх = г.пол === 'жен' ? 'zhenshchina' : 'paren';
+      const м = модель(г); if (!м) continue;                    // ещё грузится — попробуем на следующем кадре
+      г.__модель = true;
       сцена.remove(м.корень);
       г.группа.children.forEach(c => { c.visible = false; });
-      м.корень.visible = true; м.корень.scale.setScalar(г.рост || 1);
+      м.корень.visible = true;
       if (г.y) м.корень.position.y = г.y;
       if (г.z) м.корень.position.z = г.z;
       if (г.наПол) {
@@ -7328,8 +7344,6 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
         if (поп && поп.point.y > от.y) м.корень.position.y = (поп.point.y - от.y) / (г.группа.scale.y || 1);
       }
       г.группа.add(м.корень);
-      обвес(м, г);
-      м.корень.traverse(о => { if (о.isMesh) о.castShadow = true; });
       героиМ.push({ г, м, x: null, z: null });
     }
   }
@@ -7345,42 +7359,47 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       const имя = о.г.аним ? о.г.аним(ск) : ск > 0.4 ? 'Walk_Loop' : 'Idle_Loop';
       играть(о.м, имя, имя === 'Walk_Loop' ? Math.min(1.4, Math.max(0.7, ск / 1.3)) : 1);
       обновить(о.м, dt);
-      if (о.г.голова) { const к = о.м.кости.Head; if (к) { кв2.setFromAxisAngle(ОсьY, о.г.голова()); к.quaternion.multiply(кв2); } }
+      if (о.г.голова) { const к = о.м.кости.head; if (к) { кв2.setFromAxisAngle(ОсьY, о.г.голова()); к.quaternion.multiply(кв2); } }
     }
   }
-  let игрокБлок = null;
-  // модель под конкретного человека (одежда из его цветов)
+  // ===================== СЕЛЬЧАНЕ =====================
+  // по виду человека — модель; оттенок одежды чуть разный, чтобы одинаковые не бросались в глаза
+  function мхСельчанина(ч) {
+    if (ч.вид === 'бабушка') return ч.k % 2 ? 'babushka1' : 'babushka2';
+    if (ч.вид === 'ребёнок') return 'rebyonok';
+    if (ч.вид === 'парень') return 'paren';
+    return ['muzhik', 'ded', 'zhenshchina'][ч.k % 3];
+  }
   function надеть(слот, ч) {
+    const м = модель({ мх: мхСельчанина(ч), тон: 0.8 + (ч.k % 5) * 0.08 });
+    if (!м) return false;
     if (слот.м) { сцена.remove(слот.м.корень); слот.м.миксер.stopAllAction(); }
-    const о = ч.одежда || { куртка: '#3A3F46', штаны: '#23262B', шапка: '#2B2B2B', кожа: '#E2B596' };
-    const жен = ч.вид === 'бабушка', ребёнок = ч.вид === 'ребёнок', парень = ч.вид === 'парень';
-    const причёска = жен ? (ч.шапка ? null : ч.k % 2 ? 'hair_buns' : 'hair_long') : (ч.k % 4 === 0 ? 'hair_beard' : ч.k % 2 ? 'hair_buzzed' : 'hair_simpleparted');
-    слот.м = модель(жен ? 'жен' : 'муж', { верх: о.куртка, низ: о.штаны, обувь: '#1E1C1A', рукав: парень || ребёнок ? 0.33 : 0.68, платок: жен && ч.шапка ? о.шапка : null, талия: жен ? 0.42 : 0.98 },
-      причёска, слот.ВОЛОСЫ[ч.k % слот.ВОЛОСЫ.length], о.кожа);
-    слот.м.корень.scale.setScalar((ребёнок ? 0.6 : жен ? 0.95 : 0.98) * (ч.рост || 1) / (ребёнок ? 0.62 : 1));
-    слот.ч = ч; ч.скин = true;
+    слот.м = м; слот.ч = ч; ч.скин = true;
+    return true;
   }
   // ===================== ОНЛАЙН =====================
-  // переодеть игрока под роль (null — обратно в красную футболку); аватары — чужие игроки
-  function переодеть(г) {
-    if (!готово || !игрокМ) { отложено = г; return; }
-    сцена.remove(игрокМ.корень); игрокМ.миксер.stopAllAction();
-    if (г) { игрокМ = модель(г.пол || 'муж', г.одежда, г.причёска, г.волосы, г.кожа); обвес(игрокМ, г); игрокМ.корень.scale.setScalar(г.рост || 1); }
-    else игрокМ = стандартный();
-  }
   const аватары = new Set();
   function аватар(г) {
-    if (!готово) return null;
-    const м = модель(г.пол || 'муж', г.одежда, г.причёска, г.волосы, г.кожа); обвес(м, г);
-    м.корень.scale.setScalar(г.рост || 1);
+    const м = модель(г); if (!м) return null;
     const а = { м, корень: м.корень, анимация: 'Idle_Loop', темп: 1 }; аватары.add(а); return а;
   }
   function убратьАватар(а) { if (!а) return; сцена.remove(а.м.корень); а.м.миксер.stopAllAction(); аватары.delete(а); }
+
   // ===================== КАДР =====================
-  let таймПерераздачи = 0;
+  let таймПерераздачи = 0, игрокБлок = null, таймРожи = 2;
+  мх('igrok');
   API.каждыйКадр.push((dt, ms, поз) => {
-    if (!готово || !dt || !игрокМ) return;
+    if (!dt) return;
+    времяШтормa.value += dt;
+    // глитч: иногда сильный сбой; рожица на экране меняется сама
+    сбой.value = Math.max(0, сбой.value - dt * 2.5); if (Math.random() < dt * 0.25) сбой.value = 1;
+    таймРожи -= dt;
+    for (const л of лица) { if (л.до > 0) { л.до -= dt; continue; } if (таймРожи <= 0) { л.текст = РОЖИ[Math.floor(Math.random() * РОЖИ.length)]; рисоватьЛицо(л); } }
+    if (таймРожи <= 0) таймРожи = 2 + Math.random() * 3;
+    if (!клипы) { мх('igrok'); return; }
     // игрок
+    if (!игрокМ) { игрокМ = модель(образ || ИГРОК); }
+    if (!игрокМ) return;
     if (!игрокБлок && window.__мир && window.__мир.игрок) { игрокБлок = window.__мир.игрок; игрокБлок.children.forEach(c => { c.visible = false; }); }   // блочного прячем
     const иг = window.__мир && window.__мир.поз;
     if (иг) {
@@ -7417,12 +7436,12 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       if (ч.сидитСейчас) играть(с.м, 'Sitting_Idle_Loop');
       else if (ч.идёт > 1.9) играть(с.м, 'Sprint_Loop', 1);
       else if (ч.идёт > 1.3) играть(с.м, 'Jog_Fwd_Loop', 1);
-      else if (ч.идёт > 0) играть(с.м, 'Walk_Loop', ч.вид === 'бабушка' ? 0.75 : 0.95);
+      else if (ч.идёт > 0) играть(с.м, ч.вид === 'бабушка' ? 'Walk_Formal_Loop' : 'Walk_Loop', ч.вид === 'бабушка' ? 0.75 : 0.95);
       else играть(с.м, ч.k % 3 === 0 ? 'Idle_Talking_Loop' : 'Idle_Loop');
       обновить(с.м, dt);
     }
   });
-  window.__люди3д = { пул, игрок: () => игрокМ, переодеть, аватар, убратьАватар, готово: () => готово };
+  window.__люди3д = { пул, игрок: () => игрокМ, переодеть, аватар, убратьАватар, готово, мх, модель };
 }]);
 
 </script>
@@ -7861,13 +7880,13 @@ window.ДЕТАЛИ.push(['халупа', function (API) {
   // ===================== ВАНЯ =====================
   const ваня = new THREE.Group(); ваня.position.set(HX + 2.5, HY, HZ + 3); ваня.visible = false; сцена.add(ваня);
   const молоток = new THREE.Group(); молоток.add(ящик(0.03, 0.3, 0.03, мат('#8A6A40'), 0, -0.1, 0), ящик(0.1, 0.05, 0.05, мат('#6A6C70'), 0, 0.05, 0));
-  (window.__герои3д = window.__герои3д || []).push({ группа: ваня, причёска: 'hair_simpleparted', волосы: '#3A2A1E', кожа: '#E6BC9E',
+  (window.__герои3д = window.__герои3д || []).push({ группа: ваня, мх: 'vanya', принт: ['полоски', /tank_top/], причёска: 'hair_simpleparted', волосы: '#3A2A1E', кожа: '#E6BC9E',
     одежда: { верх: '#3A3F4A', низ: '#2E3A4E', обувь: '#1E1C1A', рукав: 0.68 }, вРуке: молоток,
     аним: ск => ск > 0.4 ? 'Walk_Loop' : (ст.говорит > 0 ? 'Idle_Talking_Loop' : 'Idle_Loop') });
   // ===================== ЛЮБА =====================
   const люба = new THREE.Group(); люба.visible = false; сцена.add(люба);
   const бургер = new THREE.Group(); бургер.add(ящик(0.11, 0.035, 0.11, мат('#D89A48'), 0, 0.03, 0), ящик(0.12, 0.025, 0.12, мат('#7A4A22'), 0, 0.0, 0), ящик(0.115, 0.01, 0.115, мат('#6AA83A'), 0, 0.015, 0), ящик(0.11, 0.03, 0.11, мат('#D89A48'), 0, -0.025, 0));
-  (window.__герои3д = window.__герои3д || []).push({ группа: люба, пол: 'жен', причёска: 'hair_long', волосы: '#B0582E', кожа: '#EEC8B0', рост: 0.95,
+  (window.__герои3д = window.__герои3д || []).push({ группа: люба, мх: 'lyuba', принт: ['олимпийка', /sweater/], пол: 'жен', причёска: 'hair_long', волосы: '#B0582E', кожа: '#EEC8B0', рост: 0.95,
     одежда: { верх: '#141416', низ: '#1C1C20', обувь: '#1A1A1A', рукав: 0.68, стиль: 4, талия: 0.98 }, чокер: true, вРуке: бургер,
     аним: () => ст.любаЛетит ? 'Sitting_Idle_Loop' : 'Sitting_Idle_Loop', y: 0.12 });
   // лавка у магазина
@@ -9080,11 +9099,11 @@ window.ДЕТАЛИ.push(['Шторм и спутник', function (API) {
   const шторм = new THREE.Group(); шторм.position.set(SX + 3.4, SY, SZ + 2.4); шторм.rotation.y = Math.PI; сцена.add(шторм);
   const наушники = new THREE.Group(); наушники.add(new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.015, 6, 16, Math.PI), мат('#1A1A1C')));
   for (const s of [-1, 1]) { const ч = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.04, 12), мат('#1A1A1C')); ч.rotation.z = Math.PI / 2; ч.position.set(s * 0.11, 0, 0); наушники.add(ч); }
-  (window.__герои3д = window.__герои3д || []).push({ группа: шторм, причёска: 'hair_buzzed', волосы: '#2A2420', кожа: '#E6BC9E',
+  (window.__герои3д = window.__герои3д || []).push({ группа: шторм, мх: 'shtorm', глитч: true, гарнитура: true, банка: true, принт: ['void', /hooded/], причёска: 'hair_buzzed', волосы: '#2A2420', кожа: '#E6BC9E',
     одежда: { верх: '#14161C', низ: '#2E3A4E', обувь: '#E8E8E8', рукав: 0.68 },
     аним: () => (ст.говорит > 0 ? 'Idle_Talking_Loop' : 'Idle_Loop') });
   // наушники цепляем на голову, когда модель появится
-  let наушНадеты = false;
+  let наушНадеты = true;   // гарнитуру теперь надевает модуль людей (66)
   const ст = { внутри: false, говорит: 0, сказал: 0, t: 0, высота: 0, цельВыс: 0, ночь: false, тревога: 0, прыжок: 0, нажатий: 0, был: false };
   const фразы = ['— О, дошёл. Я, кстати, эту игру сделал.', '— Это «Штурм-1». Тьфу. «ШТОРМ-1». Мой спутник. Садись.', '— Только красную не нажимай. Серьёзно.'];
   const сказать = (т, сек = 3.5) => { window.__кино && window.__кино.подпись('Шторм: ' + т, сек); голос(т, 0.95); ст.говорит = сек; };
@@ -9489,6 +9508,10 @@ window.ДЕТАЛИ.push(['настройки', function () {
   строка('ЗВУК', звук); строка('ПОДПИСИ', подписи);
   строка('МАТ', взять('мат'));
   строка('ГРАФИКА', взять('графика'));
+  // авторы ассетов (часть одежды людей — CC-BY, указывать обязательно)
+  { const т = document.createElement('div'); т.style.cssText = 'font-size:9px;line-height:1.4;color:var(--тусклый);letter-spacing:0;max-width:230px';
+    т.textContent = 'Люди: MakeHuman (CC0); одежда и волосы — Elvaerwyn, Mindfront, janexx, punkduck (CC-BY 4.0), MakeHuman community (CC0). Анимации и сортир: Quaternius, System G6 (CC0). Текстуры: Poly Haven (CC0). Карта © OpenStreetMap.';
+    меню.appendChild(т); }
   кн.addEventListener('click', e => { e.stopPropagation(); меню.classList.toggle('открыто'); });
   addEventListener('pointerdown', e => { if (!меню.contains(e.target) && e.target !== кн) меню.classList.remove('открыто'); });
 }]);
@@ -9526,20 +9549,20 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   // ===================== РОЛИ =====================
   const РОЛИ = {
     шторм: { имя: 'Шторм', цвет: '#F4C430', задача: 'Ты разработчик. Следи за посёлком, жми кнопки, а когда все сделают своё — запускай всех в космос.',
-      вид: { причёска: 'hair_buzzed', волосы: '#2A2420', кожа: '#E6BC9E', одежда: { верх: '#14161C', низ: '#2E3A4E', обувь: '#E8E8E8', рукав: 0.68 } } },
+      вид: { мх: 'shtorm', глитч: true, гарнитура: true, банка: true, принт: ['void', /hooded/] } },
     богдан: { имя: 'Богдан', цвет: '#E8E8E8', задача: 'Собери банки карбида, пока их не нашли пацаны с петардами.', предмет: 'банка', нужно: 6, подпись: 'Банки карбида',
-      вид: { причёска: 'hair_buzzed', волосы: '#3A2E26', кожа: '#E2B596', одежда: { верх: '#1C1C1E', низ: '#2E3A4E', обувь: '#1E1C1A', рукав: 0.33, стиль: 1 }, очки: true, цепь: true } },
+      вид: { мх: 'bogdan', принт: ['лев', /t-shirt/], очки: true, цепь: true } },
     егор: { имя: 'Егор', цвет: '#9AD0F0', задача: 'Найди мотки провода — Ване на халупу.', предмет: 'провод', нужно: 5, подпись: 'Мотки провода',
-      вид: { причёска: 'hair_simpleparted', волосы: '#3A2E26', кожа: '#E6BC9E', рост: 0.9, одежда: { верх: '#F2F2EE', низ: '#2A2E36', обувь: '#1E1C1A', рукав: 0.68, стиль: 3 } } },
+      вид: { мх: 'egor' } },
     ярик: { имя: 'Ярик', цвет: '#B0E070', задача: 'Найди потерянные посылки Ozon. Вставать с остановки всё-таки придётся.', предмет: 'посылка', нужно: 5, подпись: 'Посылки',
-      вид: { причёска: 'hair_simpleparted', волосы: '#C8A870', кожа: '#E8C0A2', одежда: { верх: '#141416', низ: '#E6E4DE', обувь: '#0C0C0E', рукав: 0.7, стиль: 2, толщВерх: 0.05, толщНиз: 0.035 }, сумка: true } },
+      вид: { мх: 'yarik', сумка: true } },
     ваня: { имя: 'Ваня', цвет: '#F09A50', задача: 'Найди 7 QR-кодов. Куда они ведут — сам знаешь.', предмет: 'qr', нужно: 7, подпись: 'QR-коды',
-      вид: { причёска: 'hair_simpleparted', волосы: '#3A2A1E', кожа: '#E6BC9E', одежда: { верх: '#3A3F4A', низ: '#2E3A4E', обувь: '#1E1C1A', рукав: 0.68 } } },
+      вид: { мх: 'vanya', принт: ['полоски', /tank_top/] } },
     люба: { имя: 'Люба', цвет: '#F070B0', задача: 'Собери чикенбургеры. Все. Никому не отдавай.', предмет: 'бургер', нужно: 5, подпись: 'Чикенбургеры',
-      вид: { пол: 'жен', причёска: 'hair_long', волосы: '#B0582E', кожа: '#EEC8B0', рост: 0.95, одежда: { верх: '#141416', низ: '#1C1C20', обувь: '#1A1A1A', рукав: 0.68, стиль: 4, талия: 0.98 }, чокер: true } },
+      вид: { мх: 'lyuba', принт: ['олимпийка', /sweater/], чокер: true } },
     яша: { имя: 'Яша', цвет: '#F0A040', задача: 'Ты кот. Лови кур. Мяу.', предмет: 'курица', нужно: 5, подпись: 'Куры', кот: true },
     житель: { имя: 'Житель', цвет: '#C8C0B0', задача: 'Собери семечки по посёлку. Святое.', предмет: 'семечки', нужно: 5, подпись: 'Пакеты семечек', много: true,
-      вид: { причёска: 'hair_simpleparted', волосы: '#5A4030', кожа: '#E2B596', одежда: { верх: '#3A4A3A', низ: '#23262B', обувь: '#1E1C1A', рукав: 0.68 } } },
+      вид: { мх: 'paren' } },
   };
   const ПОРЯДОК = ['шторм', 'богдан', 'егор', 'ярик', 'ваня', 'люба', 'яша', 'житель'];
   const ФРАЗЫ = ['Сюда!', 'Бежим!', 'Ха-ха', 'Я тут', 'Помоги', 'Красава', 'Где все?', 'Это не баг, это фича'];
@@ -10061,7 +10084,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       if (Math.hypot(п.цx - п.x, п.цz - п.z) > 25) { п.x = п.цx; п.z = п.цz; }   // телепорт
       let dа = п.цугол - п.угол; dа = Math.atan2(Math.sin(dа), Math.cos(dа)); п.угол += dа * k;
       const ск = Math.hypot(п.x - пx, п.z - пz) / dt; п.ск = (п.ск || 0) + (ск - (п.ск || 0)) * Math.min(1, dt * 6);
-      if (п.ждётТела && window.__люди3д && window.__люди3д.готово()) { п.ждётТела = false; const р = РОЛИ[п.роль]; п.ав = window.__люди3д.аватар(п.роль === 'шторм' && !п.шторм ? РОЛИ.житель.вид : р.вид); }
+      if (п.ждётТела && window.__люди3д) { const р = РОЛИ[п.роль]; п.ав = window.__люди3д.аватар(п.роль === 'шторм' && !п.шторм ? РОЛИ.житель.вид : р.вид); if (п.ав) п.ждётТела = false; }
       if (п.ав) {
         const к = п.ав.корень; к.visible = true; к.position.set(п.x, п.y, п.z); к.rotation.y = п.угол;
         п.ав.анимация = п.поза || (п.ск > 4.5 ? 'Sprint_Loop' : п.ск > 0.4 ? 'Walk_Loop' : 'Idle_Loop'); п.ав.темп = п.ав.анимация === 'Walk_Loop' ? Math.min(1.4, Math.max(0.7, п.ск / 2.2)) : 1;
