@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cut">
 <title>Бороздиновский</title>
 <style>
   /* Одна намеренная среда: вечер в посёлке. Тема не переключается. */
@@ -4282,7 +4282,7 @@ window.ДЕТАЛИ.push(['сортир взлетает', function (API) {
     бумага.visible = true;
     const к = камера.position;
     for (let i = 0; i < БУМ; i++) {
-      const т = лента[Math.min(i, n - 1)], сосед = лента[Math.min(i + 1, n - 1)] === т ? лента[Math.max(i - 1, 0)] : лента[Math.min(i + 1, n - 1)];
+      const т = лента[Math.min(i, n - 1)], сосед = лента[Math.min(i + 1, n - 1)] === т ? лента[Math.max(Math.min(i, n - 1) - 1, 0)] : лента[Math.min(i + 1, n - 1)];
       // ширина ленты — поперёк направления и взгляда
       const dx = сосед.p[0] - т.p[0], dy = сосед.p[1] - т.p[1], dz = сосед.p[2] - т.p[2];
       const vx = к.x - т.p[0], vy = к.y - т.p[1], vz = к.z - т.p[2];
@@ -6818,12 +6818,19 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
     я.t += dt;
     // сюжет может увести Яшу: я.цель — за кем идти (курица), я.на — на чём сидеть (пылесос)
     let наY = 0;
+    // онлайн: Яшей управляет живой игрок (я.игрок — {x, z, угол}); ИИ молчит, ноги считаются по скорости
+    if (я.игрок && я.игрок.x !== null) {
+      const ип = я.игрок; я.лежит = false; я.на = null; я.цель = null; я.проснулся = true;
+      const ск = Math.hypot(ип.x - я.x, ип.z - я.z) / dt;
+      я.x = ип.x; я.z = ип.z; я.угол = ип.угол;
+      я.скИгр = (я.скИгр || 0) + (Math.min(8, ск) - (я.скИгр || 0)) * Math.min(1, dt * 8);
+    } else я.скИгр = 0;
     if (я.на) { const в = я.на.getWorldPosition(new THREE.Vector3()); я.x = в.x; я.z = в.z; наY = в.y; я.угол = я.на.userData.угол !== undefined ? я.на.userData.угол : я.на.rotation.y; }
     const Ц = я.цель || поз;
-    const dx = Ц.x - я.x, dz = Ц.z - я.z, d = я.на ? 0 : Math.hypot(dx, dz);
+    const dx = Ц.x - я.x, dz = Ц.z - я.z, d = я.на || я.игрок ? 0 : Math.hypot(dx, dz);
     if (я.цель && d > 35) { const а = Math.atan2(dx, dz); я.x = Ц.x - Math.sin(а) * 5; я.z = Ц.z - Math.cos(а) * 5; }   // отстал от курицы — «догнал» за кадром
-    if (d > 40 && !я.цель) { я.x = поз.x - Math.sin(поз.угол) * 3; я.z = поз.z - Math.cos(поз.угол) * 3; }   // отстал — догоняет «за кадром»
-    let скорость = 0;
+    if (d > 40 && !я.цель && !я.игрок) { я.x = поз.x - Math.sin(поз.угол) * 3; я.z = поз.z - Math.cos(поз.угол) * 3; }   // отстал — догоняет «за кадром»
+    let скорость = я.игрок && я.скИгр > 0.3 ? я.скИгр : 0;
     const стоп = я.цель ? (я.стоп || 1.3) : 2.4;
     if (d > стоп) {
       скорость = d > 7 ? 5.5 : 1.6 + (d - стоп) * 0.6;
@@ -6843,7 +6850,7 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
     const трава = (я.лежит || (!я.на && (я.крадётся || вТраве(я.x, я.z)))) && скорость < 4;
     я.кр += ((трава ? 1 : 0) - я.кр) * Math.min(1, dt * 4);
     // иногда: замер, виляет задом — и прыжок вперёд, на добычу
-    if (трава && !скорость && !я.цель) {
+    if (трава && !скорость && !я.цель && !я.игрок) {
       я.таймОхоты -= dt;
       if (я.таймОхоты <= 0 && !я.охота) { я.охота = 1.4; я.таймОхоты = 7 + Math.random() * 8; }
     }
@@ -7239,16 +7246,21 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     д.timeScale = скорость;
   }
   // ===================== ИГРОК =====================
-  let игрокМ = null, пул = [];
-  function собрать() {
-    // игрок: красная футболка (короткий рукав), тёмные джинсы, стрижка, кепка
-    игрокМ = модель('муж', { верх: '#C24A3A', низ: '#2E3F5E', обувь: '#1E1E1E', рукав: 0.33 }, 'hair_buzzed', '#3A2A1E');
+  let игрокМ = null, пул = [], отложено;
+  function стандартный() {
+    const м0 = модель('муж', { верх: '#C24A3A', низ: '#2E3F5E', обувь: '#1E1E1E', рукав: 0.33 }, 'hair_buzzed', '#3A2A1E');
     const кепка = new THREE.Group();
     const м = new THREE.MeshStandardMaterial({ color: ц('#2B2B2B'), roughness: 0.8 });
     const купол = new THREE.Mesh(new THREE.SphereGeometry(0.105, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), м); купол.scale.set(1, 0.75, 1.1);
     const козырёк = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.012, 0.11), м); козырёк.position.set(0, 0.005, 0.13);
     кепка.add(купол, козырёк); кепка.position.set(0, 0.2, 0.01);
-    игрокМ.корень.traverse(о => { if (о.isBone && о.name === 'Head') о.add(кепка); });
+    м0.корень.traverse(о => { if (о.isBone && о.name === 'Head') о.add(кепка); });
+    return м0;
+  }
+  function собрать() {
+    // игрок: красная футболка (короткий рукав), тёмные джинсы, стрижка, кепка
+    игрокМ = стандартный();
+    if (отложено !== undefined) переодеть(отложено);
     // блочного человечка прячем (группа остаётся — по ней ходит камера)
 
     герои();
@@ -7269,6 +7281,34 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     объект.position.set(x, y, z); м.корень.add(объект); м.корень.updateMatrixWorld(true);
     к.attach(объект);
   }
+  function обвес(м, г) {
+    if (г.очки) {
+      const оп = new THREE.MeshStandardMaterial({ color: ц('#101012'), roughness: 0.3 }), ст = new THREE.MeshStandardMaterial({ color: ц('#1A1E24'), roughness: 0.1, transparent: true, opacity: 0.55 });
+      const о = new THREE.Group();
+      for (const s of [-1, 1]) {
+        const рамка = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.036, 0.006), оп); рамка.position.set(s * 0.033, 0, 0);
+        const линза = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.028, 0.007), ст); линза.position.set(s * 0.033, 0, 0.001);
+        const дужка = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.006, 0.1), оп); дужка.position.set(s * 0.06, 0.005, -0.05);
+        о.add(рамка, линза, дужка);
+      }
+      const мост = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.005, 0.005), оп); мост.position.y = 0.01; о.add(мост);
+      прицепить(м, 'Head', о, 0, 1.70, 0.095);
+    }
+    if (г.цепь) {
+      const ц0 = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.005, 5, 28), new THREE.MeshStandardMaterial({ color: ц('#C8C8C8'), roughness: 0.25, metalness: 0 }));
+      ц0.rotation.x = Math.PI / 2 - 0.5; ц0.scale.set(1, 0.85, 1);
+      прицепить(м, 'spine_03', ц0, 0, 1.49, 0.03);
+    }
+    if (г.чокер) {
+      const ч = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.006, 5, 24), new THREE.MeshStandardMaterial({ color: ц('#0C0C0E'), roughness: 0.4 }));
+      ч.rotation.x = Math.PI / 2; прицепить(м, 'neck_01', ч, 0, 1.5, 0.005);
+    }
+    if (г.вРуке) прицепить(м, 'hand_r', г.вРуке, -0.72, 1.42, 0.05);
+    if (г.сумка) {
+      const с = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.26), new THREE.MeshStandardMaterial({ color: ц('#0C0C0E'), roughness: 0.6 }));
+      прицепить(м, 'pelvis', с, -0.24, 0.98, 0.02);
+    }
+  }
   function герои() {
     for (const г of window.__герои3д || []) {
       if (г.__модель) continue; г.__модель = true;                 // модули могут регистрироваться и после загрузки моделей
@@ -7288,32 +7328,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
         if (поп && поп.point.y > от.y) м.корень.position.y = (поп.point.y - от.y) / (г.группа.scale.y || 1);
       }
       г.группа.add(м.корень);
-      if (г.очки) {
-        const оп = new THREE.MeshStandardMaterial({ color: ц('#101012'), roughness: 0.3 }), ст = new THREE.MeshStandardMaterial({ color: ц('#1A1E24'), roughness: 0.1, transparent: true, opacity: 0.55 });
-        const о = new THREE.Group();
-        for (const s of [-1, 1]) {
-          const рамка = new THREE.Mesh(new THREE.BoxGeometry(0.052, 0.036, 0.006), оп); рамка.position.set(s * 0.033, 0, 0);
-          const линза = new THREE.Mesh(new THREE.BoxGeometry(0.044, 0.028, 0.007), ст); линза.position.set(s * 0.033, 0, 0.001);
-          const дужка = new THREE.Mesh(new THREE.BoxGeometry(0.004, 0.006, 0.1), оп); дужка.position.set(s * 0.06, 0.005, -0.05);
-          о.add(рамка, линза, дужка);
-        }
-        const мост = new THREE.Mesh(new THREE.BoxGeometry(0.016, 0.005, 0.005), оп); мост.position.y = 0.01; о.add(мост);
-        прицепить(м, 'Head', о, 0, 1.70, 0.095);
-      }
-      if (г.цепь) {
-        const ц0 = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.005, 5, 28), new THREE.MeshStandardMaterial({ color: ц('#C8C8C8'), roughness: 0.25, metalness: 0 }));
-        ц0.rotation.x = Math.PI / 2 - 0.5; ц0.scale.set(1, 0.85, 1);
-        прицепить(м, 'spine_03', ц0, 0, 1.49, 0.03);
-      }
-      if (г.чокер) {
-        const ч = new THREE.Mesh(new THREE.TorusGeometry(0.052, 0.006, 5, 24), new THREE.MeshStandardMaterial({ color: ц('#0C0C0E'), roughness: 0.4 }));
-        ч.rotation.x = Math.PI / 2; прицепить(м, 'neck_01', ч, 0, 1.5, 0.005);
-      }
-      if (г.вРуке) прицепить(м, 'hand_r', г.вРуке, -0.72, 1.42, 0.05);
-      if (г.сумка) {
-        const с = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.2, 0.26), new THREE.MeshStandardMaterial({ color: ц('#0C0C0E'), roughness: 0.6 }));
-        прицепить(м, 'pelvis', с, -0.24, 0.98, 0.02);
-      }
+      обвес(м, г);
       м.корень.traverse(о => { if (о.isMesh) о.castShadow = true; });
       героиМ.push({ г, м, x: null, z: null });
     }
@@ -7345,6 +7360,22 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     слот.м.корень.scale.setScalar((ребёнок ? 0.6 : жен ? 0.95 : 0.98) * (ч.рост || 1) / (ребёнок ? 0.62 : 1));
     слот.ч = ч; ч.скин = true;
   }
+  // ===================== ОНЛАЙН =====================
+  // переодеть игрока под роль (null — обратно в красную футболку); аватары — чужие игроки
+  function переодеть(г) {
+    if (!готово || !игрокМ) { отложено = г; return; }
+    сцена.remove(игрокМ.корень); игрокМ.миксер.stopAllAction();
+    if (г) { игрокМ = модель(г.пол || 'муж', г.одежда, г.причёска, г.волосы, г.кожа); обвес(игрокМ, г); игрокМ.корень.scale.setScalar(г.рост || 1); }
+    else игрокМ = стандартный();
+  }
+  const аватары = new Set();
+  function аватар(г) {
+    if (!готово) return null;
+    const м = модель(г.пол || 'муж', г.одежда, г.причёска, г.волосы, г.кожа); обвес(м, г);
+    м.корень.scale.setScalar(г.рост || 1);
+    const а = { м, корень: м.корень, анимация: 'Idle_Loop', темп: 1 }; аватары.add(а); return а;
+  }
+  function убратьАватар(а) { if (!а) return; сцена.remove(а.м.корень); а.м.миксер.stopAllAction(); аватары.delete(а); }
   // ===================== КАДР =====================
   let таймПерераздачи = 0;
   API.каждыйКадр.push((dt, ms, поз) => {
@@ -7353,7 +7384,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     if (!игрокБлок && window.__мир && window.__мир.игрок) { игрокБлок = window.__мир.игрок; игрокБлок.children.forEach(c => { c.visible = false; }); }   // блочного прячем
     const иг = window.__мир && window.__мир.поз;
     if (иг) {
-      игрокМ.корень.visible = true;
+      игрокМ.корень.visible = !window.__игрокСкрыт;
       игрокМ.корень.position.set(иг.x, window.__игрокY !== undefined ? window.__игрокY : В(иг.x, иг.z), иг.z); игрокМ.корень.rotation.y = иг.угол;
       const д = window.__мир.джойстик, сила = document.body.classList.contains('кино') || window.__управлениеСтоп ? 0 : Math.min(1, Math.hypot(д.dx, д.dy));
       if (window.__игрокПоза) играть(игрокМ, window.__игрокПоза, 1);
@@ -7362,6 +7393,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     }
     if ((window.__герои3д || []).some(г => !г.__модель)) герои();
     кадрГероев(dt, поз);
+    for (const а of аватары) if (а.корень.visible) { играть(а.м, а.анимация, а.темп); обновить(а.м, dt); }
     // раздаём модели ближайшим видимым сельчанам (раз в полсекунды)
     const люди = window.__люди && window.__люди.люди; if (!люди) return;
     таймПерераздачи -= dt;
@@ -7390,7 +7422,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       обновить(с.м, dt);
     }
   });
-  window.__люди3д = { пул, игрок: () => игрокМ };
+  window.__люди3д = { пул, игрок: () => игрокМ, переодеть, аватар, убратьАватар, готово: () => готово };
 }]);
 
 </script>
@@ -9278,7 +9310,7 @@ window.ДЕТАЛИ.push(['Шторм и спутник', function (API) {
     if (таймЭкранов <= 0) { таймЭкранов = 0.12;
       for (const э of экраны) { if (!э.т) continue; const с = э.т.__к.getContext('2d'); (ст.тревога > 0 && э.имя !== 'DEV-КОНСОЛЬ' ? ТРЕВОГА : э.рис)(с, э.т.__к.width, э.т.__к.height, ст.t); э.т.needsUpdate = true; } }
   });
-  window.__шторм = { ст, войти, выйти, SX, SZ, кнопки, спутник, космос, космКам, земля };
+  window.__шторм = { ст, войти, выйти, вКосмос, персонаж: шторм, SX, SZ, кнопки, спутник, космос, космКам, земля };
 }]);
 
 </script>
@@ -9459,6 +9491,599 @@ window.ДЕТАЛИ.push(['настройки', function () {
   строка('ГРАФИКА', взять('графика'));
   кн.addEventListener('click', e => { e.stopPropagation(); меню.classList.toggle('открыто'); });
   addEventListener('pointerdown', e => { if (!меню.contains(e.target) && e.target !== кн) меню.classList.remove('открыто'); });
+}]);
+
+</script>
+<script>
+// Онлайн: вся Бороздиновка в одном мире. Каждый играет кем-то из своих, у каждого своя задача.
+// Связь — через тот же сервер, что у мессенджера Void (wss://voidm.site/signal, комната brzd-rstv):
+// он только пересылает сообщения от игрока к игроку, вся логика здесь.
+//
+// Шторм — роль разработчика, занять её никто не может: заявку Шторма проверяет каждый
+// клиент по цифровой подписи (ECDSA P-256). Закрытый ключ создаётся один раз на телефоне
+// Шторма (?shtorm в адресе), хранится в IndexedDB и наружу не выдаётся; в код вписана
+// только открытая половина. Пока она пустая — роль Шторма закрыта для всех.
+// Подписаны и «силы» Шторма (ночь, салют, собрать всех, запуск), поэтому подделать их нельзя.
+//
+// Задачи: у каждой роли свои предметы по посёлку — видит их только она (столб света + стрелка).
+// Яша — кот: управляешь настоящим Яшей и ловишь кур. Когда все сделали своё — Шторм
+// запускает всех в космос на «ШТОРМ-1».
+window.ДЕТАЛИ.push(['онлайн', function (API) {
+  const { сцена, землиВысота: В, ШИР, ГЛУБ } = API;
+  const ШТОРМ_КЛЮЧ = '';                       // открытый ключ Шторма (base64, 65 байт raw P-256); пусто — роль закрыта
+  const КОМНАТА = 'brzd-rstv-1';
+  const вЛокалке = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
+  const qs = new URLSearchParams(location.search);
+  const АДРЕС = вЛокалке && qs.get('ws') ? qs.get('ws') : 'wss://voidm.site/signal';
+  const хран = { взять: к => { try { return localStorage.getItem(к); } catch (e) { return null; } }, положить: (к, з) => { try { localStorage.setItem(к, з); } catch (e) {} } };
+
+  // ===================== РОЛИ =====================
+  const РОЛИ = {
+    шторм: { имя: 'Шторм', цвет: '#F4C430', задача: 'Ты разработчик. Следи за посёлком, жми кнопки, а когда все сделают своё — запускай всех в космос.',
+      вид: { причёска: 'hair_buzzed', волосы: '#2A2420', кожа: '#E6BC9E', одежда: { верх: '#14161C', низ: '#2E3A4E', обувь: '#E8E8E8', рукав: 0.68 } } },
+    богдан: { имя: 'Богдан', цвет: '#E8E8E8', задача: 'Собери банки карбида, пока их не нашли пацаны с петардами.', предмет: 'банка', нужно: 6, подпись: 'Банки карбида',
+      вид: { причёска: 'hair_buzzed', волосы: '#3A2E26', кожа: '#E2B596', одежда: { верх: '#1C1C1E', низ: '#2E3A4E', обувь: '#1E1C1A', рукав: 0.33, стиль: 1 }, очки: true, цепь: true } },
+    егор: { имя: 'Егор', цвет: '#9AD0F0', задача: 'Найди мотки провода — Ване на халупу.', предмет: 'провод', нужно: 5, подпись: 'Мотки провода',
+      вид: { причёска: 'hair_simpleparted', волосы: '#3A2E26', кожа: '#E6BC9E', рост: 0.9, одежда: { верх: '#F2F2EE', низ: '#2A2E36', обувь: '#1E1C1A', рукав: 0.68, стиль: 3 } } },
+    ярик: { имя: 'Ярик', цвет: '#B0E070', задача: 'Найди потерянные посылки Ozon. Вставать с остановки всё-таки придётся.', предмет: 'посылка', нужно: 5, подпись: 'Посылки',
+      вид: { причёска: 'hair_simpleparted', волосы: '#C8A870', кожа: '#E8C0A2', одежда: { верх: '#141416', низ: '#E6E4DE', обувь: '#0C0C0E', рукав: 0.7, стиль: 2, толщВерх: 0.05, толщНиз: 0.035 }, сумка: true } },
+    ваня: { имя: 'Ваня', цвет: '#F09A50', задача: 'Найди 7 QR-кодов. Куда они ведут — сам знаешь.', предмет: 'qr', нужно: 7, подпись: 'QR-коды',
+      вид: { причёска: 'hair_simpleparted', волосы: '#3A2A1E', кожа: '#E6BC9E', одежда: { верх: '#3A3F4A', низ: '#2E3A4E', обувь: '#1E1C1A', рукав: 0.68 } } },
+    люба: { имя: 'Люба', цвет: '#F070B0', задача: 'Собери чикенбургеры. Все. Никому не отдавай.', предмет: 'бургер', нужно: 5, подпись: 'Чикенбургеры',
+      вид: { пол: 'жен', причёска: 'hair_long', волосы: '#B0582E', кожа: '#EEC8B0', рост: 0.95, одежда: { верх: '#141416', низ: '#1C1C20', обувь: '#1A1A1A', рукав: 0.68, стиль: 4, талия: 0.98 }, чокер: true } },
+    яша: { имя: 'Яша', цвет: '#F0A040', задача: 'Ты кот. Лови кур. Мяу.', предмет: 'курица', нужно: 5, подпись: 'Куры', кот: true },
+    житель: { имя: 'Житель', цвет: '#C8C0B0', задача: 'Собери семечки по посёлку. Святое.', предмет: 'семечки', нужно: 5, подпись: 'Пакеты семечек', много: true,
+      вид: { причёска: 'hair_simpleparted', волосы: '#5A4030', кожа: '#E2B596', одежда: { верх: '#3A4A3A', низ: '#23262B', обувь: '#1E1C1A', рукав: 0.68 } } },
+  };
+  const ПОРЯДОК = ['шторм', 'богдан', 'егор', 'ярик', 'ваня', 'люба', 'яша', 'житель'];
+  const ФРАЗЫ = ['Сюда!', 'Бежим!', 'Ха-ха', 'Я тут', 'Помоги', 'Красава', 'Где все?', 'Это не баг, это фича'];
+
+  // ===================== СОСТОЯНИЕ =====================
+  const я = { ид: Math.random().toString(36).slice(2, 12), роль: null, ник: хран.взять('brzd-nik') || '', t0: 0, счёт: 0, шторм: false };
+  const пиры = new Map();   // ид → { роль, ник, t0, шторм, x, z, y, угол, цx, цz, цy, цугол, счёт, ав, табл, ск, связь }
+  let ws = null, подключён = false, таймПоз = 0, таймПривет = 0, ночь = false;
+
+  // ===================== ПОДПИСЬ ШТОРМА =====================
+  const b64 = б => btoa(String.fromCharCode(...new Uint8Array(б)));
+  const изB64 = с => Uint8Array.from(atob(с), ч => ч.charCodeAt(0));
+  const текст = с => new TextEncoder().encode(с);
+  const АЛГ = { name: 'ECDSA', namedCurve: 'P-256' }, ПОДП = { name: 'ECDSA', hash: 'SHA-256' };
+  const мояБД = () => new Promise((ок, нет) => { const р = indexedDB.open('brzd-shtorm', 1); р.onupgradeneeded = () => р.result.createObjectStore('k'); р.onsuccess = () => ок(р.result); р.onerror = () => нет(р.error); });
+  async function мойКлюч() {
+    try { const б = await мояБД(); return await new Promise(ок => { const з = б.transaction('k').objectStore('k').get('пара'); з.onsuccess = () => ок(з.result || null); з.onerror = () => ок(null); }); }
+    catch (e) { return null; }
+  }
+  async function новыйКлюч() {
+    const пара = await crypto.subtle.generateKey(АЛГ, false, ['sign', 'verify']);   // закрытый — неизвлекаемый
+    const б = await мояБД();
+    await new Promise((ок, нет) => { const т = б.transaction('k', 'readwrite'); т.objectStore('k').put(пара, 'пара'); т.oncomplete = ок; т.onerror = () => нет(т.error); });
+    return пара;
+  }
+  const открытый = async пара => b64(await crypto.subtle.exportKey('raw', пара.publicKey));
+  let ключПроверки = null;
+  async function проверка() {
+    if (!ШТОРМ_КЛЮЧ || !crypto.subtle) return null;
+    if (!ключПроверки) ключПроверки = await crypto.subtle.importKey('raw', изB64(ШТОРМ_КЛЮЧ), АЛГ, false, ['verify']);
+    return ключПроверки;
+  }
+  async function верна(строка, подпись) {
+    try { const к = await проверка(); return !!к && await crypto.subtle.verify(ПОДП, к, изB64(подпись), текст(строка)); } catch (e) { return false; }
+  }
+  let пара = null;
+  async function подписать(строка) { return b64(await crypto.subtle.sign(ПОДП, пара.privateKey, текст(строка))); }
+  const СВЕЖЕСТЬ = 10 * 60 * 1000;      // часы у телефонов могут разъехаться — даём 10 минут
+  let яШторм = false;                   // этот телефон — Шторма (ключ совпал с вписанным)
+  (async () => {
+    if (!window.crypto || !crypto.subtle || !window.indexedDB) return;
+    пара = await мойКлюч();
+    if (пара && ШТОРМ_КЛЮЧ && await открытый(пара) === ШТОРМ_КЛЮЧ) яШторм = true;
+    if (qs.has('shtorm')) окноКлюча();
+  })();
+
+  // ===================== ИНТЕРФЕЙС =====================
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #онлКн { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(170px + env(safe-area-inset-right, 0px)); z-index: 9; height: 38px; padding: 0 12px;
+             border-radius: 19px; border: 1px solid rgba(242,230,204,0.3); background: rgba(18,12,8,0.62); color: #F2E6CC; font: 700 12px/36px system-ui, sans-serif; letter-spacing: 1px; cursor: pointer; }
+    #онлКн.в-сети { border-color: #6AD06A; color: #BFF5BF; }
+    #онлКн:focus-visible, .онл button:focus-visible { outline: 2px solid #F4C430; outline-offset: 2px; }
+    .онл { font: 13px/1.35 system-ui, -apple-system, Roboto, sans-serif; color: #F2E6CC; }
+    #онлОкно { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; background: rgba(8,6,4,0.72); padding: 12px; }
+    #онлОкно.открыто { display: flex; }
+    #онлОкно .лист { width: min(760px, 100%); max-height: 100%; overflow: auto; background: #1A140E; border: 1px solid rgba(242,230,204,0.25); border-radius: 16px; padding: 14px; }
+    #онлОкно h2 { margin: 0 0 4px; font-size: 16px; letter-spacing: 2px; }
+    #онлОкно .мел { color: #B8AC94; font-size: 12px; margin: 0 0 10px; }
+    #онлОкно .роли { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 8px; }
+    #онлОкно .роль { text-align: left; background: #2A2018; color: #F2E6CC; border: 1px solid rgba(242,230,204,0.18); border-radius: 12px; padding: 9px 10px; cursor: pointer; font: inherit; min-height: 74px; }
+    #онлОкно .роль b { display: block; font-size: 14px; margin-bottom: 3px; }
+    #онлОкно .роль small { color: #B8AC94; font-size: 11px; display: block; }
+    #онлОкно .роль[disabled] { opacity: 0.45; cursor: default; }
+    #онлОкно .роль.шторм { border-color: #F4C430; background: linear-gradient(135deg, #3A2E10, #2A2018); }
+    #онлОкно .низ { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+    #онлОкно input { flex: 1; min-width: 140px; height: 34px; border-radius: 10px; border: 1px solid rgba(242,230,204,0.3); background: #120E0A; color: #F2E6CC; padding: 0 10px; font: inherit; }
+    #онлОкно .кн2, #онлПанель .кн2 { height: 34px; padding: 0 14px; border-radius: 10px; border: 1px solid rgba(242,230,204,0.3); background: #2A2018; color: #F2E6CC; font: 700 12px system-ui, sans-serif; cursor: pointer; }
+    #онлОкно code { display: block; word-break: break-all; background: #0E0B08; padding: 8px; border-radius: 8px; font-size: 11px; margin: 8px 0; user-select: all; }
+    #онлПанель { position: fixed; left: calc(10px + env(safe-area-inset-left, 0px)); top: calc(88px + env(safe-area-inset-top, 0px)); z-index: 8; width: 172px; display: none; font-size: 11.5px;
+                 background: rgba(18,12,8,0.6); border: 1px solid rgba(242,230,204,0.2); border-radius: 12px; padding: 6px 9px; pointer-events: auto; }
+    #онлПанель.видно { display: block; max-height: calc(100vh - 100px - env(safe-area-inset-top, 0px)); overflow: auto; }
+    #онлСилы { position: fixed; left: 62%; transform: translateX(-50%); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); z-index: 9; display: none; gap: 6px; }
+    #онлСилы.видно { display: flex; }
+    #онлСилы button { min-width: 48px; height: 48px; border-radius: 14px; border: 1px solid #F4C430; background: rgba(30,22,6,0.82); color: #F4E0A0; font: 700 9px/1.1 system-ui, sans-serif; padding: 3px 6px; cursor: pointer; }
+    #онлСилы button b { display: block; font-size: 19px; line-height: 22px; }
+    #онлСилы button[disabled] { opacity: 0.35; }
+    #онлСилы .пуск { border-color: #FF7A30; color: #FFD0A0; }
+    body.кино #онлСилы, body.кабина #онлСилы { opacity: 0; pointer-events: none; }
+    #онлПанель .кто { font-weight: 800; letter-spacing: 1px; }
+    #онлПанель .полоса { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.12); margin: 3px 0 4px; overflow: hidden; }
+    #онлПанель .полоса i { display: block; height: 100%; background: #6AD06A; width: 0; transition: width .4s; }
+    #онлПанель .список { font-size: 10.5px; color: #C8BCA4; max-height: 44px; overflow: auto; }
+    #онлПанель .ряд { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+    #онлПанель .кн2 { height: 30px; padding: 0 10px; font-size: 11px; }
+    #онлПанель .силы .кн2 { border-color: #F4C430; color: #F4E0A0; }
+    #онлПанель .кн2[disabled] { opacity: 0.4; }
+    #онлФразы { position: fixed; left: calc(192px + env(safe-area-inset-left, 0px)); top: calc(88px + env(safe-area-inset-top, 0px)); z-index: 9; display: none; flex-wrap: wrap; gap: 6px; width: 260px; }
+    #онлФразы.видно { display: flex; }
+    #онлФразы button { height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid rgba(242,230,204,0.3); background: rgba(18,12,8,0.85); color: #F2E6CC; font: 600 12px system-ui, sans-serif; }
+    #онлСтрелка { position: fixed; left: 50%; top: calc(60px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 7; display: none; pointer-events: none;
+                  text-align: center; color: #fff; font: 800 12px system-ui, sans-serif; text-shadow: 0 1px 3px #000; }
+    #онлСтрелка.видно { display: block; }
+    #онлСтрелка .ст { font-size: 26px; line-height: 26px; display: inline-block; }
+    #онлРадар { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); top: calc(120px + env(safe-area-inset-top, 0px)); z-index: 7; width: 96px; height: 96px;
+                border-radius: 50%; border: 1px solid #F4C430; background: rgba(6,14,8,0.75); display: none; pointer-events: none; }
+    #онлРадар.видно { display: block; }
+    body.кино #онлКн, body.кино #онлПанель, body.кино #онлФразы, body.кино #онлСтрелка, body.кабина #онлСтрелка { opacity: 0; pointer-events: none; }
+  `;
+  document.head.appendChild(стиль);
+  const эл = (тег, атр = {}, ...дети) => { const э = document.createElement(тег); for (const [к, з] of Object.entries(атр)) { if (к === 'class') э.className = з; else if (к.startsWith('on')) э.addEventListener(к.slice(2), з); else э.setAttribute(к, з); } for (const д of дети) э.append(д); return э; };
+  const кн = эл('button', { id: 'онлКн', 'aria-label': 'Онлайн' }, '👥 ОНЛАЙН');
+  const окно = эл('div', { id: 'онлОкно', class: 'онл', role: 'dialog', 'aria-modal': 'true' });
+  const панель = эл('div', { id: 'онлПанель', class: 'онл' });
+  const фразы = эл('div', { id: 'онлФразы', class: 'онл' });
+  const стрелка = эл('div', { id: 'онлСтрелка' });
+  const радар = эл('canvas', { id: 'онлРадар', width: 240, height: 240 });
+  const силы = эл('div', { id: 'онлСилы', class: 'онл' });
+  document.body.append(кн, окно, панель, фразы, стрелка, радар, силы);
+  const совет = (т, с = 3.5) => window.__подсказки && window.__подсказки.совет(т, с);
+  // звук
+  let аудио = null;
+  function бип(частоты, длит = 0.12, громк = 0.07, тип = 'square') {
+    try {
+      аудио = аудио || new (window.AudioContext || window.webkitAudioContext)();
+      частоты.forEach((ч, i) => { const о = аудио.createOscillator(), г = аудио.createGain(); о.type = тип; о.frequency.value = ч; const t = аудио.currentTime + i * длит;
+        г.gain.setValueAtTime(громк, t); г.gain.exponentialRampToValueAtTime(0.0001, t + длит * 0.95); о.connect(г).connect(аудио.destination); о.start(t); о.stop(t + длит); });
+    } catch (e) {}
+  }
+
+  кн.addEventListener('click', () => { if (!подключён) подключиться(); выборРоли(); });
+
+  function закрытьОкно() { окно.classList.remove('открыто'); }
+  окно.addEventListener('click', e => { if (e.target === окно) закрытьОкно(); });
+  addEventListener('keydown', e => { if (e.key === 'Escape') закрытьОкно(); });
+
+  function кемЗанята(роль) {
+    if (РОЛИ[роль].много) return null;
+    for (const п of пиры.values()) if (п.роль === роль && (роль !== 'шторм' || п.шторм)) return п;
+    return null;
+  }
+  function выборРоли(причина) {
+    окно.innerHTML = '';
+    const лист = эл('div', { class: 'лист' });
+    лист.append(эл('h2', {}, 'БОРОЗДИНОВКА ОНЛАЙН'),
+      эл('p', { class: 'мел' }, причина || (подключён ? `В посёлке сейчас: ${пиры.size + 1}. Выбери, кем играешь — у каждого своя задача.` : 'Подключаюсь к посёлку…')));
+    const сетка = эл('div', { class: 'роли' });
+    for (const к of ПОРЯДОК) {
+      const р = РОЛИ[к], кто = кемЗанята(к);
+      let под = р.задача, можно = !кто;
+      if (к === 'шторм') {
+        if (!ШТОРМ_КЛЮЧ) { под = '🔒 Только разработчик. Роль ещё не активирована.'; можно = false; }
+        else if (!яШторм) { под = '🔒 Только разработчик. Занять эту роль нельзя.'; можно = false; }
+      }
+      if (кто) под = 'Занято — уже в игре';
+      if (я.роль === к) { под = 'Это ты'; можно = false; }
+      const б = эл('button', { class: 'роль' + (к === 'шторм' ? ' шторм' : '') }, эл('b', { style: `color:${р.цвет}` }, (к === 'шторм' ? '⚡ ' : '') + р.имя + (р.кот ? ' 🐈' : '')), эл('small', {}, под));
+      if (!можно || !подключён) б.disabled = true;
+      б.addEventListener('click', () => взятьРоль(к));
+      сетка.append(б);
+    }
+    лист.append(сетка);
+    const ник = эл('input', { placeholder: 'Ник для «Жителя» (необязательно)', maxlength: '14', 'aria-label': 'Ник' }); ник.value = я.ник;
+    ник.addEventListener('change', () => { я.ник = чистыйНик(ник.value); ник.value = я.ник; хран.положить('brzd-nik', я.ник); });
+    const низ = эл('div', { class: 'низ' }, ник);
+    if (я.роль) низ.append(эл('button', { class: 'кн2', onclick: выйтиИзОнлайна }, 'Выйти из онлайна'));
+    низ.append(эл('button', { class: 'кн2', onclick: закрытьОкно }, 'Закрыть'));
+    лист.append(низ);
+    окно.append(лист); окно.classList.add('открыто');
+  }
+  // ник Жителя: без «Шторма» — это место занято навсегда
+  function чистыйНик(с) {
+    с = String(с || '').replace(/[^\p{L}\p{N} _.\-]/gu, '').trim().slice(0, 14);
+    if (/шторм|storm|штopм|разраб/i.test(с.replace(/\s/g, ''))) с = '';
+    return с;
+  }
+
+  // ===================== СЕТЬ =====================
+  function отправить(кому, данные) { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ to: кому, type: 'brzd', ...данные })); }
+  function всем(данные) { for (const ид of пиры.keys()) отправить(ид, данные); }
+  function подключиться() {
+    try { ws = new WebSocket(АДРЕС); } catch (e) { выборРоли('Не получилось подключиться. Онлайн работает на voidm.site/brzd-rstv.'); return; }
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'join', room: КОМНАТА, peer: я.ид }));
+    ws.onmessage = e => { let м; try { м = JSON.parse(e.data); } catch (_) { return; } приём(м); };
+    ws.onclose = () => {
+      const был = подключён; подключён = false; кн.classList.remove('в-сети');
+      for (const ид of [...пиры.keys()]) ушёл(ид);
+      if (был || я.роль) { совет('Связь с посёлком пропала. Переподключаюсь…', 3); setTimeout(() => { if (!подключён && я.роль) подключиться(); }, 3000); }
+      else if (окно.classList.contains('открыто')) выборРоли('Не получилось подключиться. Онлайн работает на voidm.site/brzd-rstv.');
+    };
+  }
+  async function привет(кому) {
+    if (!я.роль) return;
+    const д = { k: 'h', роль: я.роль, ник: я.ник, t0: я.t0, счёт: я.счёт };
+    if (я.роль === 'шторм' && пара) { д.ts = Date.now(); д.sig = await подписать(`brzd|шторм|${я.ид}|${д.ts}`); }
+    кому ? отправить(кому, д) : всем(д);
+  }
+  function приём(м) {
+    if (м.type === 'joined') {
+      подключён = true; кн.classList.add('в-сети');
+      for (const ид of м.peers || []) пир(ид);
+      if (я.роль) привет(); else if (окно.classList.contains('открыто')) выборРоли();
+      return;
+    }
+    if (м.type === 'peer-joined') { пир(м.peer); привет(м.peer); return; }
+    if (м.type === 'peer-left') { ушёл(м.peer); return; }
+    if (м.type !== 'brzd' || !м.from || м.from === я.ид) return;
+    const п = пир(м.from);
+    п.связь = performance.now(); п.связьК = кадрТ;
+    if (м.k === 'p' && !п.роль && !п.спросил) { п.спросил = true; отправить(п.ид, { k: '?' }); setTimeout(() => { п.спросил = false; }, 3000); }
+    if (м.k === '?') { привет(п.ид); return; }
+    if (м.k === 'p') {
+      for (const к of ['x', 'z', 'y', 'угол']) if (typeof м[к] === 'number' && isFinite(м[к])) п['ц' + к] = м[к];
+      if (п.x === null) { п.x = п.цx; п.z = п.цz; п.y = п.цy; п.угол = п.цугол; }
+      п.поза = typeof м.поза === 'string' ? м.поза.slice(0, 24) : null;
+      return;
+    }
+    if (м.k === 'h') { приветОт(п, м); return; }
+    if (м.k === 'ф') { if (typeof м.н === 'number' && ФРАЗЫ[м.н]) пузырь(п, ФРАЗЫ[м.н]); return; }
+    if (м.k === 'с') { if (typeof м.счёт === 'number') { п.счёт = Math.max(0, Math.min(99, м.счёт | 0)); обновитьПанель(); if (п.роль && РОЛИ[п.роль] && п.счёт >= (РОЛИ[п.роль].нужно || 0) && РОЛИ[п.роль].нужно) совет(`${подписьПира(п)} сделал свою задачу!`, 3); } return; }
+    if (м.k === 'c') { команда(п, м); return; }
+  }
+  function пир(ид) {
+    if (!пиры.has(ид)) пиры.set(ид, { ид, роль: null, ник: '', t0: 0, шторм: false, x: null, z: 0, y: 0, угол: 0, цx: 0, цz: 0, цy: 0, цугол: 0, счёт: 0, ав: null, табл: null, связь: performance.now(), связьК: кадрТ, видели: new Set() });
+    return пиры.get(ид);
+  }
+  function ушёл(ид) {
+    const п = пиры.get(ид); if (!п) return;
+    убратьТело(п); пиры.delete(ид);
+    if (п.роль === 'шторм' && п.шторм && я.роль !== 'шторм') прятатьNPCШторма(false);
+    if (п.роль) совет(`${подписьПира(п)} ушёл из посёлка`, 2.5);
+    обновитьПанель();
+  }
+  async function приветОт(п, м) {
+    const роль = typeof м.роль === 'string' && РОЛИ[м.роль] ? м.роль : null;
+    if (!роль) return;
+    let шторм = false;
+    if (роль === 'шторм') {
+      if (typeof м.ts === 'number' && typeof м.sig === 'string' && Math.abs(Date.now() - м.ts) < СВЕЖЕСТЬ) шторм = await верна(`brzd|шторм|${п.ид}|${м.ts}`, м.sig);
+    }
+    const новый = п.роль !== роль || п.шторм !== шторм;
+    п.ник = чистыйНик(м.ник); п.t0 = +м.t0 || 0; п.счёт = Math.max(0, Math.min(99, м.счёт | 0));
+    if (новый) {
+      const былРоль = п.роль; п.роль = роль; п.шторм = шторм;
+      убратьТело(п); телоДля(п);
+      if (роль === 'шторм' && шторм) прятатьNPCШторма(true);
+      if (!былРоль) совет(роль === 'шторм' ? (шторм ? '⚡ В посёлок зашёл Шторм. Разработчик в здании.' : 'Кто-то пытался зайти Штормом. Не вышло.') : `${подписьПира(п)} зашёл в посёлок`, 3);
+    }
+    // одна роль — один человек: кто раньше зашёл, тот и играет
+    if (я.роль && я.роль === роль && !РОЛИ[роль].много && (роль !== 'шторм' || шторм) && (п.t0 < я.t0 || (п.t0 === я.t0 && п.ид < я.ид))) {
+      сброситьРоль(); выборРоли(`Роль «${РОЛИ[роль].имя}» уже занята. Выбери другую.`);
+    }
+    обновитьПанель();
+  }
+  const подписьПира = п => п.роль === 'шторм' ? (п.шторм ? '⚡ Шторм' : 'Самозванец') : п.роль === 'житель' ? (п.ник || 'Житель') : (РОЛИ[п.роль] ? РОЛИ[п.роль].имя : '…');
+
+  // ===================== РОЛЬ =====================
+  function взятьРоль(к) {
+    if (к === 'шторм' && !яШторм) return;
+    if (кемЗанята(к)) { выборРоли(`Роль «${РОЛИ[к].имя}» уже занята.`); return; }
+    сброситьРоль(true);
+    я.роль = к; я.t0 = Date.now(); я.счёт = 0;
+    const р = РОЛИ[к];
+    if (р.кот) {
+      window.__игрокСкрыт = true; window.__скоростьИгрока = 1.3;
+      const кам = window.__мир && window.__мир.кам; if (кам) { кам.высота = 1.0; кам.даль = 3.4; кам.тангаж = Math.max(кам.тангаж, 0.42); }
+      if (window.__яша) { window.__яша.я.игрок = window.__мир.поз; }
+    } else if (window.__люди3д) window.__люди3д.переодеть(р.вид);
+    if (к === 'шторм') прятатьNPCШторма(true);
+    разложить(к);
+    закрытьОкно(); панель.classList.add('видно');
+    совет(`Ты — ${к === 'житель' ? (я.ник || 'Житель') : р.имя}. ${р.задача}`, 5);
+    бип([523, 659, 784], 0.1, 0.05, 'triangle');
+    привет(); обновитьПанель();
+  }
+  function сброситьРоль(тихо) {
+    if (!я.роль) return;
+    const р = РОЛИ[я.роль];
+    if (р.кот) {
+      window.__игрокСкрыт = false; window.__скоростьИгрока = 1;
+      const кам = window.__мир && window.__мир.кам; if (кам) { кам.высота = 1.6; кам.даль = 7.5; }
+      if (window.__яша && window.__яша.я.игрок === window.__мир.поз) window.__яша.я.игрок = null;
+    } else if (window.__люди3д) window.__люди3д.переодеть(null);
+    if (я.роль === 'шторм') прятатьNPCШторма(false);
+    убратьПредметы(); я.роль = null; я.счёт = 0;
+    панель.classList.remove('видно'); силы.classList.remove('видно'); фразы.classList.remove('видно'); стрелка.classList.remove('видно'); радар.classList.remove('видно');
+    if (!тихо) обновитьПанель();
+  }
+  function выйтиИзОнлайна() {
+    сброситьРоль(); закрытьОкно();
+    if (ws) { const w = ws; ws = null; я.роль = null; w.onclose = null; w.close(); }
+    подключён = false; кн.classList.remove('в-сети');
+    for (const ид of [...пиры.keys()]) ушёл(ид);
+  }
+  function прятатьNPCШторма(да) {
+    const ш = window.__шторм && window.__шторм.персонаж; if (ш) ш.visible = !да;
+  }
+
+  // ===================== ТЕЛА ЧУЖИХ ИГРОКОВ =====================
+  function табличка(текстН, цвет, второй) {
+    const к = document.createElement('canvas'); к.width = 256; к.height = 72; const с = к.getContext('2d');
+    с.font = '800 30px system-ui, sans-serif'; const w = Math.min(248, с.measureText(текстН).width + 28);
+    с.fillStyle = 'rgba(14,10,6,0.72)'; с.beginPath(); с.roundRect ? с.roundRect(128 - w / 2, 4, w, 40, 14) : с.rect(128 - w / 2, 4, w, 40); с.fill();
+    с.fillStyle = цвет; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillText(текстН, 128, 25);
+    if (второй) { с.font = '700 15px system-ui, sans-serif'; с.fillStyle = цвет; с.fillText(второй, 128, 60); }
+    const т = new THREE.CanvasTexture(к); т.anisotropy = 4;
+    const сп = new THREE.Sprite(new THREE.SpriteMaterial({ map: т, transparent: true, depthWrite: false, sizeAttenuation: false }));
+    сп.scale.set(0.24, 0.0675, 1); сп.renderOrder = 10; return сп;
+  }
+  function телоДля(п) {
+    const р = РОЛИ[п.роль]; if (!р) return;
+    const цвет = п.роль === 'шторм' && !п.шторм ? '#C8C0B0' : р.цвет;
+    п.табл = табличка(подписьПира(п), цвет, п.роль === 'шторм' && п.шторм ? 'РАЗРАБОТЧИК' : null); сцена.add(п.табл);
+    if (р.кот) { if (window.__яша) window.__яша.я.игрок = п; return; }
+    const вид = п.роль === 'шторм' && !п.шторм ? РОЛИ.житель.вид : р.вид;
+    п.ав = window.__люди3д && window.__люди3д.аватар(вид);
+    if (!п.ав) п.ждётТела = true;
+  }
+  function убратьТело(п) {
+    if (п.ав) { window.__люди3д.убратьАватар(п.ав); п.ав = null; }
+    if (п.табл) { сцена.remove(п.табл); п.табл.material.map.dispose(); п.табл.material.dispose(); п.табл = null; }
+    if (п.пуз) { сцена.remove(п.пуз.сп); п.пуз = null; }
+    if (window.__яша && window.__яша.я.игрок === п) window.__яша.я.игрок = null;
+  }
+  function пузырь(п, т) {
+    if (п.пуз) сцена.remove(п.пуз.сп);
+    const сп = табличка('💬 ' + т, '#FFFFFF'); сп.scale.set(0.28, 0.079, 1); сцена.add(сп);
+    п.пуз = { сп, t: 3.2 };
+  }
+  const мой = { пуз: null };
+
+  // ===================== ПРЕДМЕТЫ ЗАДАЧ =====================
+  const м = (ц, доп = {}) => new THREE.MeshStandardMaterial({ color: API.цвет ? API.цвет(ц) : new THREE.Color(ц), roughness: 0.6, ...доп });
+  const ящ = (w, h, d, мат, x = 0, y = 0, z = 0) => { const о = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), мат); о.position.set(x, y, z); о.castShadow = true; return о; };
+  function qrТекстура() {
+    const к = document.createElement('canvas'); к.width = к.height = 64; const с = к.getContext('2d'); с.fillStyle = '#fff'; с.fillRect(0, 0, 64, 64); с.fillStyle = '#000';
+    for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) if (Math.random() < 0.5) с.fillRect(4 + x * 3.5, 4 + y * 3.5, 3.5, 3.5);
+    for (const [x, y] of [[4, 4], [39, 4], [4, 39]]) { с.fillRect(x, y, 21, 21); с.fillStyle = '#fff'; с.fillRect(x + 3, y + 3, 15, 15); с.fillStyle = '#000'; с.fillRect(x + 6, y + 6, 9, 9); }
+    const т = new THREE.CanvasTexture(к); т.magFilter = THREE.NearestFilter; return т;
+  }
+  const ВИДЫ = {
+    банка: () => { const г = new THREE.Group(); const б = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.38, 16), м('#8A96A0', { metalness: 0.5, roughness: 0.35 })); б.position.y = 0.19;
+      const лента = new THREE.Mesh(new THREE.CylinderGeometry(0.163, 0.163, 0.14, 16), м('#C8322A')); лента.position.y = 0.2; г.add(б, лента); return г; },
+    провод: () => { const г = new THREE.Group(); for (let i = 0; i < 4; i++) { const т = new THREE.Mesh(new THREE.TorusGeometry(0.22 - i * 0.012, 0.025, 6, 24), м(i % 2 ? '#1A1A1A' : '#D86A20')); т.rotation.x = Math.PI / 2; т.position.y = 0.04 + i * 0.045; г.add(т); } return г; },
+    посылка: () => { const г = new THREE.Group(); г.add(ящ(0.45, 0.32, 0.36, м('#C8A070'), 0, 0.16, 0), ящ(0.46, 0.06, 0.37, м('#1E5AE0'), 0, 0.2, 0), ящ(0.08, 0.33, 0.37, м('#D8C8A8'), 0, 0.165, 0)); return г; },
+    qr: () => { const г = new THREE.Group(); г.add(ящ(0.06, 1.1, 0.06, м('#5A5A5A'), 0, 0.55, 0)); const п = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), new THREE.MeshBasicMaterial({ map: qrТекстура(), side: THREE.DoubleSide })); п.position.set(0, 1.05, 0.04); г.add(п); return г; },
+    бургер: () => { const г = new THREE.Group(); г.add(ящ(0.3, 0.09, 0.3, м('#D89A48'), 0, 0.2, 0), ящ(0.32, 0.06, 0.32, м('#7A4A22'), 0, 0.13, 0), ящ(0.31, 0.025, 0.31, м('#6AA83A'), 0, 0.165, 0), ящ(0.3, 0.07, 0.3, м('#D89A48'), 0, 0.07, 0)); return г; },
+    семечки: () => { const г = new THREE.Group(); г.add(ящ(0.22, 0.32, 0.08, м('#1A1A1A'), 0, 0.16, 0), ящ(0.18, 0.1, 0.081, м('#F2D040'), 0, 0.2, 0)); return г; },
+    курица: () => { const г = new THREE.Group(); const тело = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 8), м('#F2EFE6')); тело.scale.set(1, 0.9, 1.3); тело.position.y = 0.26;
+      const гол = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), м('#F2EFE6')); гол.position.set(0, 0.45, 0.17);
+      const гр = ящ(0.02, 0.07, 0.08, м('#D02A20'), 0, 0.54, 0.17), кл = ящ(0.04, 0.03, 0.06, м('#E8A020'), 0, 0.44, 0.27);
+      const н1 = ящ(0.02, 0.14, 0.02, м('#E8A020'), -0.06, 0.07, 0), н2 = н1.clone(); н2.position.x = 0.06; тело.castShadow = true; г.add(тело, гол, гр, кл, н1, н2); return г; },
+  };
+  let предметы = [];
+  const лучМат = c => new THREE.MeshBasicMaterial({ color: new THREE.Color(c), transparent: true, opacity: 0.22, depthWrite: false, blending: THREE.AdditiveBlending });
+  // точки у дорог, в пределах посёлка; одинаковые у всех для одной роли и дня (seed)
+  function места(роль, n) {
+    let s = 0; for (const ч of роль + new Date().toDateString()) s = (s * 31 + ч.charCodeAt(0)) >>> 0;
+    const сл = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+    const дороги = (API.КАРТА.дороги || []).filter(д => д.п && д.п.length > 1);
+    const ДИ = API.КАРТА.дом_игрока, цx = ДИ ? (ДИ.о[0] + 40) / 2 : 0, цz = ДИ ? (ДИ.о[1] + 36) / 2 : 0;
+    const рез = [];
+    for (let п = 0; рез.length < n && п < 4000; п++) {
+      const д = дороги[Math.floor(сл() * дороги.length)], i = Math.floor(сл() * (д.п.length - 1)), t = сл();
+      const [ax, az] = д.п[i], [bx, bz] = д.п[i + 1], дл = Math.hypot(bx - ax, bz - az) || 1;
+      const s2 = сл() < 0.5 ? -1 : 1, отступ = 3.5 + сл() * 2;
+      const x = ax + (bx - ax) * t + (-(bz - az) / дл) * отступ * s2, z = az + (bz - az) * t + ((bx - ax) / дл) * отступ * s2;
+      if (Math.hypot(x - цx, z - цz) > 230 || Math.abs(x) > ШИР / 2 - 40 || Math.abs(z) > ГЛУБ / 2 - 40) continue;
+      if (API.вДоме(x, z, 0.8) || API.вВоде(x, z)) continue;
+      if (рез.some(р => Math.hypot(р.x - x, р.z - z) < 45)) continue;
+      рез.push({ x, z });
+    }
+    return рез;
+  }
+  function разложить(роль) {
+    убратьПредметы();
+    const р = РОЛИ[роль]; if (!р.предмет) return;
+    for (const т of места(роль, р.нужно)) {
+      const гр = new THREE.Group(); гр.position.set(т.x, В(т.x, т.z), т.z);
+      const тело = ВИДЫ[р.предмет](); гр.add(тело);
+      const луч = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 40, 10, 1, true), лучМат(р.цвет)); луч.position.y = 20; гр.add(луч);
+      сцена.add(гр);
+      предметы.push({ гр, тело, луч, x: т.x, z: т.z, взят: false, бег: р.предмет === 'курица', фаза: Math.random() * 6 });
+    }
+    обновитьПанель();
+  }
+  function убратьПредметы() { for (const п of предметы) сцена.remove(п.гр); предметы = []; }
+  function взял(п) {
+    п.взят = true; сцена.remove(п.гр);
+    я.счёт++; всем({ k: 'с', счёт: я.счёт });
+    const р = РОЛИ[я.роль];
+    бип([660, 880], 0.08, 0.05, 'triangle');
+    if (я.счёт >= р.нужно) {
+      совет(`Задача выполнена! ${р.подпись}: ${я.счёт}/${р.нужно}`, 4); бип([523, 659, 784, 1047], 0.12, 0.06, 'triangle');
+      window.__особые && window.__особые.салют && window.__особые.салют();
+    } else совет(`${р.подпись}: ${я.счёт}/${р.нужно}`, 2);
+    обновитьПанель();
+  }
+
+  // ===================== ПАНЕЛЬ =====================
+  function всеГотовы() {
+    const кто = [я.роль ? { роль: я.роль, счёт: я.счёт } : null, ...[...пиры.values()].filter(п => п.роль)].filter(Boolean).filter(п => РОЛИ[п.роль].нужно);
+    return кто.length > 0 && кто.every(п => п.счёт >= РОЛИ[п.роль].нужно);
+  }
+  function обновитьПанель() {
+    if (!я.роль) return;
+    const р = РОЛИ[я.роль];
+    панель.innerHTML = '';
+    const имя = я.роль === 'житель' ? (я.ник || 'Житель') : р.имя;
+    панель.append(эл('div', { class: 'кто', style: `color:${р.цвет}` }, (я.роль === 'шторм' ? '⚡ ' : '') + имя + (я.роль === 'шторм' ? ' · dev' : '')));
+    if (р.нужно) {
+      панель.append(эл('div', {}, `${р.подпись}: ${Math.min(я.счёт, р.нужно)}/${р.нужно}`));
+      const пол = эл('div', { class: 'полоса' }, эл('i', { style: `width:${Math.min(100, я.счёт / р.нужно * 100)}%` })); панель.append(пол);
+    }
+    // общий прогресс
+    const все = [я.роль ? { роль: я.роль, счёт: я.счёт, имя } : null, ...[...пиры.values()].filter(п => п.роль).map(п => ({ роль: п.роль, счёт: п.счёт, имя: подписьПира(п) }))].filter(Boolean);
+    const сЗадачей = все.filter(п => РОЛИ[п.роль].нужно);
+    const общий = сЗадачей.length ? сЗадачей.reduce((s, п) => s + Math.min(1, п.счёт / РОЛИ[п.роль].нужно), 0) / сЗадачей.length : 0;
+    панель.append(эл('div', { style: 'font-size:11px;margin-top:2px' }, `Посёлок: ${Math.round(общий * 100)}%`), эл('div', { class: 'полоса' }, эл('i', { style: `width:${общий * 100}%;background:#F4C430` })));
+    const сп = эл('div', { class: 'список' });
+    for (const п of все) { const рр = РОЛИ[п.роль]; сп.append(эл('div', {}, `${п.имя}${рр.нужно ? ` — ${Math.min(п.счёт, рр.нужно)}/${рр.нужно}${п.счёт >= рр.нужно ? ' ✓' : ''}` : ''}`)); }
+    панель.append(сп);
+    const ряд = эл('div', { class: 'ряд' });
+    ряд.append(эл('button', { class: 'кн2', onclick: () => фразы.classList.toggle('видно'), 'aria-label': 'Фразы' }, '💬'), эл('button', { class: 'кн2', onclick: () => выборРоли() }, 'Роли'));
+    if (я.роль !== 'шторм') панель.append(ряд);
+    if (я.роль === 'шторм') {
+      const сб = (знак, подпись, имя, доп = '') => эл('button', { class: доп, onclick: () => имя === 'фразы' ? фразы.classList.toggle('видно') : сила(имя), 'aria-label': подпись }, эл('b', {}, знак), подпись);
+      силы.innerHTML = '';
+      силы.append(сб(ночь ? '☀' : '🔥', ночь ? 'Небо' : 'Конец света', 'ночь'), сб('🚽', 'Салют', 'салют'), сб('📣', 'Ко мне', 'сбор'), сб('💬', 'Фразы', 'фразы'));
+      const пуск = сб('🚀', 'ЗАПУСК', 'запуск', 'пуск');
+      if (!всеГотовы()) { пуск.disabled = true; пуск.title = 'Сначала все должны сделать свои задачи'; }
+      силы.append(пуск); силы.classList.add('видно');
+    } else if (всеГотовы()) панель.append(эл('div', { style: 'font-size:11px;color:#F4C430;margin-top:6px' }, [...пиры.values()].some(п => п.роль === 'шторм' && п.шторм) ? 'Все задачи сделаны! Шторм готовит запуск…' : 'Все задачи сделаны! Ждём Шторма — запуск за ним.'));
+  }
+  фразы.append(...ФРАЗЫ.map((т, i) => эл('button', { onclick: () => { всем({ k: 'ф', н: i }); пузырь(мой, т); фразы.classList.remove('видно'); } }, т)));
+
+  // ===================== СИЛЫ ШТОРМА =====================
+  const виденныеКоманды = new Set();
+  async function сила(имя) {
+    if (я.роль !== 'шторм' || !пара) return;
+    if (имя === 'запуск' && !всеГотовы()) return;
+    const ts = Date.now(), sig = await подписать(`brzd|c|${имя}|${ts}|${я.ид}`);
+    всем({ k: 'c', cmd: имя, ts, sig });
+    выполнить(имя, { x: window.__мир.поз.x, z: window.__мир.поз.z }, true);
+  }
+  async function команда(п, м) {
+    if (typeof м.cmd !== 'string' || typeof м.ts !== 'number' || typeof м.sig !== 'string') return;
+    if (Math.abs(Date.now() - м.ts) > СВЕЖЕСТЬ || виденныеКоманды.has(м.sig)) return;
+    if (!await верна(`brzd|c|${м.cmd}|${м.ts}|${п.ид}`, м.sig)) return;
+    виденныеКоманды.add(м.sig);
+    выполнить(м.cmd, { x: п.x, z: п.z }, false);
+  }
+  function выполнить(имя, где, сам) {
+    if (имя === 'ночь') { ночь = !ночь; window.__кино && window.__кино.небо && window.__кино.небо(ночь ? 1.2 : 0); совет(ночь ? '⚡ Шторм включил конец света.' : '⚡ Шторм вернул нормальное небо.', 3); обновитьПанель(); }
+    else if (имя === 'салют') { window.__особые && window.__особые.салют && window.__особые.салют(); совет('⚡ Шторм запустил сортир. Смотри в небо.', 3); }
+    else if (имя === 'сбор') {
+      if (сам) { совет('Всех зовёшь к себе.', 2); return; }
+      if (где.x === null || document.body.classList.contains('кино')) return;
+      const поз = window.__мир.поз;
+      for (let k = 0; k < 12; k++) { const а = Math.random() * 6.28, r = 2 + Math.random() * 3, x = где.x + Math.sin(а) * r, z = где.z + Math.cos(а) * r; if (!API.вДоме(x, z, 0.5) && !API.вВоде(x, z)) { поз.x = x; поз.z = z; break; } }
+      совет('⚡ Шторм позвал всех к себе. Телепорт.', 3); бип([300, 600, 1200], 0.06, 0.05, 'sine');
+    } else if (имя === 'запуск') {
+      совет('⚡ ВСЕ ЗАДАЧИ СДЕЛАНЫ. ШТОРМ ЗАПУСКАЕТ ПОСЁЛОК В КОСМОС.', 4);
+      const ш = window.__шторм;
+      if (ш && ш.войти && ш.вКосмос) setTimeout(() => { if (!ш.ст.внутри) ш.войти(); setTimeout(() => ш.вКосмос(), 1200); }, 1500);
+    }
+  }
+
+  // ===================== КЛЮЧ ШТОРМА (?shtorm) =====================
+  async function окноКлюча() {
+    окно.innerHTML = '';
+    const лист = эл('div', { class: 'лист' }); окно.append(лист); окно.classList.add('открыто');
+    лист.append(эл('h2', {}, '⚡ КЛЮЧ ШТОРМА'));
+    const пп = await мойКлюч();
+    if (!пп) {
+      лист.append(эл('p', { class: 'мел' }, 'На этом телефоне ключа ещё нет. Создай его один раз: закрытая часть останется только здесь и наружу не выдаётся. Открытую часть отправь Claude — её впишут в игру.'),
+        эл('div', { class: 'низ' }, эл('button', { class: 'кн2', onclick: async () => { try { пара = await новыйКлюч(); } catch (e) { лист.append(эл('p', { class: 'мел' }, 'Не получилось: ' + e.message)); return; } окноКлюча(); } }, 'Создать ключ'), эл('button', { class: 'кн2', onclick: закрытьОкно }, 'Закрыть')));
+      return;
+    }
+    const пуб = await открытый(пп);
+    const совпал = пуб === ШТОРМ_КЛЮЧ;
+    лист.append(эл('p', { class: 'мел' }, совпал ? '✓ Ключ вписан в игру. Этот телефон — Шторм. Жми «👥 ОНЛАЙН» и бери роль.' : 'Ключ создан. Отправь Claude эту строку (это открытая часть, её можно показывать):'),
+      эл('code', {}, пуб));
+    const копи = эл('button', { class: 'кн2', onclick: async () => { try { await navigator.clipboard.writeText(пуб); копи.textContent = 'Скопировано ✓'; } catch (e) { копи.textContent = 'Выдели строку и скопируй'; } } }, 'Скопировать');
+    лист.append(эл('div', { class: 'низ' }, копи, эл('button', { class: 'кн2', onclick: закрытьОкно }, 'Закрыть')),
+      эл('p', { class: 'мел', style: 'margin-top:10px' }, 'Если очистишь данные сайта в браузере, ключ пропадёт — тогда создашь новый и пришлёшь ещё раз.'));
+  }
+
+  // ===================== КАДР =====================
+  let былоГотово = false, кадрТ = 0;
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt) return;
+    // отправка своей позиции ~8 раз в секунду
+    if (подключён && я.роль) {
+      таймПоз -= dt; таймПривет -= dt;
+      if (таймПоз <= 0) {
+        таймПоз = 0.125;
+        const y = window.__игрокY !== undefined ? window.__игрокY : В(поз.x, поз.z);
+        всем({ k: 'p', x: +поз.x.toFixed(2), z: +поз.z.toFixed(2), y: +y.toFixed(2), угол: +поз.угол.toFixed(3), поза: window.__игрокПоза || null });
+      }
+      if (таймПривет <= 0) { таймПривет = 4; привет(); }
+    }
+    // чужие игроки: плавно к последней точке
+    const сейчас = performance.now(); кадрТ += Math.min(dt, 0.25);
+    for (const п of пиры.values()) {
+      if (п.x === null) continue;
+      if (кадрТ - п.связьК > 20) { ушёл(п.ид); continue; }
+      const k = Math.min(1, dt * 10), пx = п.x, пz = п.z;
+      п.x += (п.цx - п.x) * k; п.z += (п.цz - п.z) * k; п.y += (п.цy - п.y) * k;
+      if (Math.hypot(п.цx - п.x, п.цz - п.z) > 25) { п.x = п.цx; п.z = п.цz; }   // телепорт
+      let dа = п.цугол - п.угол; dа = Math.atan2(Math.sin(dа), Math.cos(dа)); п.угол += dа * k;
+      const ск = Math.hypot(п.x - пx, п.z - пz) / dt; п.ск = (п.ск || 0) + (ск - (п.ск || 0)) * Math.min(1, dt * 6);
+      if (п.ждётТела && window.__люди3д && window.__люди3д.готово()) { п.ждётТела = false; const р = РОЛИ[п.роль]; п.ав = window.__люди3д.аватар(п.роль === 'шторм' && !п.шторм ? РОЛИ.житель.вид : р.вид); }
+      if (п.ав) {
+        const к = п.ав.корень; к.visible = true; к.position.set(п.x, п.y, п.z); к.rotation.y = п.угол;
+        п.ав.анимация = п.поза || (п.ск > 4.5 ? 'Sprint_Loop' : п.ск > 0.4 ? 'Walk_Loop' : 'Idle_Loop'); п.ав.темп = п.ав.анимация === 'Walk_Loop' ? Math.min(1.4, Math.max(0.7, п.ск / 2.2)) : 1;
+      }
+      const кот = РОЛИ[п.роль] && РОЛИ[п.роль].кот;
+      if (п.табл) п.табл.position.set(п.x, п.y + (кот ? 1.0 : 2.15), п.z);
+      if (п.пуз) { п.пуз.t -= dt; п.пуз.сп.position.set(п.x, п.y + (кот ? 1.25 : 2.45), п.z); if (п.пуз.t <= 0) { сцена.remove(п.пуз.сп); п.пуз = null; } }
+    }
+    if (мой.пуз) { мой.пуз.t -= dt; мой.пуз.сп.position.set(поз.x, (window.__игрокY !== undefined ? window.__игрокY : В(поз.x, поз.z)) + (я.роль === 'яша' ? 1.25 : 2.45), поз.z); if (мой.пуз.t <= 0) { сцена.remove(мой.пуз.сп); мой.пуз = null; } }
+    // свои предметы: крутятся, куры убегают от кота
+    if (я.роль && предметы.length) {
+      let ближ = null, бд = 1e9;
+      for (const п of предметы) {
+        if (п.взят) continue;
+        п.фаза += dt;
+        const d = Math.hypot(п.x - поз.x, п.z - поз.z);
+        if (п.бег) {
+          if (d < 7) { const а = Math.atan2(п.x - поз.x, п.z - поз.z) + Math.sin(п.фаза * 3) * 0.6, nx = п.x + Math.sin(а) * 4.2 * dt, nz = п.z + Math.cos(а) * 4.2 * dt;
+            if (!API.вДоме(nx, nz, 0.3) && !API.вВоде(nx, nz)) { п.x = nx; п.z = nz; } п.тело.rotation.y = а; п.тело.position.y = Math.abs(Math.sin(п.фаза * 14)) * 0.08; }
+          else { п.тело.position.y = 0; п.тело.rotation.y += Math.sin(п.фаза) * dt; }
+          п.гр.position.set(п.x, В(п.x, п.z), п.z);
+        } else { п.тело.rotation.y += dt * 1.2; п.тело.position.y = 0.15 + Math.sin(п.фаза * 2.5) * 0.08; }
+        п.луч.material.opacity = d < 12 ? 0.08 : 0.22;
+        if (d < (п.бег ? 1.0 : 1.7) && !document.body.classList.contains('кино')) { взял(п); continue; }
+        if (d < бд) { бд = d; ближ = п; }
+      }
+      // стрелка к ближайшему
+      if (ближ && !document.body.classList.contains('кабина')) {
+        const кам = window.__мир.кам, взгляд = Math.atan2(поз.x - API.камера.position.x, поз.z - API.камера.position.z);
+        const к = Math.atan2(ближ.x - поз.x, ближ.z - поз.z) - взгляд;
+        стрелка.innerHTML = `<span class="ст" style="transform:rotate(${(-к * 180 / Math.PI).toFixed(0)}deg);color:${РОЛИ[я.роль].цвет}">⬆</span><br>${Math.round(бд)} м`;
+        стрелка.classList.add('видно'); void кам;
+      } else стрелка.classList.remove('видно');
+    } else стрелка.classList.remove('видно');
+    // радар Шторма: все на одной карте
+    if (я.роль === 'шторм') {
+      радар.classList.add('видно');
+      const с = радар.getContext('2d'), R = 120, М = 0.4;      // 1 px = 2.5 м
+      с.clearRect(0, 0, 240, 240); с.strokeStyle = 'rgba(244,196,48,0.35)'; for (const r of [40, 80, 118]) { с.beginPath(); с.arc(R, R, r, 0, 6.29); с.stroke(); }
+      const вз = Math.atan2(поз.x - API.камера.position.x, поз.z - API.камера.position.z);
+      const точка = (x, z, цв, р) => { const dx = x - поз.x, dz = z - поз.z, cs = Math.cos(-вз), sn = Math.sin(-вз); let px = (dx * cs - dz * sn) * М, pz = (dx * sn + dz * cs) * М; const L = Math.hypot(px, pz); if (L > 112) { px *= 112 / L; pz *= 112 / L; } с.fillStyle = цв; с.beginPath(); с.arc(R - px, R - pz, р, 0, 6.29); с.fill(); };
+      for (const п of пиры.values()) if (п.роль && п.x !== null) точка(п.x, п.z, РОЛИ[п.роль].цвет, 6);
+      с.fillStyle = '#F4C430'; с.beginPath(); с.moveTo(R, R - 9); с.lineTo(R - 6, R + 6); с.lineTo(R + 6, R + 6); с.fill();
+    }
+    if (я.роль === 'шторм') { const г = всеГотовы(); if (г !== былоГотово) { былоГотово = г; обновитьПанель(); } }   // кнопка запуска оживает, когда все готовы
+  });
+  window.__онлайн = { я, пиры, РОЛИ, взятьРоль, выборРоли, сила, разложить, обновитьПанель, предметы: () => предметы };
 }]);
 
 </script>
@@ -11412,7 +12037,7 @@ function шаг(dt) {
     const мх = -вx * Math.cos(уголКам) + (-вy) * Math.sin(уголКам);
     const мz = вx * Math.sin(уголКам) + (-вy) * Math.cos(уголКам);
     const н = Math.hypot(мх, мz) || 1;
-    const скорость = сила > 0.8 || клавиши.has('ShiftLeft') ? 6.2 : 2.6 * (0.5 + сила);
+    const скорость = (сила > 0.8 || клавиши.has('ShiftLeft') ? 6.2 : 2.6 * (0.5 + сила)) * (window.__скоростьИгрока || 1);
     let nx = поз.x + мх / н * скорость * dt, nz = поз.z + мz / н * скорость * dt;
     // сквозь дома и в пруд не пускаем; по одной оси проскальзываем вдоль стены
     const нельзя = (x, z) => вДоме(x, z, 0.35) || вВоде(x, z);
@@ -11442,14 +12067,14 @@ function камераШаг(dt) {
     цельКамеры.set(поз.x, y, поз.z);
     глазКамеры.set(поз.x + Math.sin(кам.рыск) * 60, y + 150, поз.z + Math.cos(кам.рыск) * 60);
   } else {
-    цельКамеры.set(поз.x, y + 1.6, поз.z);
+    цельКамеры.set(поз.x, y + (кам.высота || 1.6), поз.z);
     const г = кам.даль * Math.cos(кам.тангаж);
-    глазКамеры.set(поз.x + Math.sin(кам.рыск) * г, y + 1.6 + кам.даль * Math.sin(кам.тангаж), поз.z + Math.cos(кам.рыск) * г);
+    глазКамеры.set(поз.x + Math.sin(кам.рыск) * г, y + (кам.высота || 1.6) + кам.даль * Math.sin(кам.тангаж), поз.z + Math.cos(кам.рыск) * г);
     // Камера не заходит в дома: если сзади стена — подъезжаем ближе.
     // Иначе в тесном дворе вместо посёлка был виден изнанка крыши.
     for (let д = кам.даль; д > 1.4 && вДоме(глазКамеры.x, глазКамеры.z, 0.6); д -= 0.5) {
       const г2 = д * Math.cos(кам.тангаж);
-      глазКамеры.set(поз.x + Math.sin(кам.рыск) * г2, y + 1.6 + д * Math.sin(кам.тангаж), поз.z + Math.cos(кам.рыск) * г2);
+      глазКамеры.set(поз.x + Math.sin(кам.рыск) * г2, y + (кам.высота || 1.6) + д * Math.sin(кам.тангаж), поз.z + Math.cos(кам.рыск) * г2);
     }
     глазКамеры.y = Math.max(глазКамеры.y, землиВысота(глазКамеры.x, глазКамеры.z) + 0.8);
     // взгляд вверх: камера у плеча, точка взгляда поднимается — игрок остаётся внизу кадра, а не пропадает
