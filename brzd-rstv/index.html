@@ -9511,9 +9511,15 @@ window.ДЕТАЛИ.push(['настройки', function () {
 window.ДЕТАЛИ.push(['онлайн', function (API) {
   const { сцена, землиВысота: В, ШИР, ГЛУБ } = API;
   const ШТОРМ_КЛЮЧ = '';                       // открытый ключ Шторма (base64, 65 байт raw P-256); пусто — роль закрыта
-  const КОМНАТА = 'brzd-rstv-1';
+  // комнаты: общая (все подряд) или своя по коду — код можно скинуть ссылкой ?room=КОД
+  const ОБЩАЯ = 'ОБЩАЯ';
+  const кодКомнаты = к => String(к || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+  const новыйКод = () => Array.from({ length: 4 }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('');
   const вЛокалке = /^(localhost|127\.0\.0\.1)$/.test(location.hostname);
   const qs = new URLSearchParams(location.search);
+  let комната = кодКомнаты(qs.get('room')) || ОБЩАЯ;
+  const адресКомнаты = () => 'brzd-rstv-' + (комната === ОБЩАЯ ? '1' : комната);
+  if (комната !== ОБЩАЯ) setTimeout(() => window.__подсказки && window.__подсказки.совет(`Тебя позвали в комнату ${комната}. Жми «👥 ОНЛАЙН».`, 6), 4000);
   const АДРЕС = вЛокалке && qs.get('ws') ? qs.get('ws') : 'wss://voidm.site/signal';
   const хран = { взять: к => { try { return localStorage.getItem(к); } catch (e) { return null; } }, положить: (к, з) => { try { localStorage.setItem(к, з); } catch (e) {} } };
 
@@ -9686,6 +9692,14 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       сетка.append(б);
     }
     лист.append(сетка);
+    // комната
+    const код = эл('input', { placeholder: 'Код комнаты', maxlength: '6', 'aria-label': 'Код комнаты', style: 'flex:0 1 120px;text-transform:uppercase' });
+    const ссылка = эл('button', { class: 'кн2', onclick: async () => { const u = location.origin + location.pathname + '?room=' + комната; try { await navigator.clipboard.writeText(u); ссылка.textContent = 'Скопировано ✓'; } catch (e) { ссылка.textContent = u; } } }, 'Ссылка');
+    const строкаК = эл('div', { class: 'низ' }, эл('span', { style: 'color:#B8AC94;font-size:12px' }, 'Комната: '), эл('b', { style: 'color:#F4C430;letter-spacing:2px' }, комната), код,
+      эл('button', { class: 'кн2', onclick: () => { const к = кодКомнаты(код.value); if (к) сменитьКомнату(к); } }, 'Войти'),
+      эл('button', { class: 'кн2', onclick: () => сменитьКомнату(новыйКод()) }, 'Новая'));
+    if (комната !== ОБЩАЯ) строкаК.append(ссылка, эл('button', { class: 'кн2', onclick: () => сменитьКомнату(ОБЩАЯ) }, 'В общую'));
+    лист.append(строкаК);
     const ник = эл('input', { placeholder: 'Ник для «Жителя» (необязательно)', maxlength: '14', 'aria-label': 'Ник' }); ник.value = я.ник;
     ник.addEventListener('change', () => { я.ник = чистыйНик(ник.value); ник.value = я.ник; хран.положить('brzd-nik', я.ник); });
     const низ = эл('div', { class: 'низ' }, ник);
@@ -9706,7 +9720,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   function всем(данные) { for (const ид of пиры.keys()) отправить(ид, данные); }
   function подключиться() {
     try { ws = new WebSocket(АДРЕС); } catch (e) { выборРоли('Не получилось подключиться. Онлайн работает на voidm.site/brzd-rstv.'); return; }
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'join', room: КОМНАТА, peer: я.ид }));
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'join', room: адресКомнаты(), peer: я.ид }));
     ws.onmessage = e => { let м; try { м = JSON.parse(e.data); } catch (_) { return; } приём(м); };
     ws.onclose = () => {
       const был = подключён; подключён = false; кн.classList.remove('в-сети');
@@ -9811,6 +9825,16 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     убратьПредметы(); я.роль = null; я.счёт = 0;
     панель.classList.remove('видно'); силы.classList.remove('видно'); фразы.classList.remove('видно'); стрелка.classList.remove('видно'); радар.classList.remove('видно');
     if (!тихо) обновитьПанель();
+  }
+  function сменитьКомнату(к) {
+    if (к === комната) return;
+    сброситьРоль();
+    if (ws) { const w = ws; ws = null; w.onclose = null; w.close(); }
+    подключён = false; кн.classList.remove('в-сети');
+    for (const ид of [...пиры.keys()]) ушёл(ид);
+    комната = к;
+    try { history.replaceState(null, '', location.pathname + (к === ОБЩАЯ ? '' : '?room=' + к)); } catch (e) {}
+    подключиться(); выборРоли(к === ОБЩАЯ ? 'Ты в общей комнате.' : `Комната ${к}. Скинь друзьям ссылку или код.`);
   }
   function выйтиИзОнлайна() {
     сброситьРоль(); закрытьОкно();
@@ -9933,6 +9957,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     const р = РОЛИ[я.роль];
     панель.innerHTML = '';
     const имя = я.роль === 'житель' ? (я.ник || 'Житель') : р.имя;
+    панель.append(эл('div', { style: 'font-size:10px;color:#B8AC94;letter-spacing:1px' }, 'КОМНАТА ' + комната));
     панель.append(эл('div', { class: 'кто', style: `color:${р.цвет}` }, (я.роль === 'шторм' ? '⚡ ' : '') + имя + (я.роль === 'шторм' ? ' · dev' : '')));
     if (р.нужно) {
       панель.append(эл('div', {}, `${р.подпись}: ${Math.min(я.счёт, р.нужно)}/${р.нужно}`));
