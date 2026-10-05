@@ -10037,6 +10037,64 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   const радар = эл('canvas', { id: 'онлРадар', width: 240, height: 240 });
   const силы = эл('div', { id: 'онлСилы', class: 'онл' });
   document.body.append(кн, окно, панель, фразы, стрелка, радар, силы);
+
+  // ===================== ИНСТРУМЕНТЫ ШТОРМА (полёт, невидимость, призыв, небо) =====================
+  const стильИнстр = document.createElement('style');
+  стильИнстр.textContent = `
+    #штормИнстр { position: fixed; left: calc(10px + env(safe-area-inset-left, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); z-index: 8; display: none;
+                  flex-direction: column; gap: 6px; width: 190px; background: rgba(18,12,8,0.78); border: 1px solid rgba(244,196,48,0.35); border-radius: 12px; padding: 8px; }
+    #штормИнстр.видно { display: flex; }
+    #штормИнстр .ряд2 { display: flex; gap: 6px; }
+    #штормИнстр button, #штормИнстр select, #штормИнстр input[type=color] { height: 30px; border-radius: 8px; border: 1px solid rgba(242,230,204,0.3); background: #2A2018; color: #F2E6CC; font: 11px system-ui, sans-serif; }
+    #штормИнстр button { cursor: pointer; flex: 1; }
+    #штормИнстр button[aria-pressed="true"] { border-color: #F4C430; color: #F4E0A0; }
+    #штормИнстр select { flex: 1; }
+    #штормИнстр input[type=color] { width: 36px; padding: 0; cursor: pointer; }
+    #полётВВ, #полётВН { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); z-index: 8; width: 48px; height: 48px; border-radius: 50%;
+                          border: 1px solid #F4C430; background: rgba(30,22,6,0.82); color: #F4E0A0; font-size: 20px; display: none; align-items: center; justify-content: center; }
+    #полётВВ.видно, #полётВН.видно { display: flex; }
+    #полётВВ { bottom: calc(180px + env(safe-area-inset-bottom, 0px)); }
+    #полётВН { bottom: calc(126px + env(safe-area-inset-bottom, 0px)); }
+    body.кино #штормИнстр, body.кино #полётВВ, body.кино #полётВН { opacity: 0; pointer-events: none; }
+  `;
+  document.head.appendChild(стильИнстр);
+
+  const СУЩЕСТВА = { muzhik: 'Мужик', ded: 'Дед', zhenshchina: 'Женщина', paren: 'Парень', rebyonok: 'Ребёнок', babushka1: 'Бабушка', babushka2: 'Бабушка 2',
+    bogdan: 'Богдан', yarik: 'Ярик', vanya: 'Ваня', lyuba: 'Люба', egor: 'Егор', shtorm: 'Шторм', igrok: 'Игрок' };
+
+  const кнПолёт = эл('button', { 'aria-pressed': 'false', onclick: () => переключитьПолёт() }, '✈️ Полёт');
+  const кнНев = эл('button', { 'aria-pressed': 'false', onclick: () => переключитьНевидимость() }, '👻 Невидимость');
+  const селСущество = эл('select', {}, ...Object.entries(СУЩЕСТВА).map(([k, н]) => эл('option', { value: k }, н)));
+  const кнПризвать = эл('button', { onclick: () => сила('призвать', { вид: селСущество.value }) }, '🧬 Призвать');
+  const инпЦвет = эл('input', { type: 'color', value: '#ffffff' });
+  const кнНебо = эл('button', { onclick: () => сила('небо-цвет', { hex: инпЦвет.value }) }, '🎨 Применить');
+  const инстр = эл('div', { id: 'штормИнстр', class: 'онл' },
+    эл('div', { class: 'ряд2' }, кнПолёт, кнНев),
+    эл('div', { class: 'ряд2' }, селСущество, кнПризвать),
+    эл('div', { class: 'ряд2' }, инпЦвет, кнНебо));
+  const полётВВ = эл('button', { id: 'полётВВ', 'aria-label': 'Вверх' }, '⬆');
+  const полётВН = эл('button', { id: 'полётВН', 'aria-label': 'Вниз' }, '⬇');
+  const держать = (эл2, знак) => {
+    const старт = () => { window.__полётУпр = знак; };
+    const стоп = () => { if (window.__полётУпр === знак) window.__полётУпр = 0; };
+    эл2.addEventListener('pointerdown', старт); эл2.addEventListener('pointerup', стоп); эл2.addEventListener('pointercancel', стоп); эл2.addEventListener('pointerleave', стоп);
+  };
+  держать(полётВВ, 1); держать(полётВН, -1);
+  document.body.append(инстр, полётВВ, полётВН);
+
+  function переключитьПолёт() {
+    window.__полёт = !window.__полёт;
+    кнПолёт.setAttribute('aria-pressed', String(window.__полёт));
+    полётВВ.classList.toggle('видно', window.__полёт); полётВН.classList.toggle('видно', window.__полёт);
+    if (!window.__полёт) window.__полётУпр = 0;
+  }
+  function переключитьНевидимость() {
+    я.невидим = !я.невидим;
+    window.__игрокСкрыт = я.невидим;
+    кнНев.setAttribute('aria-pressed', String(я.невидим));
+    совет(я.невидим ? '👻 Ты невидим для остальных.' : '👻 Снова виден.', 2.5);
+  }
+
   const совет = (т, с = 3.5) => window.__подсказки && window.__подсказки.совет(т, с);
   // звук
   let аудио = null;
@@ -10166,6 +10224,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       for (const к of ['x', 'z', 'y', 'угол']) if (typeof м[к] === 'number' && isFinite(м[к])) п['ц' + к] = м[к];
       if (п.x === null) { п.x = п.цx; п.z = п.цz; п.y = п.цy; п.угол = п.цугол; }
       п.поза = typeof м.поза === 'string' && /^[A-Za-z_]{1,32}$/.test(м.поза) ? м.поза : null;
+      п.невидим = !!м.нв;
       return;
     }
     if (м.k === 'h') { приветОт(п, м); return; }
@@ -10241,13 +10300,16 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     } else if (window.__люди3д) window.__люди3д.переодеть(р.вид);
     обновитьNPCШторма();
     разложить(к);
-    закрытьОкно(); панель.classList.add('видно');
+    закрытьОкно(); панель.classList.add('видно'); инстр.classList.toggle('видно', к === 'шторм');
     совет(`Ты — ${к === 'житель' ? (я.ник || 'Житель') : р.имя}. ${р.задача}`, 5);
     бип([523, 659, 784], 0.1, 0.05, 'triangle');
     привет(); обновитьПанель();
   }
   function сброситьРоль(тихо) {
     if (!я.роль) return;
+    window.__полёт = false; window.__полётУпр = 0; полётВВ.classList.remove('видно'); полётВН.classList.remove('видно'); кнПолёт.setAttribute('aria-pressed', 'false');
+    я.невидим = false; window.__игрокСкрыт = false; кнНев.setAttribute('aria-pressed', 'false');
+    инстр.classList.remove('видно');
     const р = РОЛИ[я.роль];
     if (р.кот) {
       window.__игрокСкрыт = false; window.__скоростьИгрока = 1;
@@ -10429,25 +10491,46 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   фразы.append(...ФРАЗЫ.map((т, i) => эл('button', { onclick: () => { всем({ k: 'ф', н: i }); пузырь(мой, т); фразы.classList.remove('видно'); } }, т)));
 
   // ===================== СИЛЫ ШТОРМА =====================
-  async function сила(имя) {
+  async function сила(имя, доп) {
     if (я.роль !== 'шторм' || !пара) return;
     if (имя === 'запуск' && !всеГотовы()) return;
     if (имя === 'осадить' && !(window.__никита && window.__никита.активен())) return;
     if (имя === 'ночь') имя = ночь ? 'ночь0' : 'ночь1';
     const ts = Math.max(Date.now(), (последКоманда.get(я.ид) || 0) + 1); последКоманда.set(я.ид, ts);
-    const sig = await подписать(`brzd|c|${адресКомнаты()}|${я.ид}|${имя}|${ts}`);
-    всем({ k: 'c', cmd: имя, ts, sig });
-    выполнить(имя, { x: window.__мир.поз.x, z: window.__мир.поз.z }, true);
+    const пэйлоуд = доп ? JSON.stringify(доп) : '';
+    const sig = await подписать(`brzd|c|${адресКомнаты()}|${я.ид}|${имя}|${пэйлоуд}|${ts}`);
+    всем({ k: 'c', cmd: имя, доп: пэйлоуд || undefined, ts, sig });
+    выполнить(имя, { x: window.__мир.поз.x, z: window.__мир.поз.z }, true, доп);
   }
   async function команда(п, м) {
-    if (!['ночь0', 'ночь1', 'салют', 'сбор', 'запуск', 'осадить'].includes(м.cmd) || typeof м.ts !== 'number' || typeof м.sig !== 'string') return;
+    if (!['ночь0', 'ночь1', 'салют', 'сбор', 'запуск', 'осадить', 'призвать', 'небо-цвет'].includes(м.cmd) || typeof м.ts !== 'number' || typeof м.sig !== 'string') return;
     if (Math.abs(Date.now() - м.ts) > СВЕЖЕСТЬ || м.ts <= (последКоманда.get(п.ид) || 0)) return;   // старые и повторные — мимо
-    if (!await верна(`brzd|c|${адресКомнаты()}|${п.ид}|${м.cmd}|${м.ts}`, м.sig)) return;
+    const пэйлоуд = typeof м.доп === 'string' ? м.доп : '';
+    if (!await верна(`brzd|c|${адресКомнаты()}|${п.ид}|${м.cmd}|${пэйлоуд}|${м.ts}`, м.sig)) return;
     if (м.ts <= (последКоманда.get(п.ид) || 0)) return;
     последКоманда.set(п.ид, м.ts);
-    выполнить(м.cmd, { x: п.x, z: п.z }, false);
+    let доп; try { доп = пэйлоуд ? JSON.parse(пэйлоуд) : undefined; } catch (e) { return; }
+    выполнить(м.cmd, { x: п.x, z: п.z }, false, доп);
   }
-  function выполнить(имя, где, сам) {
+  const призванные = [];
+  function призватьСущество(где, доп) {
+    if (!доп || !доп.вид || где.x === null) return;
+    const гр = new API.THREE.Group();
+    гр.position.set(где.x, В(где.x, где.z), где.z);
+    гр.rotation.y = Math.random() * Math.PI * 2;
+    сцена.add(гр);
+    (window.__герои3д = window.__герои3д || []).push({ группа: гр, мх: доп.вид, аним: () => 'Idle_Loop' });
+    призванные.push(гр);
+    if (призванные.length > 16) { const старый = призванные.shift(); сцена.remove(старый); }
+    совет('⚡ Шторм призвал: ' + (СУЩЕСТВА[доп.вид] || доп.вид), 3);
+  }
+  function применитьЦветНеба(hex) {
+    if (!API.небоМат || !/^#[0-9a-fA-F]{6}$/.test(hex || '')) return;
+    const c = new API.THREE.Color(hex);
+    API.небоМат.uniforms.uTint.value.set(c.r, c.g, c.b);
+    совет('⚡ Шторм перекрасил небо.', 2.5);
+  }
+  function выполнить(имя, где, сам, доп) {
     if (имя === 'ночь0' || имя === 'ночь1') { ночь = имя === 'ночь1'; window.__кино && window.__кино.небо && window.__кино.небо(ночь ? 1.2 : 0); совет(ночь ? '⚡ Шторм включил конец света.' : '⚡ Шторм вернул нормальное небо.', 3); обновитьПанель(); }
     else if (имя === 'салют') { window.__особые && window.__особые.салют && window.__особые.салют(); совет('⚡ Шторм запустил сортир. Смотри в небо.', 3); }
     else if (имя === 'сбор') {
@@ -10458,6 +10541,10 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       совет('⚡ Шторм позвал всех к себе. Телепорт.', 3); бип([300, 600, 1200], 0.06, 0.05, 'sine');
     } else if (имя === 'осадить') {
       window.__никита && window.__никита.остановить('панель');
+    } else if (имя === 'призвать') {
+      призватьСущество(где, доп);
+    } else if (имя === 'небо-цвет') {
+      применитьЦветНеба(доп && доп.hex);
     } else if (имя === 'запуск') {
       совет('⚡ ВСЕ ЗАДАЧИ СДЕЛАНЫ. ШТОРМ ЗАПУСКАЕТ ПОСЁЛОК В КОСМОС.', 4);
       const ш = window.__шторм;
@@ -10495,7 +10582,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       if (таймПоз <= 0) {
         таймПоз = 0.125;
         const y = window.__игрокY !== undefined ? window.__игрокY : В(поз.x, поз.z);
-        всем({ k: 'p', x: +поз.x.toFixed(2), z: +поз.z.toFixed(2), y: +y.toFixed(2), угол: +поз.угол.toFixed(3), поза: window.__игрокПоза || null });
+        всем({ k: 'p', x: +поз.x.toFixed(2), z: +поз.z.toFixed(2), y: +y.toFixed(2), угол: +поз.угол.toFixed(3), поза: window.__игрокПоза || null, нв: я.невидим || undefined });
       }
       if (таймПривет <= 0) { таймПривет = 4; привет(); }
     }
@@ -10511,11 +10598,11 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       const ск = Math.hypot(п.x - пx, п.z - пz) / dt; п.ск = (п.ск || 0) + (ск - (п.ск || 0)) * Math.min(1, dt * 6);
       if (п.ждётТела && window.__люди3д) { const р = РОЛИ[п.роль], вид = п.роль === 'шторм' && !п.шторм ? РОЛИ.житель.вид : р && р.вид; if (!вид) п.ждётТела = false; else { п.ав = window.__люди3д.аватар(вид); if (п.ав) п.ждётТела = false; } }
       if (п.ав) {
-        const к = п.ав.корень; к.visible = true; к.position.set(п.x, п.y, п.z); к.rotation.y = п.угол;
+        const к = п.ав.корень; к.visible = !п.невидим; к.position.set(п.x, п.y, п.z); к.rotation.y = п.угол;
         п.ав.анимация = п.поза || (п.ск > 4.5 ? 'Sprint_Loop' : п.ск > 0.4 ? 'Walk_Loop' : 'Idle_Loop'); п.ав.темп = п.ав.анимация === 'Walk_Loop' ? Math.min(1.4, Math.max(0.7, п.ск / 2.2)) : 1;
       }
       const кот = РОЛИ[п.роль] && РОЛИ[п.роль].кот;
-      if (п.табл) п.табл.position.set(п.x, п.y + (кот ? 1.0 : 2.15), п.z);
+      if (п.табл) { п.табл.visible = !п.невидим; п.табл.position.set(п.x, п.y + (кот ? 1.0 : 2.15), п.z); }
       if (п.пуз) { п.пуз.t -= dt; п.пуз.сп.position.set(п.x, п.y + (кот ? 1.25 : 2.45), п.z); if (п.пуз.t <= 0) { снятьСпрайт(п.пуз.сп); п.пуз = null; } }
     }
     if (мой.пуз) { мой.пуз.t -= dt; мой.пуз.сп.position.set(поз.x, (window.__игрокY !== undefined ? window.__игрокY : В(поз.x, поз.z)) + (я.роль === 'яша' ? 1.25 : 2.45), поз.z); if (мой.пуз.t <= 0) { снятьСпрайт(мой.пуз.сп); мой.пуз = null; } }
@@ -10705,10 +10792,10 @@ let небоМат;
 {
   небоМат = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { sunDir: { value: СОЛНЦЕ }, uApok: { value: 0 }, uFlash: { value: 0 }, uTime: { value: 0 } },   // апокалипсис 0..1.2, вспышка взрыва
+    uniforms: { sunDir: { value: СОЛНЦЕ }, uApok: { value: 0 }, uFlash: { value: 0 }, uTime: { value: 0 }, uTint: { value: new THREE.Vector3(1, 1, 1) } },   // апокалипсис 0..1.2, вспышка взрыва, uTint — ручной цвет от Шторма
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: `
-      uniform vec3 sunDir; uniform float uApok; uniform float uFlash; uniform float uTime; varying vec3 vDir;
+      uniform vec3 sunDir; uniform float uApok; uniform float uFlash; uniform float uTime; uniform vec3 uTint; varying vec3 vDir;
       float hs(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float ns(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         return mix(mix(hs(i), hs(i + vec2(1.0, 0.0)), f.x), mix(hs(i + vec2(0.0, 1.0)), hs(i + vec2(1.0, 1.0)), f.x), f.y); }
@@ -10737,7 +10824,7 @@ let небоМат;
         }
         if (vDir.y < 0.0) col = mix(hor, vec3(0.35,0.24,0.16), smoothstep(0.0,-0.1,vDir.y));
         col += vec3(1.0, 0.55, 0.2) * uFlash * (0.35 + 0.65 * smoothstep(0.3, -0.05, vDir.y));
-        gl_FragColor = vec4(col, 1.0);
+        gl_FragColor = vec4(col * uTint, 1.0);
       }`
   });
   window.__небоМеш = new THREE.Mesh(new THREE.SphereGeometry(3000, 32, 16), небоМат);   // ездит за камерой (дорога в Ростов — далеко за картой)
@@ -12495,6 +12582,8 @@ function улицаРядом(x, z) {
 
 // ===================== ХОД =====================
 const ГРАНИЦА_X = ШИР / 2 - 25, ГРАНИЦА_Z = ГЛУБ / 2 - 25;
+let летВысота = 0;
+function высотаИгрока() { return землиВысота(поз.x, поз.z) + (window.__полёт ? 3 + летВысота : 0); }
 function шаг(dt) {
   let вx = джойстик.dx, вy = джойстик.dy;
   const стоп = киноИдёт();
@@ -12519,7 +12608,7 @@ function шаг(dt) {
     const скорость = (сила > 0.8 || клавиши.has('ShiftLeft') ? 6.2 : 2.6 * (0.5 + сила)) * (window.__скоростьИгрока || 1);
     let nx = поз.x + мх / н * скорость * dt, nz = поз.z + мz / н * скорость * dt;
     // сквозь дома и в пруд не пускаем; по одной оси проскальзываем вдоль стены
-    const нельзя = (x, z) => вДоме(x, z, 0.35) || вВоде(x, z);
+    const нельзя = (x, z) => !window.__полёт && (вДоме(x, z, 0.35) || вВоде(x, z));
     // если уже стоим внутри препятствия (его поставили под нами — воронка), выпускаем в любую сторону
     if (нельзя(nx, nz) && !нельзя(поз.x, поз.z)) { if (!нельзя(nx, поз.z)) nz = поз.z; else if (!нельзя(поз.x, nz)) nx = поз.x; else { nx = поз.x; nz = поз.z; } }
     поз.x = Math.max(-ГРАНИЦА_X, Math.min(ГРАНИЦА_X, nx));
@@ -12536,13 +12625,14 @@ function шаг(dt) {
   } else поз.фаза *= 0.85;
   const качели = Math.sin(поз.фаза) * 0.7 * Math.min(1, сила * 1.5);
   части.лн.rotation.x = качели; части.пн.rotation.x = -качели; части.лр.rotation.x = -качели * 0.8; части.пр.rotation.x = качели * 0.8;
-  const y = землиВысота(поз.x, поз.z);
+  if (window.__полёт) летВысота = Math.max(0, летВысота + (window.__полётУпр || 0) * 7 * dt);
+  const y = высотаИгрока();
   игрок.position.set(поз.x, y + Math.abs(Math.sin(поз.фаза)) * 0.05, поз.z);
   игрок.rotation.y = поз.угол;
 }
 const цельКамеры = new THREE.Vector3(), глазКамеры = new THREE.Vector3();
 function камераШаг(dt) {
-  const y = землиВысота(поз.x, поз.z);
+  const y = высотаИгрока();
   if (кам.сверху) {
     цельКамеры.set(поз.x, y, поз.z);
     глазКамеры.set(поз.x + Math.sin(кам.рыск) * 60, y + 150, поз.z + Math.cos(кам.рыск) * 60);
