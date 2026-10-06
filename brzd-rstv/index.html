@@ -6571,21 +6571,25 @@ window.ДЕТАЛИ.push(['люди', function (API) {
   let режим = 'мирно';                   // мирно | паника | попрятались | смотрят
   const двериДомов = жилые.map(д => [д.дверь.x + д.дверь.нx * 0.5, д.дверь.z + д.дверь.нz * 0.5]);
   function ближайшаяДверь(x, z) { let л = null, d0 = Infinity; for (const [dx, dz] of двериДомов) { const d = Math.hypot(dx - x, dz - z); if (d < d0) { d0 = d; л = [dx, dz]; } } return л; }
+  function паника() { режим = 'паника'; for (const ч of люди) { ч.цель = ближайшаяДверь(ч.x, ч.z); ч.видно = true; } }
+  function успокоить() { режим = 'мирно'; for (const ч of люди) { ч.видно = true; if (ч.ролиИсходная !== undefined) ч.роль = ч.ролиИсходная; } }
+  function собратьФормацию() {
+    режим = 'смотрят';
+    // выходят и встают полукругом поодаль, смотрят на тебя
+    const П = window.__мир.поз; let k = 0;
+    for (const ч of люди) {
+      if (ч.ролиИсходная === undefined) ч.ролиИсходная = ч.роль;
+      ч.видно = true; ч.роль = 'смотрит';
+      const а = (k / люди.length) * 6.28 + сл(ч.k, 20), r = 9 + сл(ч.k, 21) * 14; k++;
+      let x = П.x + Math.cos(а) * r, z = П.z + Math.sin(а) * r;
+      if (API.вДоме(x, z, 0.5) || API.вВоде(x, z)) { ч.видно = false; continue; }
+      ч.x = x; ч.z = z;
+    }
+  }
   if (window.__подписка) {
     window.__подписка('сортир-взлетел', () => { if (режим === 'мирно') for (const ч of люди) ч.испуг = 2 + Math.random() * 2; });
-    window.__подписка('апокалипсис-начался', () => { режим = 'паника'; for (const ч of люди) { ч.цель = ближайшаяДверь(ч.x, ч.z); ч.видно = true; } });
-    window.__подписка('уборка-кончилась', () => setTimeout(() => {
-      режим = 'смотрят';
-      // выходят и встают полукругом поодаль, смотрят на тебя
-      const П = window.__мир.поз; let k = 0;
-      for (const ч of люди) {
-        ч.видно = true; ч.роль = 'смотрит';
-        const а = (k / люди.length) * 6.28 + сл(ч.k, 20), r = 9 + сл(ч.k, 21) * 14; k++;
-        let x = П.x + Math.cos(а) * r, z = П.z + Math.sin(а) * r;
-        if (API.вДоме(x, z, 0.5) || API.вВоде(x, z)) { ч.видно = false; continue; }
-        ч.x = x; ч.z = z;
-      }
-    }, 4000));
+    window.__подписка('апокалипсис-начался', паника);
+    window.__подписка('уборка-кончилась', () => setTimeout(собратьФормацию, 4000));
   }
   // ===================== КАДР =====================
   const м4 = new THREE.Matrix4(), база = new THREE.Matrix4(), лок = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), s = new THREE.Vector3(), ноль = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -6642,7 +6646,7 @@ window.ДЕТАЛИ.push(['люди', function (API) {
     }
     for (const м of Object.values(части)) м.instanceMatrix.needsUpdate = true;
   });
-  window.__люди = { люди, режим: () => режим };
+  window.__люди = { люди, режим: () => режим, паника, успокоить, собрать: собратьФормацию };
 }]);
 
 </script>
@@ -9766,6 +9770,42 @@ window.ДЕТАЛИ.push(['настройки', function () {
 
 </script>
 <script>
+// Погода по заказу Шторма: дождь (летящие капли вокруг камеры) и туман
+// (временное сгущение штатного сцена.fog). Чисто косметика, не трогает
+// сюжетные системы — можно включать/выключать когда угодно.
+window.ДЕТАЛИ.push(['погода', function (API) {
+  const { THREE, сцена } = API;
+  const базаТумана = { near: сцена.fog.near, far: сцена.fog.far };
+  let туманВкл = false;
+  function туман(вкл) {
+    туманВкл = !!вкл;
+    if (туманВкл) { сцена.fog.near = 20; сцена.fog.far = 170; }
+    else { сцена.fog.near = базаТумана.near; сцена.fog.far = базаТумана.far; }
+  }
+
+  const N = API.телефон ? 350 : 900, РАД = 22, ВЫС = 16;
+  const поз = new Float32Array(N * 3), скор = new Float32Array(N);
+  for (let i = 0; i < N; i++) скор[i] = 8 + Math.random() * 4;
+  const гео = new THREE.BufferGeometry(); гео.setAttribute('position', new THREE.BufferAttribute(поз, 3));
+  const капли = new THREE.Points(гео, new THREE.PointsMaterial({ color: 0xBFD4E0, size: 0.06, transparent: true, opacity: 0.55, depthWrite: false }));
+  капли.visible = false; капли.frustumCulled = false; сцена.add(капли);
+  let дождьВкл = false;
+  function расставить(к) { for (let i = 0; i < N; i++) { поз[i * 3] = к.x + (Math.random() * 2 - 1) * РАД; поз[i * 3 + 1] = к.y + Math.random() * ВЫС; поз[i * 3 + 2] = к.z + (Math.random() * 2 - 1) * РАД; } гео.attributes.position.needsUpdate = true; }
+  function дождь(вкл) { дождьВкл = !!вкл; капли.visible = дождьВкл; if (дождьВкл) расставить(API.камера.position); }
+  API.каждыйКадр.push(dt => {
+    if (!дождьВкл) return;
+    const к = API.камера.position, p = гео.attributes.position.array;
+    for (let i = 0; i < N; i++) {
+      p[i * 3 + 1] -= скор[i] * dt;
+      if (p[i * 3 + 1] < к.y - 2 || Math.hypot(p[i * 3] - к.x, p[i * 3 + 2] - к.z) > РАД * 1.4) { p[i * 3] = к.x + (Math.random() * 2 - 1) * РАД; p[i * 3 + 1] = к.y + ВЫС; p[i * 3 + 2] = к.z + (Math.random() * 2 - 1) * РАД; }
+    }
+    гео.attributes.position.needsUpdate = true;
+  });
+  window.__погода = { дождь, туман };
+}]);
+
+</script>
+<script>
 // Никита — финальный твист: он всё это время подсыпал карбид в сортиры.
 // Появляется после посадки Шторма у спутника, срывается и устраивает
 // апокалипсис помощнее обычного. Остановить его может только Шторм —
@@ -10052,14 +10092,17 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   const стильИнстр = document.createElement('style');
   стильИнстр.textContent = `
     #штормИнстр { position: fixed; left: calc(10px + env(safe-area-inset-left, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); z-index: 8; display: none;
-                  flex-direction: column; gap: 6px; width: 190px; background: rgba(18,12,8,0.78); border: 1px solid rgba(244,196,48,0.35); border-radius: 12px; padding: 8px; }
+                  flex-direction: column; gap: 6px; width: 210px; max-height: 78vh; overflow-y: auto; background: rgba(18,12,8,0.82); border: 1px solid rgba(244,196,48,0.35); border-radius: 12px; padding: 8px; }
     #штормИнстр.видно { display: flex; }
     #штормИнстр .ряд2 { display: flex; gap: 6px; }
-    #штормИнстр button, #штормИнстр select, #штормИнстр input[type=color] { height: 30px; border-radius: 8px; border: 1px solid rgba(242,230,204,0.3); background: #2A2018; color: #F2E6CC; font: 11px system-ui, sans-serif; }
+    #штормИнстр .разд { height: 1px; background: rgba(242,230,204,0.18); margin: 2px 0; }
+    #штормИнстр button, #штормИнстр select, #штормИнстр input[type=color], #штормИнстр input[type=text] { height: 30px; border-radius: 8px; border: 1px solid rgba(242,230,204,0.3); background: #2A2018; color: #F2E6CC; font: 11px system-ui, sans-serif; }
     #штормИнстр button { cursor: pointer; flex: 1; }
     #штормИнстр button[aria-pressed="true"] { border-color: #F4C430; color: #F4E0A0; }
-    #штормИнстр select { flex: 1; }
+    #штормИнстр select { flex: 1; min-width: 0; }
     #штормИнстр input[type=color] { width: 36px; padding: 0; cursor: pointer; }
+    #штормИнстр input[type=text] { flex: 1; min-width: 0; padding: 0 6px; }
+    #онлРадар.целимся { pointer-events: auto !important; cursor: crosshair; }
     #полётВВ, #полётВН { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); z-index: 8; width: 48px; height: 48px; border-radius: 50%;
                           border: 1px solid #F4C430; background: rgba(30,22,6,0.82); color: #F4E0A0; font-size: 20px; display: none; align-items: center; justify-content: center; }
     #полётВВ.видно, #полётВН.видно { display: flex; }
@@ -10078,10 +10121,79 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   const кнПризвать = эл('button', { onclick: () => сила('призвать', { вид: селСущество.value }) }, '🧬 Призвать');
   const инпЦвет = эл('input', { type: 'color', value: '#ffffff' });
   const кнНебо = эл('button', { onclick: () => сила('небо-цвет', { hex: инпЦвет.value }) }, '🎨 Применить');
+
+  // ---- цель: игроки с ролью, для выдачи/обнуления задачи ----
+  const селИгрок = эл('select', { onfocus: () => обновитьИгроков() });
+  function обновитьИгроков() {
+    const старое = селИгрок.value;
+    селИгрок.innerHTML = '';
+    const список = [...пиры.values()].filter(п => п.роль && п.роль !== 'шторм');
+    if (!список.length) { селИгрок.append(эл('option', { value: '' }, 'нет игроков')); селИгрок.disabled = true; return; }
+    селИгрок.disabled = false;
+    for (const п of список) селИгрок.append(эл('option', { value: п.ид }, (п.ник || РОЛИ[п.роль].имя) + ' (' + РОЛИ[п.роль].имя + ')'));
+    if ([...селИгрок.options].some(o => o.value === старое)) селИгрок.value = старое;
+  }
+  обновитьИгроков();
+  const кнВыдать = эл('button', { onclick: () => селИгрок.value && сила('задача', { ид: селИгрок.value, действие: 'плюс' }) }, '🎁 Выдать');
+  const кнОбнулить = эл('button', { onclick: () => селИгрок.value && сила('задача', { ид: селИгрок.value, действие: 'обнулить' }) }, '🔄 Обнулить');
+
+  // ---- сюжетные триггеры ----
+  const кнНикита = эл('button', { onclick: () => сила('никита-вызов') }, '🛰 Никита');
+  const кнИспуг = эл('button', { onclick: () => сила('испуг') }, '🚽 Напугать');
+
+  // ---- толпа сельчан ----
+  const кнПаника = эл('button', { onclick: () => сила('толпа', { действие: 'паника' }), 'aria-label': 'Паника' }, '😱');
+  const кнСобрать = эл('button', { onclick: () => сила('толпа', { действие: 'собрать' }), 'aria-label': 'Собрать' }, '👀');
+  const кнУспокоить = эл('button', { onclick: () => сила('толпа', { действие: 'успокоить' }), 'aria-label': 'Успокоить' }, '🙂');
+
+  // ---- погода ----
+  let дождьВкл = false, туманВкл = false;
+  const кнДождь = эл('button', { 'aria-pressed': 'false', onclick: () => { дождьВкл = !дождьВкл; кнДождь.setAttribute('aria-pressed', String(дождьВкл)); сила('погода', { дождь: дождьВкл }); } }, '🌧 Дождь');
+  const кнТуман = эл('button', { 'aria-pressed': 'false', onclick: () => { туманВкл = !туманВкл; кнТуман.setAttribute('aria-pressed', String(туманВкл)); сила('погода', { туман: туманВкл }); } }, '🌫 Туман');
+
+  // ---- громкая связь ----
+  const инпОбъявление = эл('input', { type: 'text', placeholder: 'Объявление…', maxlength: '140' });
+  const кнОбъявить = эл('button', { onclick: () => { const т = инпОбъявление.value.trim(); if (т) { сила('объявление', { текст: т }); инпОбъявление.value = ''; } } }, '📢');
+
+  // ---- куры для Яши ----
+  const кнКуры = эл('button', { onclick: () => сила('куры') }, '🐔 Куры');
+
+  // ---- точечный взрыв: взводим и жмём по радару ----
+  let целимся = false;
+  const кнВзрыв = эл('button', {
+    'aria-pressed': 'false',
+    onclick: () => {
+      целимся = !целимся;
+      кнВзрыв.setAttribute('aria-pressed', String(целимся));
+      кнВзрыв.textContent = целимся ? '🎯 Жми по радару…' : '💥 Взрыв по радару';
+      радар.classList.toggle('целимся', целимся);
+    },
+  }, '💥 Взрыв по радару');
+  радар.addEventListener('click', e => {
+    if (!целимся) return;
+    целимся = false; кнВзрыв.setAttribute('aria-pressed', 'false'); кнВзрыв.textContent = '💥 Взрыв по радару'; радар.classList.remove('целимся');
+    const rect = радар.getBoundingClientRect();
+    const cx = (e.clientX - rect.left) / rect.width * 240, cy = (e.clientY - rect.top) / rect.height * 240;
+    const П = window.__мир.поз, R = 120, М = 0.4;
+    const вз = Math.atan2(П.x - API.камера.position.x, П.z - API.камера.position.z);
+    const px = (R - cx) / М, pz = (R - cy) / М;
+    const dx = Math.cos(вз) * px - Math.sin(вз) * pz, dz = Math.sin(вз) * px + Math.cos(вз) * pz;
+    сила('взрыв-точка', { x: +(П.x + dx).toFixed(1), z: +(П.z + dz).toFixed(1) });
+  });
+
   const инстр = эл('div', { id: 'штормИнстр', class: 'онл' },
     эл('div', { class: 'ряд2' }, кнПолёт, кнНев),
     эл('div', { class: 'ряд2' }, селСущество, кнПризвать),
-    эл('div', { class: 'ряд2' }, инпЦвет, кнНебо));
+    эл('div', { class: 'ряд2' }, инпЦвет, кнНебо),
+    эл('div', { class: 'разд' }),
+    эл('div', { class: 'ряд2' }, селИгрок),
+    эл('div', { class: 'ряд2' }, кнВыдать, кнОбнулить),
+    эл('div', { class: 'разд' }),
+    эл('div', { class: 'ряд2' }, кнНикита, кнИспуг),
+    эл('div', { class: 'ряд2' }, кнПаника, кнСобрать, кнУспокоить),
+    эл('div', { class: 'ряд2' }, кнДождь, кнТуман),
+    эл('div', { class: 'ряд2' }, инпОбъявление, кнОбъявить),
+    эл('div', { class: 'ряд2' }, кнКуры, кнВзрыв));
   const полётВВ = эл('button', { id: 'полётВВ', 'aria-label': 'Вверх' }, '⬆');
   const полётВН = эл('button', { id: 'полётВН', 'aria-label': 'Вниз' }, '⬇');
   const держать = (эл2, знак) => {
@@ -10320,6 +10432,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     window.__полёт = false; window.__полётУпр = 0; полётВВ.classList.remove('видно'); полётВН.classList.remove('видно'); кнПолёт.setAttribute('aria-pressed', 'false');
     я.невидим = false; window.__игрокСкрыт = false; кнНев.setAttribute('aria-pressed', 'false');
     инстр.classList.remove('видно');
+    целимся = false; кнВзрыв.setAttribute('aria-pressed', 'false'); кнВзрыв.textContent = '💥 Взрыв по радару'; радар.classList.remove('целимся');
     const р = РОЛИ[я.роль];
     if (р.кот) {
       window.__игрокСкрыт = false; window.__скоростьИгрока = 1;
@@ -10430,28 +10543,29 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     }
     return рез;
   }
+  function создатьПредмет(вид, цвет, x, z) {
+    const гр = new THREE.Group(); гр.position.set(x, В(x, z), z);
+    const тело = ВИДЫ[вид](); гр.add(тело);
+    const луч = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 40, 10, 1, true), лучМат(цвет)); луч.position.y = 20; гр.add(луч);
+    сцена.add(гр);
+    предметы.push({ гр, тело, луч, x, z, взят: false, бег: вид === 'курица', фаза: Math.random() * 6 });
+  }
   function разложить(роль) {
     убратьПредметы();
     const р = РОЛИ[роль]; if (!р.предмет) return;
-    for (const т of места(роль, р.нужно)) {
-      const гр = new THREE.Group(); гр.position.set(т.x, В(т.x, т.z), т.z);
-      const тело = ВИДЫ[р.предмет](); гр.add(тело);
-      const луч = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 40, 10, 1, true), лучМат(р.цвет)); луч.position.y = 20; гр.add(луч);
-      сцена.add(гр);
-      предметы.push({ гр, тело, луч, x: т.x, z: т.z, взят: false, бег: р.предмет === 'курица', фаза: Math.random() * 6 });
-    }
+    for (const т of места(роль, р.нужно)) создатьПредмет(р.предмет, р.цвет, т.x, т.z);
     обновитьПанель();
   }
   function убратьПредметы() { for (const п of предметы) сцена.remove(п.гр); предметы = []; }
   function взял(п) {
     п.взят = true; сцена.remove(п.гр);
-    я.счёт++; всем({ k: 'с', счёт: я.счёт });
+    const был = я.счёт; я.счёт++; всем({ k: 'с', счёт: я.счёт });
     const р = РОЛИ[я.роль];
     бип([660, 880], 0.08, 0.05, 'triangle');
-    if (я.счёт >= р.нужно) {
+    if (был < р.нужно && я.счёт >= р.нужно) {
       совет(`Задача выполнена! ${р.подпись}: ${я.счёт}/${р.нужно}`, 4); бип([523, 659, 784, 1047], 0.12, 0.06, 'triangle');
       window.__особые && window.__особые.салют && window.__особые.салют();
-    } else совет(`${р.подпись}: ${я.счёт}/${р.нужно}`, 2);
+    } else if (я.счёт < р.нужно) совет(`${р.подпись}: ${я.счёт}/${р.нужно}`, 2);
     обновитьПанель();
   }
 
@@ -10513,7 +10627,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     выполнить(имя, { x: window.__мир.поз.x, z: window.__мир.поз.z }, true, доп);
   }
   async function команда(п, м) {
-    if (!['ночь0', 'ночь1', 'салют', 'сбор', 'запуск', 'осадить', 'призвать', 'небо-цвет'].includes(м.cmd) || typeof м.ts !== 'number' || typeof м.sig !== 'string') return;
+    if (!['ночь0', 'ночь1', 'салют', 'сбор', 'запуск', 'осадить', 'призвать', 'небо-цвет', 'задача', 'никита-вызов', 'испуг', 'толпа', 'погода', 'объявление', 'взрыв-точка', 'куры'].includes(м.cmd) || typeof м.ts !== 'number' || typeof м.sig !== 'string') return;
     if (Math.abs(Date.now() - м.ts) > СВЕЖЕСТЬ || м.ts <= (последКоманда.get(п.ид) || 0)) return;   // старые и повторные — мимо
     const пэйлоуд = typeof м.доп === 'string' ? м.доп : '';
     if (!await верна(`brzd|c|${адресКомнаты()}|${п.ид}|${м.cmd}|${пэйлоуд}|${м.ts}`, м.sig)) return;
@@ -10541,6 +10655,34 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     API.небоМат.uniforms.uTint.value.set(c.r, c.g, c.b);
     совет('⚡ Шторм перекрасил небо.', 2.5);
   }
+  function выдатьЗадачу(доп) {
+    if (!доп || доп.ид !== я.ид || !я.роль) return;
+    const р = РОЛИ[я.роль]; if (!р || !р.нужно) return;
+    if (доп.действие === 'обнулить') { я.счёт = 0; совет('⚡ Шторм обнулил твою задачу.', 3); }
+    else { я.счёт = Math.min(99, я.счёт + 1); совет('⚡ Шторм подкинул тебе предмет!', 2.5); }
+    всем({ k: 'с', счёт: я.счёт }); обновитьПанель();
+  }
+  function толпаДействие(доп) {
+    const Л = window.__люди; if (!Л || !доп) return;
+    if (доп.действие === 'паника') { Л.паника(); совет('⚡ Шторм напугал посёлок.', 2.5); }
+    else if (доп.действие === 'собрать') { Л.собрать(); совет('⚡ Шторм созвал сельчан поглазеть.', 2.5); }
+    else if (доп.действие === 'успокоить') { Л.успокоить(); совет('⚡ Шторм всех успокоил.', 2.5); }
+  }
+  function объявить(доп) {
+    const текст = доп && typeof доп.текст === 'string' ? доп.текст.trim().slice(0, 140) : '';
+    if (!текст) return;
+    window.__кино && window.__кино.подпись('📢 ШТОРМ: ' + текст, 5);
+  }
+  function взорватьТочку(доп) {
+    const Б = window.__бахЯдро; if (!Б || !доп || typeof доп.x !== 'number' || typeof доп.z !== 'number') return;
+    const x = Math.max(-2000, Math.min(2000, доп.x)), z = Math.max(-2000, Math.min(2000, доп.z));
+    Б.эффектВзрыва(x, В(x, z) + 2, z, 1.8); Б.тряхнуть && Б.тряхнуть(0.3);
+  }
+  function добавитьКур(n) {
+    if (я.роль !== 'яша') return;
+    for (const т of места('яша-куры-' + Date.now() + '-' + Math.random(), n)) создатьПредмет('курица', РОЛИ.яша.цвет, т.x, т.z);
+    совет('⚡ Шторм выпустил стаю кур!', 2.5); обновитьПанель();
+  }
   function выполнить(имя, где, сам, доп) {
     if (имя === 'ночь0' || имя === 'ночь1') { ночь = имя === 'ночь1'; window.__кино && window.__кино.небо && window.__кино.небо(ночь ? 1.2 : 0); совет(ночь ? '⚡ Шторм включил конец света.' : '⚡ Шторм вернул нормальное небо.', 3); обновитьПанель(); }
     else if (имя === 'салют') { window.__особые && window.__особые.салют && window.__особые.салют(); совет('⚡ Шторм запустил сортир. Смотри в небо.', 3); }
@@ -10556,6 +10698,26 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       призватьСущество(где, доп);
     } else if (имя === 'небо-цвет') {
       применитьЦветНеба(доп && доп.hex);
+    } else if (имя === 'задача') {
+      выдатьЗадачу(доп);
+    } else if (имя === 'никита-вызов') {
+      window.__никита && window.__никита.начать();
+    } else if (имя === 'испуг') {
+      window.__событие && window.__событие('сортир-взлетел', {});
+    } else if (имя === 'толпа') {
+      толпаДействие(доп);
+    } else if (имя === 'погода') {
+      if (window.__погода && доп) {
+        if (typeof доп.дождь === 'boolean') window.__погода.дождь(доп.дождь);
+        if (typeof доп.туман === 'boolean') window.__погода.туман(доп.туман);
+        совет('⚡ Шторм меняет погоду.', 2);
+      }
+    } else if (имя === 'объявление') {
+      объявить(доп);
+    } else if (имя === 'взрыв-точка') {
+      взорватьТочку(доп);
+    } else if (имя === 'куры') {
+      добавитьКур(5);
     } else if (имя === 'запуск') {
       совет('⚡ ВСЕ ЗАДАЧИ СДЕЛАНЫ. ШТОРМ ЗАПУСКАЕТ ПОСЁЛОК В КОСМОС.', 4);
       const ш = window.__шторм;
