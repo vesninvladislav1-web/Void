@@ -7472,7 +7472,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
   function убратьАватар(а) { if (!а) return; снести(а.м); аватары.delete(а); }
 
   // ===================== КАДР =====================
-  let таймПерераздачи = 0, игрокБлок = null, таймРожи = 2;
+  let таймПерераздачи = 0, игрокБлок = null, таймРожи = 2, прошлаяИг = null, скИгрока = 0;
   мх('igrok');
   API.каждыйКадр.push((dt, ms, поз) => {
     if (!dt) return;
@@ -7490,8 +7490,13 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     const иг = window.__мир && window.__мир.поз;
     if (иг && игрокМ) {
       игрокМ.корень.visible = !window.__игрокСкрыт;
-      игрокМ.корень.position.set(иг.x, window.__игрокY !== undefined ? window.__игрокY : В(иг.x, иг.z), иг.z); игрокМ.корень.rotation.y = иг.угол;
-      const д = window.__мир.джойстик, сила = document.body.classList.contains('кино') || window.__управлениеСтоп ? 0 : Math.min(1, Math.hypot(д.dx, д.dy));
+      const игY = window.__игрокY !== undefined ? window.__игрокY : window.__мир.высота ? window.__мир.высота() : В(иг.x, иг.z);   // в полёте — в воздухе, а не на земле
+      игрокМ.корень.position.set(иг.x, игY, иг.z); игрокМ.корень.rotation.y = иг.угол;
+      // анимация — по настоящей скорости: от клавиш тоже, а не только от джойстика (сдвиг больше 3 м за кадр — телепорт)
+      const сдв = прошлаяИг ? Math.hypot(иг.x - прошлаяИг[0], иг.z - прошлаяИг[1]) : 0; прошлаяИг = [иг.x, иг.z];
+      скИгрока += ((сдв < 3 ? сдв / dt : 0) - скИгрока) * Math.min(1, dt * 12);
+      const стоим = document.body.classList.contains('кино') || window.__управлениеСтоп || window.__поездка;
+      const сила = стоим ? 0 : Math.min(1, скИгрока / (6.2 * (window.__скоростьИгрока || 1)) / 0.85);
       if (window.__игрокПоза) играть(игрокМ, window.__игрокПоза, 1);
       else if (сила > 0.8) играть(игрокМ, 'Sprint_Loop', 1); else if (сила > 0.12) играть(игрокМ, 'Walk_Loop', 0.8 + сила * 0.6); else играть(игрокМ, 'Idle_Loop', 1);
       обновить(игрокМ, dt);
@@ -11154,7 +11159,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       таймПоз -= dt; таймПривет -= dt;
       if (таймПоз <= 0) {
         таймПоз = 0.125;
-        const y = window.__игрокY !== undefined ? window.__игрокY : В(поз.x, поз.z);
+        const y = window.__игрокY !== undefined ? window.__игрокY : window.__мир.высота ? window.__мир.высота() : В(поз.x, поз.z);
         всем({ k: 'p', x: +поз.x.toFixed(2), z: +поз.z.toFixed(2), y: +y.toFixed(2), угол: +поз.угол.toFixed(3), поза: window.__игрокПоза || null, нв: я.невидим || undefined });
       }
       if (таймПривет <= 0) { таймПривет = 4; привет(); }
@@ -11178,7 +11183,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       if (п.табл) { п.табл.visible = !п.невидим; п.табл.position.set(п.x, п.y + (кот ? 1.0 : 2.15), п.z); }
       if (п.пуз) { п.пуз.t -= dt; п.пуз.сп.position.set(п.x, п.y + (кот ? 1.25 : 2.45), п.z); п.пуз.сп.visible = !п.невидим; if (п.пуз.t <= 0) { снятьСпрайт(п.пуз.сп); п.пуз = null; } }
     }
-    if (мой.пуз) { мой.пуз.t -= dt; мой.пуз.сп.position.set(поз.x, (window.__игрокY !== undefined ? window.__игрокY : В(поз.x, поз.z)) + (я.роль === 'яша' ? 1.25 : 2.45), поз.z); if (мой.пуз.t <= 0) { снятьСпрайт(мой.пуз.сп); мой.пуз = null; } }
+    if (мой.пуз) { мой.пуз.t -= dt; мой.пуз.сп.position.set(поз.x, (window.__игрокY !== undefined ? window.__игрокY : window.__мир.высота ? window.__мир.высота() : В(поз.x, поз.z)) + (я.роль === 'яша' ? 1.25 : 2.45), поз.z); if (мой.пуз.t <= 0) { снятьСпрайт(мой.пуз.сп); мой.пуз = null; } }
     // свои предметы: крутятся, куры убегают от кота
     if (я.роль && предметы.length) {
       let ближ = null, бд = 1e9;
@@ -12891,6 +12896,7 @@ const взгляд = { ид: null, x: 0, y: 0 };
 const клавиши = new Set();
 холст.addEventListener('pointerdown', e => {
   e.preventDefault();
+  if (киноИдёт()) { if (взгляд.ид === null) { взгляд.ид = e.pointerId; взгляд.x = e.clientX; взгляд.y = e.clientY; } return; }   // в кино и в кабине джойстик не показываем
   if (e.clientX < innerWidth / 2 && джойстик.ид === null) {
     джойстик.ид = e.pointerId; джойстик.x0 = e.clientX; джойстик.y0 = e.clientY; джойстик.dx = джойстик.dy = 0;
     const д = эл('джойстик'); д.style.left = e.clientX + 'px'; д.style.top = e.clientY + 'px'; д.hidden = false;
@@ -12920,8 +12926,19 @@ function отпустить(e) {
 }
 холст.addEventListener('pointerup', отпустить);
 холст.addEventListener('pointercancel', отпустить);
-addEventListener('keydown', e => клавиши.add(e.code));
+холст.addEventListener('lostpointercapture', отпустить);
+// буквы в поле ввода (ник, объявление) — не шаги
+const печатает = e => { const т = e.target; return !!т && (т.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(т.tagName)); };
+addEventListener('keydown', e => { if (!печатает(e)) клавиши.add(e.code); });
 addEventListener('keyup', e => клавиши.delete(e.code));
+// ушёл из вкладки с зажатой клавишей — keyup не придёт, иначе идёт сам
+function сброситьВвод() {
+  клавиши.clear(); window.__полётУпр = 0;
+  if (джойстик.ид !== null) { джойстик.ид = null; джойстик.dx = джойстик.dy = 0; эл('джойстик').hidden = true; }
+  взгляд.ид = null;
+}
+addEventListener('blur', сброситьВвод);
+document.addEventListener('visibilitychange', () => { if (document.hidden) сброситьВвод(); });
 
 эл('сверху').addEventListener('click', () => { кам.сверху = !кам.сверху; эл('сверху').textContent = кам.сверху ? 'ВНИЗ' : 'С ВЫСОТЫ'; });
 
@@ -13198,8 +13215,10 @@ function шаг(dt) {
   } else поз.фаза *= 0.85;
   const качели = Math.sin(поз.фаза) * 0.7 * Math.min(1, сила * 1.5);
   части.лн.rotation.x = качели; части.пн.rotation.x = -качели; части.лр.rotation.x = -качели * 0.8; части.пр.rotation.x = качели * 0.8;
-  if (window.__полёт) летВысота = Math.max(0, летВысота + (window.__полётУпр || 0) * 7 * dt);
-  else летВысота = 0;
+  if (window.__полёт) {
+    const клав = стоп ? 0 : клавиши.has('KeyE') ? 1 : клавиши.has('KeyQ') ? -1 : 0;      // на компьютере: E — вверх, Q — вниз
+    летВысота = Math.min(150, Math.max(0, летВысота + ((window.__полётУпр || 0) || клав) * 7 * dt));
+  } else летВысота = 0;
   const y = высотаИгрока();
   игрок.position.set(поз.x, y + Math.abs(Math.sin(поз.фаза)) * 0.05, поз.z);
   игрок.rotation.y = поз.угол;
@@ -13216,7 +13235,9 @@ function камераШаг(dt) {
     глазКамеры.set(поз.x + Math.sin(кам.рыск) * г, y + (кам.высота || 1.6) + кам.даль * Math.sin(кам.тангаж), поз.z + Math.cos(кам.рыск) * г);
     // Камера не заходит в дома: если сзади стена — подъезжаем ближе.
     // Иначе в тесном дворе вместо посёлка был виден изнанка крыши.
-    for (let д = кам.даль; д > 1.4 && вДоме(глазКамеры.x, глазКамеры.z, 0.6); д -= 0.5) {
+    // в полёте над крышами стен нет — не дёргаем камеру к игроку над каждым домом
+    const надКрышами = y - землиВысота(поз.x, поз.z) > 6;
+    for (let д = кам.даль; !надКрышами && д > 1.4 && вДоме(глазКамеры.x, глазКамеры.z, 0.6); д -= 0.5) {
       const г2 = д * Math.cos(кам.тангаж);
       глазКамеры.set(поз.x + Math.sin(кам.рыск) * г2, y + (кам.высота || 1.6) + д * Math.sin(кам.тангаж), поз.z + Math.cos(кам.рыск) * г2);
     }
@@ -13317,6 +13338,6 @@ document.querySelectorAll('#графика .кн').forEach(к => {
 window.__счёт = window.__счёт || {};
 window.__мир = { поз, кам, джойстик, взгляд, дома, дороги, землиВысота, вДоме,
   fps: () => { const t = performance.now(), f = счётКадров / ((t - счётНачало) / 1000); счётКадров = 0; счётНачало = t; return Math.round(f); },
-  рендер, сцена, камера, солнце, небоСвет, игрок };
+  рендер, сцена, камера, солнце, небоСвет, игрок, высота: высотаИгрока };
 })().catch(e => показатьОшибку(String(e && (e.stack || e.message) || e).slice(0, 300)));
 </script>
