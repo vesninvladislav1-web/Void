@@ -10501,6 +10501,8 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     #штормИнстр { position: fixed; left: calc(10px + env(safe-area-inset-left, 0px)); bottom: calc(10px + env(safe-area-inset-bottom, 0px)); z-index: 8; display: none;
                   flex-direction: column; gap: 6px; width: 210px; max-height: 78vh; overflow-y: auto; background: rgba(18,12,8,0.82); border: 1px solid rgba(244,196,48,0.35); border-radius: 12px; padding: 8px; }
     #штормИнстр.видно { display: flex; }
+    #штормИнстр.свёрнут { width: auto; padding: 4px; }
+    #штормИнстр.свёрнут > :not(.шапка) { display: none; }
     #штормИнстр .ряд2 { display: flex; gap: 6px; }
     #штормИнстр .разд { height: 1px; background: rgba(242,230,204,0.18); margin: 2px 0; }
     #штормИнстр button, #штормИнстр select, #штормИнстр input[type=color], #штормИнстр input[type=text] { height: 30px; border-radius: 8px; border: 1px solid rgba(242,230,204,0.3); background: #2A2018; color: #F2E6CC; font: 11px system-ui, sans-serif; }
@@ -10589,7 +10591,13 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     сила('взрыв-точка', { x: +(П.x + dx).toFixed(1), z: +(П.z + dz).toFixed(1) });
   });
 
-  const инстр = эл('div', { id: 'штормИнстр', class: 'онл' },
+  // на телефоне панель лежит в зоне джойстика — по умолчанию свёрнута в одну кнопку
+  const кнИнстр = эл('button', { 'aria-expanded': 'false', onclick: () => {
+    const откр = инстр.classList.toggle('свёрнут') === false;
+    кнИнстр.setAttribute('aria-expanded', String(откр)); кнИнстр.textContent = откр ? '⚡ Свернуть' : '⚡';
+  } }, '⚡');
+  const инстр = эл('div', { id: 'штормИнстр', class: 'онл свёрнут' },
+    эл('div', { class: 'ряд2 шапка' }, кнИнстр),
     эл('div', { class: 'ряд2' }, кнПолёт, кнНев),
     эл('div', { class: 'ряд2' }, селСущество, кнПризвать),
     эл('div', { class: 'ряд2' }, инпЦвет, кнНебо),
