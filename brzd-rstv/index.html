@@ -5263,28 +5263,32 @@ window.ДЕТАЛИ.push(['босс', function (API) {
   API.тени.пятно(бx, бz, 1.4, 0.35);
 
   // ===================== БОГДАН =====================
-  // по приметам: короткая стрижка, очки, чёрная футболка с бело-красным принтом, цепочка
+  // по фото: стрижка под машинку, круглые очки, бордовое худи, чёрные штаны, чёрные кроссовки
+  // с рыжей подошвой, чёрный рюкзак с грибочками на лямках
   const богдан = new THREE.Group();
   {
-    const сб = new API.Сборка(), кожа = API.цвет('#E2B596'), чёрн = API.цвет('#1C1C1E'), джинс = API.цвет('#2E3A4E'), волосы = API.цвет('#3A2E26');
-    API.коробка(сб, -0.11, 0, 0, 1, 0, 0.18, 0.2, 0.86, джинс); API.коробка(сб, 0.11, 0, 0, 1, 0, 0.18, 0.2, 0.86, джинс);
-    API.коробка(сб, 0, 0.86, 0, 1, 0, 0.5, 0.26, 0.62, чёрн);                         // футболка
-    API.плашка(сб, 0, 0.14, 1, 0, 0, 1, -0.14, 0.14, 1.02, 1.2, 0.001, API.цвет('#EDEDE8'));   // принт: белый лев
-    API.плашка(сб, 0, 0.14, 1, 0, 0, 1, -0.17, 0.17, 0.97, 1.02, 0.002, API.цвет('#B81E24'));  // красная полоса
-    API.коробка(сб, -0.31, 0.95, 0, 1, 0, 0.12, 0.14, 0.52, кожа); API.коробка(сб, 0.31, 0.95, 0, 1, 0, 0.12, 0.14, 0.52, кожа);
-    API.коробка(сб, -0.31, 1.3, 0, 1, 0, 0.14, 0.16, 0.18, чёрн); API.коробка(сб, 0.31, 1.3, 0, 1, 0, 0.14, 0.16, 0.18, чёрн);
+    const сб = new API.Сборка(), кожа = API.цвет('#E2B596'), худи = API.цвет('#4A2630'), чёрн = API.цвет('#1A1A1C'), волосы = API.цвет('#3A2E26');
+    API.коробка(сб, -0.11, 0, 0, 1, 0, 0.18, 0.2, 0.86, чёрн); API.коробка(сб, 0.11, 0, 0, 1, 0, 0.18, 0.2, 0.86, чёрн);
+    API.коробка(сб, -0.11, 0, 0.03, 1, 0, 0.19, 0.27, 0.05, API.цвет('#A0622A')); API.коробка(сб, 0.11, 0, 0.03, 1, 0, 0.19, 0.27, 0.05, API.цвет('#A0622A'));   // подошва
+    API.коробка(сб, 0, 0.84, 0, 1, 0, 0.52, 0.28, 0.64, худи);                         // худи
+    API.плашка(сб, 0, 0.145, 1, 0, 0, 1, -0.12, 0.12, 0.9, 1.04, 0.001, API.цвет('#3A1C24'));  // карман-кенгуру
+    API.коробка(сб, -0.31, 0.92, 0, 1, 0, 0.13, 0.15, 0.56, худи); API.коробка(сб, 0.31, 0.92, 0, 1, 0, 0.13, 0.15, 0.56, худи);
+    API.коробка(сб, -0.31, 0.84, 0, 1, 0, 0.1, 0.12, 0.08, кожа); API.коробка(сб, 0.31, 0.84, 0, 1, 0, 0.1, 0.12, 0.08, кожа);
+    API.коробка(сб, 0, 0.98, -0.2, 1, 0, 0.34, 0.14, 0.44, чёрн);                      // рюкзак
     API.коробка(сб, 0, 1.48, 0, 1, 0, 0.3, 0.3, 0.32, кожа);                           // голова
     API.коробка(сб, 0, 1.76, 0, 1, 0, 0.31, 0.31, 0.05, волосы);                       // под машинку
     API.плашка(сб, 0, 0.155, 1, 0, 0, 1, -0.13, -0.02, 1.6, 1.68, 0.001, API.цвет('#202024'));  // очки
     API.плашка(сб, 0, 0.155, 1, 0, 0, 1, 0.02, 0.13, 1.6, 1.68, 0.001, API.цвет('#202024'));
-    API.плашка(сб, 0, 0.14, 1, 0, 0, 1, -0.06, 0.06, 1.2, 1.22, 0.002, API.цвет('#C8C8C8'));    // цепочка
     const м = сб.меш(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, side: THREE.DoubleSide })); м.castShadow = true;
     богдан.add(м);
   }
   богдан.visible = false; сцена.add(богдан);
-  // настоящая 3D-модель (подставит модуль «люди 3D»): очки, цепочка, чёрная футболка с львом
-  (window.__герои3д = window.__герои3д || []).push({ группа: богдан, мх: 'bogdan', принт: ['лев', /t-shirt/], причёска: 'hair_buzzed', волосы: '#3A2E26', кожа: '#E2B596',
-    одежда: { верх: '#1C1C1E', низ: '#2E3A4E', обувь: '#1E1C1A', рукав: 0.33, стиль: 1 }, очки: true, цепь: true });
+  // настоящая 3D-модель (подставит модуль «люди 3D»): очки и рюкзак; вместо футболки — худи
+  // (крой берём у кофты Шторма и красим в бордовый), джинсы — в чёрные штаны, кроссовки — с рыжей подошвой
+  (window.__богданВид = { мх: 'bogdan', кофта: { из: 'shtorm', меш: /hooded/, прячь: /t-shirt/, цвет: '#4A2630' },
+    перекрас: [[/jeans/, 'штаны', '#1C1C1E'], [/shoes/, 'кроссы', '#151517']], очки: true, рюкзак: true });
+  (window.__герои3д = window.__герои3д || []).push(Object.assign({ группа: богдан, причёска: 'hair_buzzed', волосы: '#3A2E26', кожа: '#E2B596',
+    одежда: { верх: '#4A2630', низ: '#1C1C1E', обувь: '#151517', рукав: 0.68 } }, window.__богданВид));
 
   // ===================== ЗВУК И СУБТИТРЫ =====================
   const субтитр = document.createElement('div');
@@ -7193,6 +7197,48 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     };
     мат.customProgramCacheKey = () => 'принт-' + вид;
   }
+  // перекрасить одежду по фото, сохранив складки текстуры: светлота ткани × новый цвет.
+  // вид: 'худи' (карман-кенгуру, манжеты), 'штаны' (резинки внизу), 'кроссы' (рыжая подошва)
+  function перекрас(мат, вид, цвет, И) {
+    const старый = мат.onBeforeCompile;
+    мат.onBeforeCompile = (ш, р) => {
+      if (старый) старый(ш, р);
+      Object.assign(ш.uniforms, { uCol: { value: ц(цвет) }, uH2: { value: И.рост }, uArm2: { value: И.рукаY }, uSh2: { value: И.плечоX } });
+      if (!/varying vec3 vBind/.test(ш.vertexShader)) ш.vertexShader = 'varying vec3 vBind;\n' + ш.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBind = position;');
+      ш.fragmentShader = 'uniform vec3 uCol; uniform float uH2; uniform float uArm2; uniform float uSh2;\n' + (/varying vec3 vBind/.test(ш.fragmentShader) ? '' : 'varying vec3 vBind;\n') + ш.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
+    diffuseColor.rgb = uCol * clamp(0.62 + l * 3.2, 0.45, 1.45);
+    float ax = abs(vBind.x), y = vBind.y; bool front = vBind.z > 0.02;
+    ${вид === 'худи' ? `// карман-кенгуру: шов по краю; манжеты на рукавах и резинка по низу — темнее
+    float ky = (y - uH2 * 0.5) / (uH2 * 0.075), kx = ax / 0.12;
+    if (front && ky > 0.0 && ky < 1.0 && kx < 1.0 - ky * 0.25 && (ky > 0.93 || kx > 0.94 - ky * 0.25)) diffuseColor.rgb *= 0.55;
+    if (ax > uSh2 + 0.42) diffuseColor.rgb *= 0.82;
+    if (ax < uSh2 && y < uH2 * 0.505) diffuseColor.rgb *= 0.82;` : ''}
+    ${вид === 'штаны' ? `if (y < uH2 * 0.075) diffuseColor.rgb *= 0.7;` : ''}
+    ${вид === 'кроссы' ? `// чёрный верх, рыжая подошва и задник
+    if (y < 0.032) diffuseColor.rgb = vec3(0.62, 0.36, 0.12) * clamp(0.7 + l * 1.5, 0.6, 1.2);
+    else if (vBind.z < -0.06 && y < 0.07) diffuseColor.rgb = vec3(0.55, 0.32, 0.1);` : ''}
+  }`);
+    };
+    мат.customProgramCacheKey = () => 'перекрас-' + вид + (старый ? '-п' : '');
+  }
+  // чужая кофта на свой скелет: тот же риг MakeHuman, кости находим по именам
+  function надетьКофту(корень, кости, г, И) {
+    const к = г.кофта, из = мх(к.из); if (!из || typeof из !== 'object') return;
+    let род = null;
+    корень.traverse(о => { if (о.isSkinnedMesh && к.прячь.test(о.material.name)) { о.visible = false; род = род || о; } });
+    if (!род) return;
+    const новые = [];
+    из.сцена.traverse(о => { if (о.isSkinnedMesh && к.меш.test(о.material.name)) новые.push(о); });
+    for (const о of новые) {
+      const н = new THREE.SkinnedMesh(о.geometry, о.material.clone()); н.castShadow = true; н.frustumCulled = false;
+      н.material.name = о.material.name;
+      if (к.цвет) перекрас(н.material, 'худи', к.цвет, И);
+      род.parent.add(н);
+      н.bind(new THREE.Skeleton(о.skeleton.bones.map(b => кости[b.name] || кости.pelvis), о.skeleton.boneInverses), род.bindMatrix);
+    }
+  }
   function глитч(мат) {
     const старый = мат.onBeforeCompile;
     мат.onBeforeCompile = (ш, р) => {
@@ -7283,6 +7329,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
   // г: { мх: 'bogdan', принт, глитч, очки, цепь, чокер, сумка, вРуке, гарнитура, банка, тон }
   function модель(г) {
     const И = мх(г.мх); if (!И || !клипы) return null;
+    if (г.кофта && !мх(г.кофта.из) && МХ[г.кофта.из] !== 'ошибка') return null;   // кофта ещё грузится — подождём
     const корень = THREE.SkeletonUtils.clone(И.сцена);
     const появл = { value: г.появление !== undefined ? г.появление : 1 };
     const кости = {}; корень.traverse(о => { if (о.isBone) кости[о.name] = о; });
@@ -7294,10 +7341,12 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       const имя = о.material.name;
       if (/_clothes_/.test(имя) && г.тон) о.material.color.multiplyScalar(г.тон);
       if (г.принт && г.принт[1].test(имя)) принт(о.material, г.принт[0], И);
+      if (г.перекрас) for (const [рв, вид, цвет] of г.перекрас) if (рв.test(имя)) перекрас(о.material, вид, цвет, И);
       if (г.глитч && !/_eyes_|_eyelashes_|_eyebrows_/.test(имя)) глитч(о.material);
       if (г.глитч && /_eyes_|_eyelashes_|_eyebrows_/.test(имя)) о.visible = false;
       if (г.голограмма) голограмма(о.material, И, появл);
     });
+    if (г.кофта) надетьКофту(корень, кости, г, И);
     const миксер = new THREE.AnimationMixer(корень), действия = {};
     for (const [имя, клип] of Object.entries(клипыДля(И.тазY / тазЭталон))) действия[имя] = миксер.clipAction(клип);
     корень.visible = false; сцена.add(корень);
@@ -7377,6 +7426,27 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       прицепить(м, 'pelvis', с, -0.2, И.тазY + 0.02, 0.02);
       const ремень = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.62, 0.012), с.material); ремень.rotation.z = -0.62;
       прицепить(м, 'spine_03', ремень, -0.02, И.тазY + 0.36, 0.11);
+    }
+    if (г.рюкзак) {
+      // чёрный рюкзак, на лямках — белые грибочки (как на фото)
+      const к = document.createElement('canvas'); к.width = 64; к.height = 128; const с = к.getContext('2d');
+      с.fillStyle = '#121214'; с.fillRect(0, 0, 64, 128);
+      for (let i = 0; i < 7; i++) { const x = 16 + (i % 2) * 30, y = 10 + i * 17;
+        с.fillStyle = '#B8B4AC'; с.beginPath(); с.ellipse(x, y, 9, 6, 0, Math.PI, 0); с.fill(); с.fillRect(x - 3, y, 6, 7);
+        с.fillStyle = '#121214'; с.beginPath(); с.arc(x - 3, y - 2, 1.5, 0, 6.3); с.arc(x + 3, y - 3, 1.3, 0, 6.3); с.fill(); }
+      const тк = new THREE.CanvasTexture(к); тк.encoding = THREE.sRGBEncoding;
+      const тм = new THREE.MeshStandardMaterial({ color: ц('#151517'), roughness: 0.7 }), лм = new THREE.MeshStandardMaterial({ map: тк, roughness: 0.7 });
+      const р = new THREE.Group();
+      const мешок = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.4, 0.13), тм); мешок.position.set(0, -0.12, -0.12); р.add(мешок);
+      const клапан = new THREE.Mesh(new THREE.BoxGeometry(0.31, 0.08, 0.14), тм); клапан.position.set(0, 0.07, -0.12); р.add(клапан);
+      const карман = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.04), тм); карман.position.set(0, -0.22, -0.2); р.add(карман);
+      for (const s of [-1, 1]) {
+        const спер = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.36, 0.012), лм); спер.position.set(s * 0.1, -0.08, 0.135); спер.rotation.z = s * 0.06; р.add(спер);
+        const верх = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.012, 0.24), лм); верх.position.set(s * 0.1, 0.095, 0.01); р.add(верх);
+        const пряжка = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.03, 0.016), new THREE.MeshStandardMaterial({ color: ц('#0A0A0A'), roughness: 0.3 })); пряжка.position.set(s * 0.1, -0.12, 0.14); р.add(пряжка);
+      }
+      р.traverse(о => { if (о.isMesh) о.castShadow = true; });
+      прицепить(м, 'spine_03', р, 0, шея.y - 0.13, шея.z - 0.01);
     }
     if (г.гарнитура) {
       const тм = new THREE.MeshStandardMaterial({ color: ц('#16171A'), roughness: 0.5 }), св = new THREE.MeshBasicMaterial({ color: ц('#5CFFC8') });
@@ -10194,17 +10264,28 @@ window.ДЕТАЛИ.push(['феникс', function (API) {
   }
 
   // ===================== ЗА РУЛЁМ =====================
-  // Ключи в замке: садишься и ездишь по посёлку. Джойстик — газ и руль, справа — стрела
-  // (крутить влево/вправо) и 🌀: раскрутить её как винт, пока Феникс не оторвётся от земли.
-  const рулём = { едет: false, v: 0, курс: 0, ω: 0, вертолёт: false, кран: 0, высота: 0, пробег: 0, было: null, завис: false, поехал: false };
+  // Ключи в замке: садишься и ездишь по посёлку. Джойстик — газ и руль, справа — круглая зона:
+  // водишь по ней пальцем — стрела крутится следом (раскрутил и отпустил — крутится по инерции),
+  // и 🌀: раскрутить её как винт, пока Феникс не оторвётся от земли.
+  const рулём = { едет: false, v: 0, курс: 0, ω: 0, вертолёт: false, инерция: 0, палец: null, высота: 0, пробег: 0, было: null, завис: false, поехал: false };
   const можноСесть = () => (ст.эт === 'стоит' || ст.эт === 'припаркован') && !ст.пролёт;
   {
     const с = document.createElement('style');
     с.textContent = `
       #фениксСесть { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
                      height: 48px; padding: 0 22px; border: 0; border-radius: 14px; background: #F2E6C8; color: #1A1A1A; font: 800 14px system-ui, sans-serif; letter-spacing: 1px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
-      #фениксРуль { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 8; display: none; gap: 8px; align-items: flex-end; }
+      #фениксРуль { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 8; display: none; gap: 10px; flex-direction: column; align-items: center; }
       #фениксРуль.видно { display: flex; }
+      #фениксРуль .ряд { display: flex; gap: 8px; align-items: center; }
+      #фениксРуль .зона { position: relative; width: 136px; height: 136px; border-radius: 50%; border: 2px solid rgba(244,196,48,.75); touch-action: none;
+                          background: radial-gradient(circle, rgba(30,22,6,.35) 0 30%, rgba(30,22,6,.72) 70%); box-shadow: 0 4px 18px rgba(0,0,0,.4); user-select: none; -webkit-user-select: none; }
+      #фениксРуль .зона.жмут { border-color: #F4C430; background: radial-gradient(circle, rgba(244,196,48,.18) 0 30%, rgba(30,22,6,.78) 70%); }
+      #фениксРуль .стр { position: absolute; left: 50%; top: 50%; width: 8px; height: 58px; margin-left: -4px; border-radius: 4px; background: #F4C430; transform-origin: 50% 0; pointer-events: none; }
+      #фениксРуль .стр::after { content: ''; position: absolute; left: -5px; bottom: -6px; width: 18px; height: 12px; border-radius: 3px; background: #F4C430; }
+      #фениксРуль .кабинка { position: absolute; left: 50%; top: 50%; width: 22px; height: 38px; margin: -19px 0 0 -11px; border-radius: 6px 6px 3px 3px; background: #2456B8; border-top: 9px solid #E8E2D0; pointer-events: none; }
+      #фениксРуль .зона::before { content: ''; position: absolute; inset: 14px; border-radius: 50%; border: 1px dashed rgba(244,196,48,.35); pointer-events: none; }
+      @media (max-height: 400px) { #фениксРуль .зона { width: 120px; height: 120px; } #фениксРуль .стр { height: 50px; } #фениксРуль button { width: 50px; height: 50px; } }
+      body.заРулём #сверху { display: none !important; }
       #фениксРуль button { width: 56px; height: 56px; border-radius: 50%; border: 1px solid #F4C430; background: rgba(30,22,6,0.82); color: #F4E0A0; font: 700 22px system-ui, sans-serif; touch-action: none; }
       #фениксРуль button[aria-pressed="true"] { background: #F4C430; color: #1A1A1A; }
       #фениксРуль .выйти { width: auto; height: 44px; border-radius: 14px; padding: 0 14px; font-size: 12px; letter-spacing: 1px; }
@@ -10214,16 +10295,43 @@ window.ДЕТАЛИ.push(['феникс', function (API) {
   }
   const кнСесть = document.createElement('button'); кнСесть.id = 'фениксСесть'; кнСесть.textContent = 'СЕСТЬ В ФЕНИКС';
   const руль = document.createElement('div'); руль.id = 'фениксРуль';
-  const кнопкаР = (текст, подпись) => { const б = document.createElement('button'); б.textContent = текст; б.setAttribute('aria-label', подпись); руль.appendChild(б); return б; };
-  const кнВлево = кнопкаР('⟲', 'Стрела влево'), кнВправо = кнопкаР('⟳', 'Стрела вправо'), кнВинт = кнопкаР('🌀', 'Раскрутить стрелу');
+  // зона стрелы: вид сверху, кабина смотрит вверх; жёлтая палка — куда сейчас смотрит стрела
+  const зона = document.createElement('div'); зона.className = 'зона'; зона.setAttribute('aria-label', 'Крутить стрелу пальцем');
+  const стрЗ = document.createElement('div'); стрЗ.className = 'стр';
+  const кабинка = document.createElement('div'); кабинка.className = 'кабинка';
+  зона.append(стрЗ, кабинка);
+  const ряд = document.createElement('div'); ряд.className = 'ряд';
+  руль.append(зона, ряд);
+  const кнопкаР = (текст, подпись) => { const б = document.createElement('button'); б.textContent = текст; б.setAttribute('aria-label', подпись); ряд.appendChild(б); return б; };
+  const кнВинт = кнопкаР('🌀', 'Раскрутить стрелу');
   const кнВыйти = кнопкаР('ВЫЙТИ', 'Выйти из Феникса'); кнВыйти.className = 'выйти';
   кнВинт.setAttribute('aria-pressed', 'false');
   document.body.append(кнСесть, руль);
-  for (const [б, знак] of [[кнВлево, 1], [кнВправо, -1]]) {
-    const стоп = () => { if (рулём.кран === знак) рулём.кран = 0; };
-    б.addEventListener('pointerdown', e => { e.preventDefault(); рулём.кран = знак; });
-    for (const и of ['pointerup', 'pointercancel', 'pointerleave']) б.addEventListener(и, стоп);
-  }
+  // угол стрелы, которая смотрела бы на палец (rotation.y: 0 — вперёд, по экрану вверх; +x Феникса — по экрану влево)
+  const уголПальца = e => { const r = зона.getBoundingClientRect(), sx = e.clientX - r.left - r.width / 2, sy = e.clientY - r.top - r.height / 2; return { у: Math.atan2(-sx, -sy), д: Math.hypot(sx, sy) }; };
+  const обёрт = a => Math.atan2(Math.sin(a), Math.cos(a));
+  зона.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation();
+    if (!рулём.едет || рулём.палец) return;
+    try { зона.setPointerCapture(e.pointerId); } catch (err) {}
+    const у = уголПальца(e);
+    рулём.палец = { ид: e.pointerId, у: у.у, t: performance.now(), w: 0 }; рулём.инерция = 0;   // схватил — стрела останавливается под пальцем
+    зона.classList.add('жмут');
+  });
+  зона.addEventListener('pointermove', e => {
+    const п = рулём.палец; if (!п || e.pointerId !== п.ид) return;
+    const у = уголПальца(e); if (у.д < 10) return;               // в самом центре угол скачет — не считаем
+    const t = performance.now(), Δ = обёрт(у.у - п.у), dt = Math.max(0.004, (t - п.t) / 1000);
+    if (!document.body.classList.contains('кино')) Ф.поворот.rotation.y += Δ;
+    п.w = п.w * 0.5 + Math.max(-20, Math.min(20, Δ / dt)) * 0.5;   // скорость пальца, рад/с — для инерции и «вертолёта»
+    п.у = у.у; п.t = t;
+  });
+  const отпуститьЗону = e => {
+    const п = рулём.палец; if (!п || e.pointerId !== п.ид) return;
+    рулём.инерция = performance.now() - п.t < 120 ? Math.max(-16, Math.min(16, п.w)) : 0;   // крутанул и отпустил — пусть крутится сама
+    рулём.палец = null; зона.classList.remove('жмут');
+  };
+  for (const и of ['pointerup', 'pointercancel', 'lostpointercapture']) зона.addEventListener(и, отпуститьЗону);
   кнВинт.addEventListener('click', () => { рулём.вертолёт = !рулём.вертолёт; кнВинт.setAttribute('aria-pressed', String(рулём.вертолёт)); });
   кнВыйти.addEventListener('click', () => выйти());
   кнСесть.addEventListener('click', () => сесть());
@@ -10231,20 +10339,20 @@ window.ДЕТАЛИ.push(['феникс', function (API) {
   function сесть() {
     const М = window.__мир;
     if (!можноСесть() || рулём.едет || !М) return;
-    Object.assign(рулём, { едет: true, v: 0, курс: Ф.гр.rotation.y, ω: 0, вертолёт: false, кран: 0, высота: 0, пробег: 0 });
+    Object.assign(рулём, { едет: true, v: 0, курс: Ф.гр.rotation.y, ω: 0, вертолёт: false, инерция: 0, палец: null, высота: 0, пробег: 0 });
     рулём.было = { высота: М.кам.высота, даль: М.кам.даль, скрыт: window.__игрокСкрыт };
-    window.__заРулём = true; window.__игрокСкрыт = true;          // пешком не ходим, самого игрока не видно — он в кабине
+    window.__заРулём = true; window.__игрокСкрыт = true; document.body.classList.add('заРулём');          // пешком не ходим, самого игрока не видно — он в кабине
     М.кам.высота = 3.2; М.кам.даль = 11;
     кнСесть.style.display = 'none'; руль.classList.add('видно'); кнВинт.setAttribute('aria-pressed', 'false');
     бип([196, 147, 196, 262], 0.12, 0.07);
-    подск() && подск().совет(ст.эт === 'стоит' ? 'Завёлся с полоборота. Ничей же. Джойстик — газ и руль, справа — стрела.' : 'Опять за рулём. Джойстик — газ и руль, справа — стрела.', 5);
+    подск() && подск().совет(ст.эт === 'стоит' ? 'Завёлся с полоборота. Ничей же. Джойстик — газ и руль. Справа круг: води по нему пальцем — крутится стрела.' : 'Опять за рулём. Джойстик — газ и руль, справа круг — стрела.', 5);
   }
   function выйти() {
     if (!рулём.едет) return;
     const М = window.__мир, б = рулём.было, p = Ф.гр.position;
-    рулём.едет = false; рулём.вертолёт = false; рулём.кран = 0; рулём.ω = 0; рулём.высота = 0;
+    рулём.едет = false; рулём.вертолёт = false; рулём.инерция = 0; рулём.палец = null; рулём.ω = 0; рулём.высота = 0; зона.classList.remove('жмут');
     p.y = В(p.x, p.z); Ф.тело.rotation.set(0, 0, 0); Ф.поворот.rotation.y = Math.PI; войКрана(0);
-    window.__заРулём = false; window.__игрокСкрыт = б.скрыт;
+    window.__заРулём = false; window.__игрокСкрыт = б.скрыт; document.body.classList.remove('заРулём');
     М.кам.высота = б.высота; М.кам.даль = б.даль;
     // вылезаем у двери водителя (слева), если там стена — справа или сзади
     const fx = Math.sin(рулём.курс), fz = Math.cos(рулём.курс);
@@ -10284,11 +10392,21 @@ window.ДЕТАЛИ.push(['феникс', function (API) {
       рулём.пробег += Math.hypot(nx - p.x, nz - p.z);
       p.x = Math.max(-API.ШИР / 2 + 25, Math.min(API.ШИР / 2 - 25, nx)); p.z = Math.max(-API.ГЛУБ / 2 + 25, Math.min(API.ГЛУБ / 2 - 25, nz));
     }
-    // стрела: кнопками крутим, 🌀 — раскручиваем как винт; на полных оборотах отрывается от земли
-    Ф.поворот.rotation.y += (рулём.кран || клКран) * dt * 1.4;
+    // стрела: пальцем по зоне (или Q/E), 🌀 — раскручиваем как винт; на полных оборотах отрывается от земли
+    Ф.поворот.rotation.y += клКран * dt * 1.4;
+    const п = рулём.палец;
+    if (п && performance.now() - п.t > 100) п.w *= Math.exp(-dt * 8);          // держит палец, но не крутит — скорость гаснет
+    if (!п && рулём.инерция) {
+      Ф.поворот.rotation.y += рулём.инерция * dt;
+      рулём.инерция *= Math.exp(-dt * 0.35);                                    // тяжёлая — крутится долго
+      if (Math.abs(рулём.инерция) < 0.05) рулём.инерция = 0;
+    }
     рулём.ω = рулём.вертолёт ? Math.min(16, рулём.ω + dt * 3) : Math.max(0, рулём.ω - dt * 5);
     Ф.поворот.rotation.y += рулём.ω * dt;
-    const надо = рулём.ω > 12 ? 2.8 * (рулём.ω - 12) / 4 : 0;
+    стрЗ.style.transform = 'rotate(' + (Math.PI - Ф.поворот.rotation.y % (Math.PI * 2)).toFixed(3) + 'rad)';
+    // раскрутил пальцем как бешеный — тоже винт
+    const обороты = Math.max(рулём.ω, Math.abs(рулём.инерция), п ? Math.abs(п.w) : 0);
+    const надо = обороты > 12 ? 2.8 * Math.min(1, (обороты - 12) / 4) : 0;
     рулём.высота += (надо - рулём.высота) * Math.min(1, dt * 2);
     if (рулём.высота > 0.3 && сл() < 0.6) пыль(p.x, p.z, В(p.x, p.z));
     // по земле: высота и наклон по рельефу
@@ -10297,7 +10415,7 @@ window.ДЕТАЛИ.push(['феникс', function (API) {
     Ф.гр.rotation.y = рулём.курс;
     Ф.тело.rotation.x = -Math.atan2(yП - yЗ, 6) * (1 - Math.min(1, рулём.высота));
     Ф.тело.rotation.z = рулём.высота > 0.2 ? Math.sin(performance.now() / 300) * 0.05 : 0;
-    войКрана(Math.max(рулём.ω / 16, 0.12 + Math.abs(рулём.v) / 26));          // мотор и вой крана
+    войКрана(Math.max(обороты / 16, 0.12 + Math.abs(рулём.v) / 26));          // мотор и вой крана
     if (!рулём.завис && рулём.высота > 1.5) { рулём.завис = true; кино() && кино().подпись('Почти вертолёт.', 2.5); событие('феникс-завис', {}); }
     if (!рулём.поехал && рулём.пробег > 150) { рулём.поехал = true; событие('феникс-поехал', {}); }
     // игрок — в кабине; камера держится сзади
@@ -10526,7 +10644,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     шторм: { имя: 'Шторм', цвет: '#F4C430', задача: 'Ты разработчик. Следи за посёлком, жми кнопки, а когда все сделают своё — запускай всех в космос.',
       вид: { мх: 'shtorm', голограмма: true, гарнитура: true, банка: true } },
     богдан: { имя: 'Богдан', цвет: '#E8E8E8', задача: 'Собери банки карбида, пока их не нашли пацаны с петардами.', предмет: 'банка', нужно: 6, подпись: 'Банки карбида',
-      вид: { мх: 'bogdan', принт: ['лев', /t-shirt/], очки: true, цепь: true } },
+      вид: window.__богданВид || { мх: 'bogdan', очки: true } },
     егор: { имя: 'Егор', цвет: '#9AD0F0', задача: 'Найди мотки провода — Ване на халупу.', предмет: 'провод', нужно: 5, подпись: 'Мотки провода',
       вид: { мх: 'egor' } },
     ярик: { имя: 'Ярик', цвет: '#B0E070', задача: 'Найди потерянные посылки Ozon. Вставать с остановки всё-таки придётся.', предмет: 'посылка', нужно: 5, подпись: 'Посылки',
