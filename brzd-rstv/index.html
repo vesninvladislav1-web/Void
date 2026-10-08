@@ -5286,7 +5286,7 @@ window.ДЕТАЛИ.push(['босс', function (API) {
   // настоящая 3D-модель (подставит модуль «люди 3D»): очки и рюкзак; вместо футболки — худи
   // (крой берём у кофты Шторма и красим в бордовый), джинсы — в чёрные штаны, кроссовки — с рыжей подошвой
   (window.__богданВид = { мх: 'bogdan', кофта: { из: 'shtorm', меш: /hooded/, прячь: /t-shirt/, цвет: '#4A2630' },
-    перекрас: [[/jeans/, 'штаны', '#1C1C1E'], [/shoes/, 'кроссы', '#151517']], очки: true, рюкзак: true });
+    перекрас: [[/jeans/, 'штаны', '#1C1C1E'], [/shoes/, 'кроссы', '#151517']], очки: true, рюкзак: true, лицо: 'lico_bogdan.jpg', ёжик: true });
   (window.__герои3д = window.__герои3д || []).push(Object.assign({ группа: богдан, причёска: 'hair_buzzed', волосы: '#3A2E26', кожа: '#E2B596',
     одежда: { верх: '#4A2630', низ: '#1C1C1E', обувь: '#151517', рукав: 0.68 } }, window.__богданВид));
 
@@ -7223,6 +7223,44 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     };
     мат.customProgramCacheKey = () => 'перекрас-' + вид + (старый ? '-п' : '');
   }
+  // ЛИЦО С ФОТО: снимок проецируется на голову спереди (по позе покоя), края мягко уходят в кожу модели.
+  // Как обрезать фото (lyudi/lico_<имя>.jpg, 2:3, без EXIF): лицо прямо, глаза — на 41.7% высоты сверху,
+  // середина между глазами — по центру, зрачки — на 28% и 72% ширины. Брови и ресницы модели прячем —
+  // свои на фото; глазные яблоки тоже покрываем фото, иначе сквозь веки на снимке торчали бы глаза модели.
+  const лицаТекс = {};
+  function фотоЛицо(мат, файл, И, ёжик) {
+    if (!лицаТекс[файл]) { const т = тексЗагр.load('lyudi/' + файл); т.anisotropy = 4; лицаТекс[файл] = т; }
+    const тф = лицаТекс[файл], гл = И.глаза || new THREE.Vector3(0, И.рост * 0.93, 0.08);
+    const старый = мат.onBeforeCompile;
+    мат.onBeforeCompile = (ш, р) => {
+      if (старый) старый(ш, р);
+      Object.assign(ш.uniforms, { uFace: { value: тф }, uEye: { value: гл.clone() }, uFW: { value: 0.1463 } });
+      if (!/varying vec3 vBind/.test(ш.vertexShader)) ш.vertexShader = 'varying vec3 vBind;\n' + ш.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBind = position;');
+      ш.fragmentShader = 'uniform sampler2D uFace; uniform vec3 uEye; uniform float uFW;\n' + (/varying vec3 vBind/.test(ш.fragmentShader) ? '' : 'varying vec3 vBind;\n') + ш.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    vec2 fp = vec2(0.5 + (vBind.x - uEye.x) / uFW, 0.4167 - (vBind.y - uEye.y) / (uFW * 1.5));
+    float fpMask = 0.0;
+    if (vBind.z > uEye.z - 0.1 && fp.x > 0.0 && fp.x < 1.0 && fp.y > 0.0 && fp.y < 1.0) {
+      vec2 e = vec2((fp.x - 0.5) / 0.45, (fp.y - 0.5) / 0.46);
+      float m = smoothstep(1.0, 0.78, length(e)) * smoothstep(uEye.z - 0.095, uEye.z - 0.055, vBind.z);
+      fpMask = m * smoothstep(0.03, 0.1, fp.y);                 // у самой макушки фото уступает ёжику
+      vec3 ф = pow(texture2D(uFace, vec2(fp.x, 1.0 - fp.y)).rgb, vec3(2.2));
+      diffuseColor.rgb = mix(diffuseColor.rgb, ф, m);
+    }
+    ${ёжик ? `// стрижка под машинку: тёмный ёжик по черепу, сквозь него чуть просвечивает кожа;
+    // линия волос спереди — как на фото, к затылку опускается
+    float зад = smoothstep(uEye.z - 0.05, uEye.z - 0.16, vBind.z);
+    float линия = uEye.y + 0.07 - зад * 0.12;
+    if (vBind.y > uEye.y - 0.14 && abs(vBind.x - uEye.x) < 0.12) {
+      float зерно = fract(sin(dot(floor(vBind * 900.0), vec3(12.99, 78.23, 37.72))) * 43758.55);
+      float h = smoothstep(линия - 0.004, линия + 0.012, vBind.y) * (0.82 + зерно * 0.18);
+      h *= 1.0 - smoothstep(0.0, 0.5, fpMask);
+      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.035, 0.025, 0.02) * (0.7 + зерно * 0.6), h);
+    }` : ''}
+  }`).replace(/ф/g, 'fc').replace(/зад/g, 'hB').replace(/линия/g, 'hL').replace(/зерно/g, 'hN');
+    };
+    мат.customProgramCacheKey = () => 'лицо-' + файл + (ёжик ? '-ё' : '') + (старый ? '-п' : '');
+  }
   // чужая кофта на свой скелет: тот же риг MakeHuman, кости находим по именам
   function надетьКофту(корень, кости, г, И) {
     const к = г.кофта, из = мх(к.из); if (!из || typeof из !== 'object') return;
@@ -7342,6 +7380,9 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       if (/_clothes_/.test(имя) && г.тон) о.material.color.multiplyScalar(г.тон);
       if (г.принт && г.принт[1].test(имя)) принт(о.material, г.принт[0], И);
       if (г.перекрас) for (const [рв, вид, цвет] of г.перекрас) if (рв.test(имя)) перекрас(о.material, вид, цвет, И);
+      if (г.лицо && /_body_|_eyes_/.test(имя)) фотоЛицо(о.material, г.лицо, И, г.ёжик && /_body_/.test(имя));
+      if (г.лицо && /_eyebrows_|_eyelashes_/.test(имя)) о.visible = false;
+      if (г.ёжик && /_hair_/.test(имя)) о.visible = false;          // своя причёска модели — длиннее, чем на фото
       if (г.глитч && !/_eyes_|_eyelashes_|_eyebrows_/.test(имя)) глитч(о.material);
       if (г.глитч && /_eyes_|_eyelashes_|_eyebrows_/.test(имя)) о.visible = false;
       if (г.голограмма) голограмма(о.material, И, появл);
