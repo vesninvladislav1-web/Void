@@ -67,7 +67,7 @@
   #старт .кн { height: 52px; padding: 0 30px; font-size: 15px; letter-spacing: 3px; border-color: var(--акцент); color: var(--акцент); }
   #графика { display: flex; align-items: center; gap: 8px; color: var(--тусклый); font-size: 11px; letter-spacing: 2px; }
   #графика .кн { height: 36px; padding: 0 12px; font-size: 11px; }
-  #графика .кн[aria-pressed="true"] { border-color: var(--акцент); color: var(--акцент); opacity: 1; }
+  #графика .кн[aria-pressed="true"], #свет .кн[aria-pressed="true"] { border-color: var(--акцент); color: var(--акцент); opacity: 1; }
   #загрузка { color: var(--тусклый); font-size: 12px; letter-spacing: 1px; max-width: 92vw; overflow-wrap: anywhere; }
 </style>
 
@@ -1703,6 +1703,12 @@ window.ДЕТАЛИ.push(['сквер', function (API) {
       const п = new THREE.Mesh(new THREE.CircleGeometry(4.5, 20).rotateX(-Math.PI / 2), пятноМ); п.position.set(x, y + 0.08, z); гр.add(п);
       API.добавитьПрепятствие([[x - 0.15, z - 0.15], [x + 0.15, z - 0.15], [x + 0.15, z + 0.15], [x - 0.15, z + 0.15]], 'фонарь');
     }
+    // днём не горят (ореол и пятно на земле гаснут, плафон — просто белый)
+    API.каждыйКадр.push(() => {
+      const L = API.НЕБО_Ц ? API.НЕБО_Ц.uLamps.value : 1;
+      ореол.opacity = L; пятноМ.opacity = L; ореол.visible = пятноМ.visible = L > 0.01;
+      светМ.color.setRGB(0.55 + 0.45 * L, 0.55 + 0.41 * L, 0.55 + 0.3 * L);
+    });
   }
 
   // ===================== СКАМЕЙКИ, УРНЫ, БЕСЕДКИ, ДЕРЕВЦА, ЗАБОР =====================
@@ -4009,8 +4015,10 @@ window.ДЕТАЛИ.push(['улицы: фонари, знаки, лужи, бу�
     г.setAttribute('aInfo', new THREE.Float32BufferAttribute(инф, 3));
     г.setAttribute('aCol', new THREE.Float32BufferAttribute(цв, 3));
     г.setIndex(инд); г.computeBoundingSphere();
+    // днём фонари не горят: яркость — общая uLamps (0…1), в апокалипсис небо их зажигает
     const мат = new THREE.ShaderMaterial({
       transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+      uniforms: { uLamps: API.НЕБО_Ц.uLamps },
       vertexShader: `
         attribute vec2 aQ; attribute vec3 aInfo; attribute vec3 aCol;
         varying vec2 vQ; varying vec3 vInfo; varying vec3 vCol; varying float vFade;
@@ -4028,21 +4036,22 @@ window.ДЕТАЛИ.push(['улицы: фонари, знаки, лужи, бу�
           gl_Position = projectionMatrix * mv;
         }`,
       fragmentShader: `
-        varying vec2 vQ; varying vec3 vInfo; varying vec3 vCol; varying float vFade;
+        varying vec2 vQ; varying vec3 vInfo; varying vec3 vCol; varying float vFade; uniform float uLamps;
         void main() {
           float r2 = dot(vQ, vQ);
           if (r2 > 1.0) discard;
           float k;
           if (vInfo.x > 0.5) k = exp(-r2 * 14.0) * 1.1 + exp(-r2 * 4.0) * 0.22;
           else { float r = sqrt(r2); k = (1.0 - r) * (1.0 - r) * (0.6 + 0.4 * (1.0 - r)); }
-          gl_FragColor = vec4(vCol * k * vInfo.z * vFade, 1.0);
+          gl_FragColor = vec4(vCol * k * vInfo.z * vFade * uLamps, 1.0);
         }`,
     });
     const м = new THREE.Mesh(г, мат); м.renderOrder = 4; м.frustumCulled = false; сцена.add(м);
+    API.каждыйКадр.push(() => { м.visible = API.НЕБО_Ц.uLamps.value > 0.01; });
     тр.свечение = инд.length / 3;
   }
 
-  // ---- лужи: тёмная вода с отражением закатного неба и мокрый край ----
+  // ---- лужи: тёмная вода с отражением неба и мокрый край ----
   if (лужи.length) {
     const лк = document.createElement('canvas'); лк.width = лк.height = 512;
     const лс = лк.getContext('2d'); лс.fillStyle = '#000'; лс.fillRect(0, 0, 512, 512);
@@ -4091,7 +4100,8 @@ window.ДЕТАЛИ.push(['улицы: фонари, знаки, лужи, бу�
       polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8 });
     // вода — тёмная; чем положе взгляд, тем больше в ней неба (как у пруда)
     мат.onBeforeCompile = ш => {
-      ш.fragmentShader = ш.fragmentShader
+      Object.assign(ш.uniforms, { uZen: API.НЕБО_Ц.uZen, uMid: API.НЕБО_Ц.uMid, uHor: API.НЕБО_Ц.uHor });
+      ш.fragmentShader = 'uniform vec3 uZen; uniform vec3 uMid; uniform vec3 uHor;\n' + ш.fragmentShader
         .replace('#include <map_fragment>', `
           vec4 pm = texture2D(map, vUv);
           float wat = smoothstep(0.35, 0.8, pm.r);
@@ -4101,8 +4111,8 @@ window.ДЕТАЛИ.push(['улицы: фонари, знаки, лужи, бу�
         .replace('#include <roughnessmap_fragment>', 'float roughnessFactor = mix(0.75, 0.04, wat);')
         .replace('#include <fog_fragment>', `
           float cv = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
-          vec3 sky = mix(vec3(0.93, 0.62, 0.40), vec3(0.62, 0.38, 0.42), smoothstep(0.0, 0.3, cv));
-          sky = mix(sky, vec3(0.16, 0.13, 0.30), smoothstep(0.3, 0.9, cv));
+          vec3 sky = mix(uHor, uMid, smoothstep(0.0, 0.3, cv));
+          sky = mix(sky, uZen, smoothstep(0.3, 0.9, cv));
           float fr = 0.25 + 0.75 * pow(1.0 - cv, 4.0);
           gl_FragColor.rgb = mix(gl_FragColor.rgb, sky * 0.92, fr * wat);
           #include <fog_fragment>`);
@@ -5137,6 +5147,8 @@ window.ДЕТАЛИ.push(['небо и кино', function (API) {
     туман: сцена.fog.color.clone(), ближе: сцена.fog.near, дальше: сцена.fog.far,
     солнце: солнце.intensity, цвСолнца: солнце.color.clone(), небо: небоСвет.intensity, цвНеба: небоСвет.color.clone(), цвЗемли: небоСвет.groundColor.clone(),
   };
+  база.лампы = API.НЕБО_Ц ? API.НЕБО_Ц.uLamps.value : 1;
+  window.__небоБаза = база;                 // переключатель «день/вечер» переписывает её на лету
   const АПОК = { туман: API.цвет('#7A2A10'), солнце: API.цвет('#FF6A30'), небо: API.цвет('#9A4A36'), земля: API.цвет('#6A2A12') };
   let ур = 0, цельУр = 0, скорость = 0.05, вспышка = 0;
   const задать = (к, сек) => { цельУр = к; скорость = Math.abs(к - ур) / Math.max(0.1, сек); };
@@ -5201,10 +5213,17 @@ window.ДЕТАЛИ.push(['небо и кино', function (API) {
       сцена.fog.color.lerp(tmp.set(0.5, 0.5, 0.48).multiplyScalar(1 - 0.4 * тёмн), дм * 0.85);
       сцена.fog.near *= 1 - дм; сцена.fog.far += (55 - сцена.fog.far) * дм;
     }
+    // и небо — в цвет дыма (туман в линейном цвете, небо пишет цвет экрана)
+    if (API.НЕБО_Ц) {
+      const Н = API.НЕБО_Ц; Н.uSmoke.value = дм * 0.92;
+      if (дм > 0) Н.uSmokeCol.value.set(Math.pow(сцена.fog.color.r, 1 / 2.2), Math.pow(сцена.fog.color.g, 1 / 2.2), Math.pow(сцена.fog.color.b, 1 / 2.2));
+    }
     солнце.intensity = база.солнце * (1 - 0.2 * a - 0.1 * тёмн); солнце.color.copy(база.цвСолнца).lerp(АПОК.солнце, a);
     небоСвет.intensity = база.небо * (1 + 0.9 * a) + fl * 1.6;   // зарево подсвечивает улицы — видно, где ты
     небоСвет.color.copy(база.цвНеба).lerp(АПОК.небо, a).lerp(tmp.set(1, 0.6, 0.25), Math.min(1, fl * 0.6));
     небоСвет.groundColor.copy(база.цвЗемли).lerp(АПОК.земля, a);
+    // фонари: вечером горят всегда, днём — только когда небо темнеет (апокалипсис)
+    if (API.НЕБО_Ц) API.НЕБО_Ц.uLamps.value = Math.max(база.лампы, Math.min(1, a * 1.5));
     // подпись
     if (таймПодписи > 0) { таймПодписи -= dt; if (таймПодписи <= 0) подписьЭл.style.opacity = 0; }
     // кино-камера: облёт события
@@ -6328,7 +6347,7 @@ window.ДЕТАЛИ.push(['главные места', function (API) {
 </script>
 <script>
 // Звуки посёлка. Всё синтезируется на месте (Web Audio), файлов нет:
-// сверчки на закате, лягушки у пруда, ветер, шаги по разным покрытиям,
+// птицы днём и сверчки вечером, лягушки у пруда, ветер, шаги по разным покрытиям,
 // собаки вдалеке — а после взрыва лает весь посёлок и звенит в ушах.
 // Кнопка «ЗВУК» глушит всё (и взрывы тоже — они идут через общий выход).
 window.ДЕТАЛИ.push(['звуки', function (API) {
@@ -6404,6 +6423,16 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
     for (let i = 0; i < n; i++) { const t = t0 + i * 0.05; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.05 * гр, t + 0.006); g.gain.linearRampToValueAtTime(0, t + 0.028); }
     о.connect(g); пан(g, p).connect(А.фон); о.start(t0); о.stop(t0 + n * 0.05 + 0.05);
   }
+  function птица(гр, p) {              // днём: воробей («чик-чирик» вверх) или синица («ти-ти-тюю»)
+    const c = А.ctx, t0 = c.currentTime, воробей = Math.random() < 0.55, n = воробей ? 2 + (Math.random() * 4 | 0) : 3, осн = 2600 + Math.random() * 1500;
+    for (let i = 0; i < n; i++) {
+      const t = t0 + i * (воробей ? 0.09 + Math.random() * 0.03 : 0.17), о = c.createOscillator(), g = c.createGain(), дл = воробей ? 0.055 : (i === n - 1 ? 0.2 : 0.09);
+      const f0 = осн * (воробей ? 1 + Math.random() * 0.2 : (i === n - 1 ? 0.78 : 1.12));
+      о.type = 'sine'; о.frequency.setValueAtTime(f0, t); о.frequency.exponentialRampToValueAtTime(f0 * (воробей ? 1.4 : 0.85), t + дл);
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.03 * гр, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + дл);
+      о.connect(g); пан(g, p).connect(А.фон); о.start(t); о.stop(t + дл + 0.02);
+    }
+  }
   function ква(гр, p) {                // лягушка: низкое «кваканье» с дрожанием
     const c = А.ctx, t0 = c.currentTime, n = 2 + (Math.random() * 4 | 0);
     for (let i = 0; i < n; i++) {
@@ -6472,7 +6501,7 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
   const доВоды = (x, z) => { let м = Infinity; for (const [bx, bz] of берег) м = Math.min(м, Math.hypot(bx - x, bz - z)); return м; };
 
   // ===================== КАЖДЫЙ КАДР =====================
-  let таймСверчок = 0, таймЛяг = 3, таймСобака = 12, прошлаяФаза = 0, пх = null, пз = null, таймВоды = 0, вода = 999;
+  let таймСверчок = 0, таймПтицы = 2, таймЛяг = 3, таймСобака = 12, прошлаяФаза = 0, пх = null, пз = null, таймВоды = 0, вода = 999;
   API.каждыйКадр.push((dt, ms, поз) => {
     if (!А.ctx || !dt || А.ctx.state !== 'running') return;
     // шаги: по фазе походки, на каждом касании земли
@@ -6486,7 +6515,11 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
     таймВоды -= dt; if (таймВоды <= 0) { таймВоды = 1; вода = доВоды(поз.x, поз.z); }
     // ветер сильнее вдали от домов (в поле) — грубо: чем дальше от центра посёлка
     if (ветерГ) ветерГ.gain.setTargetAtTime(0.02 + Math.min(0.05, Math.hypot(поз.x, поз.z) / 30000), А.ctx.currentTime, 1);
-    таймСверчок -= dt; if (таймСверчок <= 0) { таймСверчок = 0.25 + Math.random() * 0.9; чирик(0.4 + Math.random() * 0.8, Math.random() * 2 - 1); }
+    // днём — птицы, сверчков почти не слышно; вечером — наоборот (свет — в настройках)
+    const день = !!window.__свет && window.__свет.какой() === 'день';
+    if (сверчкиГ) сверчкиГ.gain.setTargetAtTime(день ? 0.01 : 0.05, А.ctx.currentTime, 2);
+    if (день) { таймПтицы -= dt; if (таймПтицы <= 0) { таймПтицы = 1.2 + Math.random() * 4; птица(0.4 + Math.random() * 0.8, Math.random() * 2 - 1); } }
+    else { таймСверчок -= dt; if (таймСверчок <= 0) { таймСверчок = 0.25 + Math.random() * 0.9; чирик(0.4 + Math.random() * 0.8, Math.random() * 2 - 1); } }
     if (вода < 160) { таймЛяг -= dt; if (таймЛяг <= 0) { таймЛяг = 1.5 + Math.random() * 4; ква(Math.max(0.1, 1 - вода / 160), Math.random() * 2 - 1); } }
     таймСобака -= dt; if (таймСобака <= 0) { таймСобака = 18 + Math.random() * 40; гав(0.15 + Math.random() * 0.25, Math.random() * 2 - 1); }
   });
@@ -7296,6 +7329,26 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
   const текстVoid = (() => { const к = document.createElement('canvas'); к.width = 256; к.height = 96; const с = к.getContext('2d');
     с.fillStyle = '#000'; с.fillRect(0, 0, 256, 96); с.fillStyle = '#fff'; с.font = 'bold 72px monospace'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillText('void', 128, 50);
     const т = new THREE.CanvasTexture(к); return т; })();
+  // Ключ программы шейдера. Доработки (принт, перекраска, лицо, кожа, глитч) навешиваются цепочкой
+  // через onBeforeCompile — ключ тоже складываем цепочкой, иначе материалы с разными цепочками
+  // (например, тело с кожей+глитчем и кофта с принтом+глитчем) получили бы одну и ту же программу.
+  function ключ(мат, имя) {
+    const к = (мат.userData.ключ || '') + '|' + имя;
+    мат.userData.ключ = к; мат.customProgramCacheKey = () => к;
+  }
+  // Кожа: свет «заворачивает» за край — тень на лице и руках ложится мягко, без резкой
+  // ступеньки на грубой сетке (как у настоящей кожи, где свет немного просвечивает).
+  const СВЕТ_КОЖИ = THREE.ShaderChunk.lights_physical_pars_fragment.replace(
+    'float dotNL = saturate( dot( geometry.normal, directLight.direction ) );',
+    'float dotNL = saturate( ( dot( geometry.normal, directLight.direction ) + 0.45 ) / 1.45 );');
+  function кожа(мат) {
+    const старый = мат.onBeforeCompile;
+    мат.onBeforeCompile = (ш, р) => {
+      if (старый) старый(ш, р);
+      ш.fragmentShader = ш.fragmentShader.replace('#include <lights_physical_pars_fragment>', СВЕТ_КОЖИ);
+    };
+    ключ(мат, 'кожа');
+  }
   // мат — материал одежды; вид: 'лев' | 'полоски' | 'олимпийка' | 'void'; И — сведения о модели
   function принт(мат, вид, И) {
     мат.onBeforeCompile = ш => {
@@ -7319,7 +7372,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     if (front && uv.x > 0.0 && uv.x < 1.0 && uv.y > 0.0 && uv.y < 1.0) diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92), texture2D(uVoid, uv).r);` : ''}
   }`);
     };
-    мат.customProgramCacheKey = () => 'принт-' + вид;
+    ключ(мат, 'принт-' + вид);
   }
   // перекрасить одежду по фото, сохранив складки текстуры: светлота ткани × новый цвет.
   // вид: 'худи' (карман-кенгуру, манжеты), 'штаны' (резинки внизу), 'кроссы' (рыжая подошва),
@@ -7356,7 +7409,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.02), надп.a * 0.92);` : ''}
   }`.replace(/рукав/g, 'sl').replace(/надп/g, 'lg'));
     };
-    мат.customProgramCacheKey = () => 'перекрас-' + вид + (старый ? '-п' : '');
+    ключ(мат, 'перекрас-' + вид);
   }
   // ЛИЦО С ФОТО: снимок проецируется на голову спереди (по позе покоя), края мягко уходят в кожу модели.
   // Как обрезать фото (lyudi/lico_<имя>.jpg, 2:3, без EXIF): лицо прямо, глаза — на 41.7% высоты сверху,
@@ -7398,7 +7451,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     }` : ''}
   }`).replace(/ф/g, 'fc').replace(/зад/g, 'hB').replace(/линия/g, 'hL').replace(/зерно/g, 'hN');
     };
-    мат.customProgramCacheKey = () => 'лицо-' + (ёжик ? 'ё' : '') + (старый ? '-п' : '');
+    ключ(мат, 'лицо' + (ёжик ? '-ё' : ''));
   }
   // чужая кофта на свой скелет: тот же риг MakeHuman, кости находим по именам
   function надетьКофту(корень, кости, г, И) {
@@ -7443,7 +7496,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     gl_FragColor.rgb += vec3(0.0, 0.25, 0.3) * скан;
   }`.replace(/кл/g, 'gC').replace(/скан/g, 'gK'));
     };
-    мат.customProgramCacheKey = () => 'глитч-' + (старый ? 'п' : '');
+    ключ(мат, 'глитч');
   }
   // голограмма: свет вместо тела — контур ярче, строки развёртки, мерцание; проявляется снизу вверх (uAp)
   const мерцание = { value: 1 };
@@ -7474,7 +7527,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     gl_FragColor = vec4(col, a);
   }`);
     };
-    мат.customProgramCacheKey = () => 'голограмма';
+    ключ(мат, 'голограмма');
   }
   function проектор() {
     const г = new THREE.Group();
@@ -7516,6 +7569,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       о.castShadow = true; о.frustumCulled = false;
       о.material = о.material.clone();
       const имя = о.material.name;
+      if (/_body_/.test(имя) && !г.голограмма) кожа(о.material);
       if (/_clothes_/.test(имя) && г.тон) о.material.color.multiplyScalar(г.тон);
       if (г.принт && г.принт[1].test(имя)) принт(о.material, г.принт[0], И);
       if (г.перекрас) for (const [рв, вид, цвет] of г.перекрас) if (рв.test(имя)) перекрас(о.material, вид, цвет, И);
@@ -7680,7 +7734,10 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
         if (поп && поп.point.y > от.y) м.корень.position.y = (поп.point.y - от.y) / (г.группа.scale.y || 1);
       }
       г.группа.add(м.корень);
-      играть(м, 'Idle_Loop'); обновить(м, 0);
+      // сразу в свою позу (сидит/стоит): анимация включается с плавным нарастанием, и без
+      // прогона в 0.3 с герой, к которому ещё не подходили ближе 90 м, издали стоял бы в T-позе
+      let поза = 'Idle_Loop'; try { if (г.аним) поза = г.аним(0) || поза; } catch (e) {}
+      играть(м, поза); обновить(м, 0.3);
       героиМ.push({ г, м, x: null, z: null });
     }
   }
@@ -10026,6 +10083,17 @@ window.ДЕТАЛИ.push(['настройки', function () {
   строка('ЗВУК', звук); строка('ПОДПИСИ', подписи);
   строка('МАТ', взять('мат'));
   строка('ГРАФИКА', взять('графика'));
+  // свет: день или вечер — сразу, без перезагрузки
+  {
+    const гр = document.createElement('div'); гр.id = 'свет'; гр.style.cssText = 'display:flex;gap:6px;align-items:center';
+    const кнопки = [['день', 'ДЕНЬ'], ['вечер', 'ВЕЧЕР']].map(([к, т]) => {
+      const б = document.createElement('button'); б.className = 'кн шрифт'; б.textContent = т; б.dataset.к = к;
+      б.addEventListener('click', () => { if (!window.__свет) return; window.__свет.поставить(к); обн(); });
+      гр.appendChild(б); return б;
+    });
+    const обн = () => { const с = window.__свет ? window.__свет.какой() : 'день'; for (const б of кнопки) б.setAttribute('aria-pressed', String(б.dataset.к === с)); };
+    обн(); строка('СВЕТ', гр);
+  }
   // авторы ассетов (часть одежды людей — CC-BY, указывать обязательно)
   { const т = document.createElement('div'); т.style.cssText = 'font-size:9px;line-height:1.4;color:var(--тусклый);letter-spacing:0;max-width:230px';
     т.textContent = 'Люди: MakeHuman (CC0); одежда и волосы — Elvaerwyn, Mindfront, janexx, punkduck (CC-BY 4.0), MakeHuman community (CC0). Анимации и сортир: Quaternius, System G6 (CC0). Текстуры: Poly Haven (CC0). Карта © OpenStreetMap.';
@@ -12263,26 +12331,50 @@ const ГОРИЗОНТ = цвет('#E9A36B');
 сцена.fog = new THREE.Fog(ГОРИЗОНТ, 120, 820);
 const камера = new THREE.PerspectiveCamera(58, 1, 0.3, 4000);
 
-// Вечер, как в «Бороздиновке — Ростов»: солнце низко на западе-юго-западе
+// Направление на солнце; задаёт его свет (см. «СВЕТ» ниже)
 const СОЛНЦЕ = new THREE.Vector3(-0.92, 0.2, 0.34).normalize();
 
-// Небо — градиент заката с сиянием у солнца и облаками. Туман на него не действует.
+// ===================== СВЕТ: ДЕНЬ ИЛИ ВЕЧЕР =====================
+// «день» (по умолчанию): солнце на 40° над горизонтом, белый свет, голубое небо с облаками,
+// светлые тени — лица и дворы видно, и на телефоне не темно.
+// «вечер» — как было с самого начала: низкое солнце на западе-юго-западе, закат
+// (как в «Бороздиновке — Ростов»). Переключается в настройках сразу, без перезагрузки.
+// Цвета неба (зенит, середина, горизонт, ореол и диск солнца, облака, отражение в воде) —
+// в цветах экрана: так их пишут шейдеры неба, пруда и луж. лампы — горят ли фонари (0…1).
+const СВЕТЫ = {
+  день: { солнце: [-0.72, 0.64, 0.27], цвСолнца: '#FFF0DC', сила: 1.15, небо: '#CFE0F2', земля: '#857A62', сНеба: 0.45,
+    туман: '#BFCFDF', ближе: 170, дальше: 1300, зен: [0.2, 0.4, 0.74], сер: [0.43, 0.62, 0.86], гор: [0.76, 0.84, 0.92],
+    ореол: [0.5, 0.46, 0.36], ореолСт: 36, диск: [1, 0.97, 0.9], облСвет: [1, 1, 1], облТень: [0.8, 0.84, 0.9], вода: [0.5, 0.63, 0.77], лампы: 0 },
+  вечер: { солнце: [-0.92, 0.2, 0.34], цвСолнца: '#FFC58F', сила: 1.8, небо: '#B9C3CF', земля: '#5A4A36', сНеба: 0.35,
+    туман: '#E9A36B', ближе: 120, дальше: 820, зен: [0.16, 0.13, 0.30], сер: [0.62, 0.38, 0.42], гор: [0.93, 0.62, 0.40],
+    ореол: [1, 0.62, 0.28], ореолСт: 18, диск: [1, 0.85, 0.55], облСвет: [1, 0.74, 0.52], облТень: [0.58, 0.42, 0.52], вода: [0.42, 0.30, 0.30], лампы: 1 },
+};
+let СВЕТ = (() => { try { return localStorage.getItem('бороздиновский.свет') || 'день'; } catch (e) { return 'день'; } })();
+if (!Object.prototype.hasOwnProperty.call(СВЕТЫ, СВЕТ)) СВЕТ = 'день';
+const НЕБО_Ц = {};
+for (const к of ['uZen', 'uMid', 'uHor', 'uGlow', 'uDisc', 'uCloudLit', 'uCloudSh', 'uWater']) НЕБО_Ц[к] = { value: new THREE.Vector3() };
+НЕБО_Ц.uGlowP = { value: 18 }; НЕБО_Ц.uLamps = { value: 1 };
+НЕБО_Ц.uSmoke = { value: 0 }; НЕБО_Ц.uSmokeCol = { value: new THREE.Vector3(0.7, 0.7, 0.68) };   // дым Дениса затягивает и небо
+
+// Небо — градиент с сиянием у солнца и облаками; цвета — из СВЕТЫ (день или закат). Туман на него не действует.
 let небоМат;
 // Шейдер — на латинице: кириллических имён язык видеокарты не понимает.
 {
   небоМат = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
-    uniforms: { sunDir: { value: СОЛНЦЕ }, uApok: { value: 0 }, uFlash: { value: 0 }, uTime: { value: 0 }, uTint: { value: new THREE.Vector3(1, 1, 1) } },   // апокалипсис 0..1.2, вспышка взрыва, uTint — ручной цвет от Шторма
+    uniforms: Object.assign({ sunDir: { value: СОЛНЦЕ }, uApok: { value: 0 }, uFlash: { value: 0 }, uTime: { value: 0 }, uTint: { value: new THREE.Vector3(1, 1, 1) } }, НЕБО_Ц),   // апокалипсис 0..1.2, вспышка взрыва, uTint — ручной цвет от Шторма
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: `
       uniform vec3 sunDir; uniform float uApok; uniform float uFlash; uniform float uTime; uniform vec3 uTint; varying vec3 vDir;
+      uniform vec3 uZen; uniform vec3 uMid; uniform vec3 uHor; uniform vec3 uGlow; uniform float uGlowP; uniform vec3 uDisc; uniform vec3 uCloudLit; uniform vec3 uCloudSh;
+      uniform float uSmoke; uniform vec3 uSmokeCol;
       float hs(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float ns(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         return mix(mix(hs(i), hs(i + vec2(1.0, 0.0)), f.x), mix(hs(i + vec2(0.0, 1.0)), hs(i + vec2(1.0, 1.0)), f.x), f.y); }
       float fbm(vec2 p){ float s = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { s += a * ns(p); p *= 2.03; a *= 0.5; } return s; }
       void main(){
         float y = max(vDir.y, -0.1);
-        vec3 zen = vec3(0.16,0.13,0.30), mid = vec3(0.62,0.38,0.42), hor = vec3(0.93,0.62,0.40);
+        vec3 zen = uZen, mid = uMid, hor = uHor;
         float ap = clamp(uApok, 0.0, 1.2);
         zen = mix(zen, vec3(0.22, 0.05, 0.06), clamp(ap, 0.0, 1.0));
         mid = mix(mid, vec3(0.62, 0.14, 0.06), clamp(ap, 0.0, 1.0));
@@ -12291,19 +12383,20 @@ let небоМат;
         vec3 col = mix(hor, mid, smoothstep(0.0, 0.18, y));
         col = mix(col, zen, smoothstep(0.18, 0.75, y));
         float k = max(dot(vDir, sunDir), 0.0);
-        col += (vec3(1.0,0.62,0.28) * pow(k, 18.0) * 0.9 + vec3(1.0,0.85,0.55) * pow(k, 900.0) * 3.0) * (1.0 - 0.75 * clamp(ap, 0.0, 1.0));
+        col += (uGlow * pow(k, uGlowP) * 0.9 + uDisc * pow(k, 900.0) * 3.0) * (1.0 - 0.75 * clamp(ap, 0.0, 1.0));
 
         if (vDir.y > 0.0) {
           vec2 cp = vDir.xz / (vDir.y + 0.15) * 1.3 + vec2(uTime * 0.004 * ap, 0.0);
           float thr = mix(0.5, 0.4, clamp(ap, 0.0, 1.0));
           float cl = smoothstep(thr, thr + 0.3, fbm(cp + vec2(3.1, 1.7))) * smoothstep(0.0, 0.14, vDir.y);
-          vec3 lit = mix(vec3(0.58, 0.42, 0.52), vec3(1.0, 0.74, 0.52), pow(k, 2.5));
+          vec3 lit = mix(uCloudSh, uCloudLit, pow(k, 2.5));
           vec3 smk = mix(vec3(0.3, 0.12, 0.08), vec3(1.0, 0.42, 0.1), smoothstep(0.45, 0.0, vDir.y) * 0.9);
           lit = mix(lit, smk, clamp(ap, 0.0, 1.0));
           col = mix(col, lit, cl * mix(0.8, 0.95, clamp(ap, 0.0, 1.0)));
         }
-        if (vDir.y < 0.0) col = mix(hor, vec3(0.35,0.24,0.16), smoothstep(0.0,-0.1,vDir.y));
+        if (vDir.y < 0.0) col = mix(hor, hor * vec3(0.42, 0.36, 0.3), smoothstep(0.0,-0.1,vDir.y));
         col += vec3(1.0, 0.55, 0.2) * uFlash * (0.35 + 0.65 * smoothstep(0.3, -0.05, vDir.y));
+        col = mix(col, uSmokeCol, uSmoke * (0.75 + 0.25 * smoothstep(0.5, 0.0, vDir.y)));
         gl_FragColor = vec4(col * uTint, 1.0);
       }`
   });
@@ -12315,7 +12408,7 @@ let небоМат;
 const небоОкр = null;
 // Свет нейтральнее: при тёплом свете сверху и снизу трава и грунтовка
 // становились одинаково бурыми, и дороги терялись на земле.
-// подобрано по снимкам: тёплое низкое солнце, прохладное небо, глубокие тени
+// Цвет и сила — из СВЕТЫ (день/вечер): их ставит применитьСвет ниже.
 const небоСвет = new THREE.HemisphereLight(цвет('#B9C3CF'), цвет('#5A4A36'), 0.35);
 сцена.add(небоСвет);
 const солнце = new THREE.DirectionalLight(цвет('#FFC58F'), 1.8);
@@ -12326,6 +12419,27 @@ const ТЕНЬ = УЛЬТРА ? 110 : 70;
 Object.assign(солнце.shadow.camera, { left: -ТЕНЬ, right: ТЕНЬ, top: ТЕНЬ, bottom: -ТЕНЬ, near: 1, far: 700 });
 солнце.shadow.bias = -0.0004; солнце.shadow.normalBias = УЛЬТРА ? 0.25 : 0.4;
 сцена.add(солнце, солнце.target);
+// поставить свет: солнце, небо, туман, цвета неба в шейдерах. Модуль «небо и кино» держит
+// свою «базу» (от неё каждый кадр считает апокалипсис) — её тоже переписываем.
+function применитьСвет(имя, запомнить) {
+  if (!Object.prototype.hasOwnProperty.call(СВЕТЫ, имя)) return;
+  const С = СВЕТЫ[имя]; СВЕТ = имя;
+  СОЛНЦЕ.set(...С.солнце).normalize();
+  солнце.color.copy(цвет(С.цвСолнца)); солнце.intensity = С.сила;
+  небоСвет.color.copy(цвет(С.небо)); небоСвет.groundColor.copy(цвет(С.земля)); небоСвет.intensity = С.сНеба;
+  сцена.fog.color.copy(цвет(С.туман)); сцена.fog.near = С.ближе; сцена.fog.far = С.дальше;
+  const Н = НЕБО_Ц;
+  Н.uZen.value.set(...С.зен); Н.uMid.value.set(...С.сер); Н.uHor.value.set(...С.гор); Н.uGlow.value.set(...С.ореол); Н.uGlowP.value = С.ореолСт;
+  Н.uDisc.value.set(...С.диск); Н.uCloudLit.value.set(...С.облСвет); Н.uCloudSh.value.set(...С.облТень); Н.uWater.value.set(...С.вода); Н.uLamps.value = С.лампы;
+  const б = window.__небоБаза;
+  if (б) {
+    б.туман.copy(сцена.fog.color); б.ближе = С.ближе; б.дальше = С.дальше; б.лампы = С.лампы;
+    б.солнце = С.сила; б.цвСолнца.copy(солнце.color); б.небо = С.сНеба; б.цвНеба.copy(небоСвет.color); б.цвЗемли.copy(небоСвет.groundColor);
+  }
+  if (запомнить) try { localStorage.setItem('бороздиновский.свет', имя); } catch (e) {}
+}
+применитьСвет(СВЕТ);
+window.__свет = { поставить: имя => применитьСвет(имя, true), какой: () => СВЕТ, СВЕТЫ };
 
 // ===================== ТЕКСТУРЫ =====================
 // Настоящие фотоматериалы (Poly Haven, CC0), ужатые до 512 px. Средний цвет
@@ -12605,7 +12719,7 @@ for (const д of ДАМБЫ) {
   const м = сб.меш(new THREE.MeshStandardMaterial({ vertexColors: true, map: текс('trava', ':дамба'), roughness: 1, side: THREE.DoubleSide }));
   м.receiveShadow = true; сцена.add(м);
 }
-// Вода: рябь (своя карта нормалей) + отражение закатного неба
+// Вода: рябь (своя карта нормалей) + отражение неба
 const водаРябь = (() => {
   const N = 128, к = document.createElement('canvas'); к.width = к.height = N;
   const с = к.getContext('2d'), img = с.createImageData(N, N), h = new Float32Array(N * N);
@@ -12628,11 +12742,12 @@ for (const в of воды) {
   const г = new THREE.ShapeGeometry(ф); г.rotateX(-Math.PI / 2);
   const мв = new THREE.MeshStandardMaterial({ color: цвет('#3A5752'), roughness: 0.12, metalness: 0,
     normalMap: водаРябь, normalScale: new THREE.Vector2(0.2, 0.2) });
-  // чем положе взгляд, тем больше в воде отражается закатное небо
+  // чем положе взгляд, тем больше в воде отражается небо (днём голубое, вечером закатное)
   мв.onBeforeCompile = ш => {
-    ш.fragmentShader = ш.fragmentShader.replace('#include <fog_fragment>', `
+    ш.uniforms.uWater = НЕБО_Ц.uWater;
+    ш.fragmentShader = 'uniform vec3 uWater;\n' + ш.fragmentShader.replace('#include <fog_fragment>', `
       float fr = pow(1.0 - clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0), 3.0);
-      gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.42, 0.30, 0.30), fr * 0.5);
+      gl_FragColor.rgb = mix(gl_FragColor.rgb, uWater, fr * 0.5);
       #include <fog_fragment>`);
   };
   const м = new THREE.Mesh(г, мв);
@@ -13469,7 +13584,7 @@ const API = {
   Сборка, коробка, плашка, дома, дороги, ШИРИНА, угодья, воды, вДоме, вВоде, вДворе, ближайшаяДорога, кДругойДороге, отрезкиДороги,
   сплат: { сп, СX, СZ, СМ, путь: сплатПуть, пятно: сплатПятно, обновить: () => { текСплат.needsUpdate = true; } },
   тени: { контур: затенитьКонтур, пятно: затенитьПятно, обновить: () => { текТени.needsUpdate = true; } },
-  добавитьПрепятствие, безТравы, безДеревьев, ДВОР, ВЕТЕР, солнце, небоСвет, камера, рендер, СОЛНЦЕ, небоМат, ОСТАНОВКА, ЗАБОРЫ, ГАЗ, СТОЛБЫ, ДЕРЕВЬЯ, ПОДПИСИ_ОРИЕНТИРОВ: [],
+  добавитьПрепятствие, безТравы, безДеревьев, ДВОР, ВЕТЕР, солнце, небоСвет, камера, рендер, СОЛНЦЕ, небоМат, НЕБО_Ц, ОСТАНОВКА, ЗАБОРЫ, ГАЗ, СТОЛБЫ, ДЕРЕВЬЯ, ПОДПИСИ_ОРИЕНТИРОВ: [],
   каждыйКадр: [],                 // функции (dt, ms, поз) — вызываются в каждом кадре
 };
 window.__API = API;
