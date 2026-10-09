@@ -8039,6 +8039,61 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     };
     ключ(мат, 'кожа');
   }
+  // ===================== ДЕТАЛИ ЛЮДЕЙ =====================
+  // Кожа: тёплый подповерхностный оттенок на границе света и тени, лёгкий бархат по краю силуэта,
+  // мелкая неровность (поры) — блик не «пластиковый». Ткань: плетение и ворс, складки темнее на изгибе,
+  // ткань не блестит. Глаза — влажный блик. Волосы — тусклый блеск вдоль прядей.
+  const ГЛСЛ_ШУМ = 'float dHash(vec3 p){ return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }\n' +
+    'float dNoise(vec3 p){ vec3 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);\n' +
+    '  return mix(mix(mix(dHash(i), dHash(i + vec3(1,0,0)), f.x), mix(dHash(i + vec3(0,1,0)), dHash(i + vec3(1,1,0)), f.x), f.y),\n' +
+    '             mix(mix(dHash(i + vec3(0,0,1)), dHash(i + vec3(1,0,1)), f.x), mix(dHash(i + vec3(0,1,1)), dHash(i + vec3(1,1,1)), f.x), f.y), f.z); }\n';
+  function сПозой(ш) {
+    if (!/varying vec3 vBind/.test(ш.vertexShader)) ш.vertexShader = 'varying vec3 vBind;\n' + ш.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBind = position;');
+    if (!/varying vec3 vBind/.test(ш.fragmentShader)) ш.fragmentShader = 'varying vec3 vBind;\n' + ш.fragmentShader;
+    if (!/dNoise/.test(ш.fragmentShader)) ш.fragmentShader = ГЛСЛ_ШУМ + ш.fragmentShader;
+  }
+  function детальКожи(мат) {
+    const старый = мат.onBeforeCompile;
+    мат.onBeforeCompile = (ш, р) => {
+      if (старый) старый(ш, р);
+      сПозой(ш);
+      ш.fragmentShader = ш.fragmentShader
+        .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+  roughnessFactor = clamp(0.62 + 0.18 * dNoise(vBind * 900.0) - 0.08 * dNoise(vBind * 60.0), 0.45, 0.85);`)
+        .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+  {
+    vec3 vd = normalize(vViewPosition);
+    float край = pow(1.0 - clamp(dot(normal, vd), 0.0, 1.0), 3.0);
+    reflectedLight.directDiffuse *= mix(vec3(1.0), vec3(1.12, 0.94, 0.88), 0.55);         // свет «внутри» кожи — теплее
+    reflectedLight.indirectDiffuse += diffuseColor.rgb * vec3(0.55, 0.22, 0.16) * 0.10;     // подповерхность в тени
+    reflectedLight.indirectSpecular += vec3(1.0, 0.86, 0.8) * край * 0.05;                   // бархат по краю
+  }`.replace(/край/g, 'kEdge'));
+    };
+    ключ(мат, 'детальКожи');
+  }
+  function детальТкани(мат) {
+    const старый = мат.onBeforeCompile;
+    мат.onBeforeCompile = (ш, р) => {
+      if (старый) старый(ш, р);
+      сПозой(ш);
+      ш.fragmentShader = ш.fragmentShader
+        .replace('#include <map_fragment>', `#include <map_fragment>
+  {
+    float weave = 0.5 + 0.25 * sin(vBind.x * 1400.0) * sin(vBind.y * 1400.0);
+    float lint = dNoise(vBind * 260.0), wear = dNoise(vBind * 18.0);
+    diffuseColor.rgb *= 0.93 + 0.07 * weave + 0.06 * (lint - 0.5);
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * vec3(1.04, 1.03, 1.0) + 0.015, smoothstep(0.62, 0.9, wear) * 0.35);   // потёртости светлее
+  }`)
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n  roughnessFactor = max(roughnessFactor, 0.88);')
+        .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+  {
+    float graz = clamp(dot(normal, normalize(vViewPosition)), 0.0, 1.0);
+    reflectedLight.indirectDiffuse *= 0.78 + 0.22 * smoothstep(0.0, 0.5, graz);            // в складках и на изгибах темнее
+    reflectedLight.indirectSpecular += diffuseColor.rgb * pow(1.0 - graz, 4.0) * 0.12;      // ворс ловит свет по краю
+  }`);
+    };
+    ключ(мат, 'детальТкани');
+  }
   // мат — материал одежды; вид: 'лев' | 'полоски' | 'олимпийка' | 'void'; И — сведения о модели
   function принт(мат, вид, И) {
     мат.onBeforeCompile = ш => {
@@ -8195,6 +8250,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       const н = new THREE.SkinnedMesh(о.geometry, о.material.clone()); н.castShadow = true; н.frustumCulled = false;
       н.material.name = о.material.name;
       if (к.цвет) перекрас(н.material, к.вид || 'худи', к.цвет, из);      // кофта в позе покоя своей модели — и мерки её
+      детальТкани(н.material);
       род.parent.add(н);
       н.bind(new THREE.Skeleton(о.skeleton.bones.map(b => кости[b.name] || кости.pelvis), о.skeleton.boneInverses), род.bindMatrix);
     }
@@ -8300,6 +8356,8 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       о.material = о.material.clone();
       const имя = о.material.name;
       if (/_body_/.test(имя) && !г.голограмма) кожа(о.material);
+      if (/_eyes_/.test(имя)) { о.material.roughness = 0.08; о.material.metalness = 0; }           // влажный блик на глазах
+      if (/_hair_/.test(имя)) { о.material.roughness = 0.55; }                                      // волосы чуть блестят
       if (/_body_/.test(имя) && г.майка) майка(о.material, г.майка, И);
       if (/_clothes_/.test(имя) && г.тон) о.material.color.multiplyScalar(г.тон);
       if (г.принт && г.принт[1].test(имя)) принт(о.material, г.принт[0], И);
@@ -8309,6 +8367,9 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       if (г.ёжик && /_hair_/.test(имя)) о.visible = false;          // своя причёска модели — длиннее, чем на фото
       if (г.глитч && !/_eyes_|_eyelashes_|_eyebrows_/.test(имя)) глитч(о.material);
       if (г.глитч && /_eyes_|_eyelashes_|_eyebrows_/.test(имя)) о.visible = false;
+      // детали — последними: принт переписывает onBeforeCompile целиком, остальные доработки цепляются
+      if (/_body_/.test(имя) && !г.голограмма) детальКожи(о.material);
+      if (/_clothes_/.test(имя) && !г.голограмма) детальТкани(о.material);
       if (г.голограмма) голограмма(о.material, И, появл);
     });
     if (г.кофта) надетьКофту(корень, кости, г, И);
