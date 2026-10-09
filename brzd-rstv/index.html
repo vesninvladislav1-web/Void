@@ -5312,7 +5312,8 @@ window.ДЕТАЛИ.push(['босс', function (API) {
   // настоящая 3D-модель (подставит модуль «люди 3D»): очки и рюкзак; вместо футболки — худи
   // (крой берём у кофты Шторма и красим в бордовый), джинсы — в чёрные штаны, кроссовки — с рыжей подошвой
   (window.__богданВид = { мх: 'bogdan', кофта: { из: 'shtorm', меш: /hooded/, прячь: /t-shirt/, цвет: '#4A2630' },
-    перекрас: [[/jeans/, 'штаны', '#1C1C1E'], [/shoes/, 'кроссы', '#151517']], очки: true, рюкзак: true, лицо: 'lico_bogdan.jpg', ёжик: true });
+    перекрас: [[/jeans/, 'штаны', '#1C1C1E'], [/shoes/, 'кроссы', '#151517']], очки: true, рюкзак: true, лицо: 'lico_bogdan.jpg', ёжик: true,
+    майка: '#3E2028' });                 // в вырезе кофты — не голая грудь: худи на фото глухое
   (window.__герои3д = window.__герои3д || []).push(Object.assign({ группа: богдан, причёска: 'hair_buzzed', волосы: '#3A2E26', кожа: '#E2B596',
     одежда: { верх: '#4A2630', низ: '#1C1C1E', обувь: '#151517', рукав: 0.68 } }, window.__богданВид));
 
@@ -7129,20 +7130,21 @@ window.ДЕТАЛИ.push(['Ярик', function (API) {
   window.__ярик = { я };
 }]);
 
-// Денис: сидит на скамейке в сквере, растрёпанный, в сером свитшоте с надписями NIKE.
-// Лицо — с фото (lyudi/lico_denis.jpg); модель — Ярика (у неё как раз растрёпанная стрижка и свитер),
-// свитер перекрашен в серый с надписями, волосы — в русый.
+// Денис: сидит на скамейке в сквере, растрёпанный, в зелёной куртке Stone Island поверх серого свитшота.
+// Лицо — с фото (lyudi/lico_denis.jpg); модель — Ярика (у неё как раз растрёпанная стрижка), волосы — в русый.
+// Куртка — крой кофты Шторма на его скелете, перекрашена в зелёный, с патчем-компасом на левом рукаве.
 window.ДЕТАЛИ.push(['Денис', function (API) {
   const { THREE, сцена } = API, С = window.__сквер;
-  window.__денисВид = { мх: 'yarik', лицо: 'lico_denis.jpg', лицоНиз: 0.86,
-    перекрас: [[/sweater/, 'найк', '#A4A6A9'], [/_hair_/, 'волосы', '#9A7A50'], [/trousers/, 'штаны', '#2A2C30']] };
+  window.__денисВид = { мх: 'yarik', лицо: 'lico_denis.jpg', лицоНиз: 0.86, майка: '#A4A6A9',
+    кофта: { из: 'shtorm', меш: /hooded/, прячь: /sweater/, цвет: '#5E6E3E', вид: 'стоник' },
+    перекрас: [[/_hair_/, 'волосы', '#9A7A50'], [/trousers/, 'штаны', '#2A2C30']] };
   if (!С) return;
   const ц = API.цвет, В = API.землиВысота;
   const мат = h => new THREE.MeshStandardMaterial({ color: ц(h), roughness: 0.85 });
   const куб = (w, h, d, м, x, y, z) => { const о = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), м); о.position.set(x, y, z); о.castShadow = true; return о; };
   const д = new THREE.Group();
-  // блочная фигура — пока грузится 3D-модель: серый свитшот, русая копна
-  const серый = мат('#A4A6A9'), кожа = мат('#E8C0A2'), волосы = мат('#9A7A50'), тёмн = мат('#2A2C30');
+  // блочная фигура — пока грузится 3D-модель: зелёная куртка, русая копна
+  const серый = мат('#5E6E3E'), кожа = мат('#E8C0A2'), волосы = мат('#9A7A50'), тёмн = мат('#2A2C30');
   д.add(куб(0.5, 0.6, 0.28, серый, 0, 0.8, 0), куб(0.28, 0.3, 0.28, кожа, 0, 1.28, 0), куб(0.34, 0.14, 0.34, волосы, 0, 1.46, 0));
   for (const s of [-1, 1]) д.add(куб(0.2, 0.18, 0.5, тёмн, s * 0.12, 0.52, 0.2), куб(0.18, 0.5, 0.2, тёмн, s * 0.12, 0.25, 0.42));
   // скамейка у длинной стороны сквера; сидит лицом внутрь сквера
@@ -7166,7 +7168,8 @@ window.ДЕТАЛИ.push(['Денис', function (API) {
 
   // ===================== РЕПЛИКИ =====================
   const ФРАЗЫ = ['— Последняя. Честно.', '— Это не дым. Это туман. Осенний.', '— Я не проспал. Я так причёсываюсь.', '— Квадрат гипотенузы равен… короче, чему-то равен.', '— Пифагор вон тоже не причёсывался. И ничего.',
-    '— Шпоры по геометрии не видел? Ветром сдуло.', '— Always be strong in life. Это не я, это кофта.', '— Сижу, готовлюсь. Морально.'];
+    '— Шпоры по геометрии не видел? Ветром сдуло.', '— Always be strong in life. Это не я, это кофта.', '— Сижу, готовлюсь. Морально.',
+    '— Стоник настоящий. Почти.', '— Патч не трогай. Он на пуговицах, отвалится.'];
   let фраза = 0, рядом = false, снесло = false, t = 0;
   const совет = т => window.__подсказки && window.__подсказки.совет('ДЕНИС: ' + т, 4);
   window.__подписка && window.__подписка('апокалипсис-кончился', () => { снесло = true; });
@@ -7381,13 +7384,28 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     с.fillStyle = '#000'; с.textAlign = 'center'; с.font = '900 66px Impact, "Arial Black", sans-serif'; с.fillText('NIKE', 128, 72);
     с.font = 'italic 600 17px Arial, sans-serif'; с.fillText('Always be strong in life.', 128, 98);
     const т = new THREE.CanvasTexture(к); т.anisotropy = 4; return т; })();
+  // патч Stone Island: две чёрные пуговицы, под ними чёрный шеврон с жёлто-зелёным компасом
+  const текстПатч = (() => { const к = document.createElement('canvas'); к.width = 128; к.height = 180; const с = к.getContext('2d');
+    с.fillStyle = '#0E0E0E'; for (const x of [42, 86]) { с.beginPath(); с.arc(x, 13, 8, 0, 6.29); с.fill(); }
+    с.beginPath(); с.moveTo(10, 30); с.lineTo(118, 30); с.lineTo(118, 150); с.quadraticCurveTo(64, 182, 10, 150); с.closePath(); с.fill();
+    с.strokeStyle = '#3A3A3A'; с.lineWidth = 3; с.stroke();
+    // компас-роза: длинные лучи по сторонам света — половинка жёлтая, половинка зелёная; диагонали короче
+    const cx = 64, cy = 88;
+    const луч = (а, R, r, ц1, ц2) => { const x = Math.cos(а), y = Math.sin(а), px = Math.cos(а + 1.5708), py = Math.sin(а + 1.5708);
+      с.fillStyle = ц1; с.beginPath(); с.moveTo(cx, cy); с.lineTo(cx + x * R, cy + y * R); с.lineTo(cx + px * r, cy + py * r); с.closePath(); с.fill();
+      с.fillStyle = ц2; с.beginPath(); с.moveTo(cx, cy); с.lineTo(cx + x * R, cy + y * R); с.lineTo(cx - px * r, cy - py * r); с.closePath(); с.fill(); };
+    for (let i = 0; i < 4; i++) луч(i * 1.5708 + 0.7854, 26, 7, '#EDEDE4', '#2E7A3A');
+    for (let i = 0; i < 4; i++) луч(i * 1.5708 - 1.5708, 46, 10, '#F2C200', '#2E8B3A');
+    с.strokeStyle = '#EDEDE4'; с.lineWidth = 2.5; с.beginPath(); с.arc(cx, cy, 30, 0, 6.29); с.stroke();
+    с.fillStyle = '#EDEDE4'; с.textAlign = 'center'; с.font = 'bold 13px Arial, sans-serif'; с.fillText('STONE ISLAND', 64, 150);
+    const т = new THREE.CanvasTexture(к); т.anisotropy = 4; return т; })();
   function перекрас(мат, вид, цвет, И) {
     const старый = мат.onBeforeCompile;
     мат.onBeforeCompile = (ш, р) => {
       if (старый) старый(ш, р);
-      Object.assign(ш.uniforms, { uCol: { value: ц(цвет) }, uH2: { value: И.рост }, uArm2: { value: И.рукаY }, uSh2: { value: И.плечоX }, uLogo: { value: текстНайк } });
+      Object.assign(ш.uniforms, { uCol: { value: ц(цвет) }, uH2: { value: И.рост }, uArm2: { value: И.рукаY }, uSh2: { value: И.плечоX }, uLogo: { value: текстНайк }, uBadge: { value: текстПатч } });
       if (!/varying vec3 vBind/.test(ш.vertexShader)) ш.vertexShader = 'varying vec3 vBind;\n' + ш.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBind = position;');
-      ш.fragmentShader = 'uniform vec3 uCol; uniform float uH2; uniform float uArm2; uniform float uSh2;\n' + (вид === 'найк' ? 'uniform sampler2D uLogo;\n' : '') + (/varying vec3 vBind/.test(ш.fragmentShader) ? '' : 'varying vec3 vBind;\n') + ш.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      ш.fragmentShader = 'uniform vec3 uCol; uniform float uH2; uniform float uArm2; uniform float uSh2;\n' + (вид === 'найк' ? 'uniform sampler2D uLogo;\n' : '') + (вид === 'стоник' ? 'uniform sampler2D uBadge;\n' : '') + (/varying vec3 vBind/.test(ш.fragmentShader) ? '' : 'varying vec3 vBind;\n') + ш.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
   {
     float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
     diffuseColor.rgb = uCol * ${вид === 'волосы' ? 'clamp(0.3 + l * 1.2, 0.25, 1.25)' : 'clamp(0.62 + l * 3.2, 0.45, 1.45)'};
@@ -7398,6 +7416,15 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     if (ax > uSh2 + 0.42) diffuseColor.rgb *= 0.82;
     if (ax < uSh2 && y < uH2 * 0.505) diffuseColor.rgb *= 0.82;` : ''}
     ${вид === 'штаны' ? `if (y < uH2 * 0.075) diffuseColor.rgb *= 0.7;` : ''}
+    ${вид === 'стоник' ? `// зелёная куртка Stone Island: тёмная молния спереди, манжеты и низ на резинке,
+    // на левом рукаве (в T-позе рука вдоль +x, наружная сторона смотрит вверх) — патч с компасом
+    if (front && ax < 0.009 && y > uH2 * 0.49 && y < uH2 * 0.83) diffuseColor.rgb *= 0.35;
+    if (ax > uSh2 + 0.44) diffuseColor.rgb *= 0.78;
+    if (ax < uSh2 && y < uH2 * 0.5) diffuseColor.rgb *= 0.8;
+    if (vBind.x > uSh2 + 0.04 && vBind.x < uSh2 + 0.17 && y > uArm2 - 0.03) {
+      vec2 pu = vec2(0.5 - vBind.z / 0.09, (vBind.x - uSh2 - 0.04) / 0.13);
+      if (pu.x > 0.0 && pu.x < 1.0) { vec4 pc = texture2D(uBadge, vec2(pu.x, 1.0 - pu.y)); diffuseColor.rgb = mix(diffuseColor.rgb, pow(pc.rgb, vec3(2.2)), pc.a); }
+    }` : ''}
     ${вид === 'кроссы' ? `// чёрный верх, рыжая подошва и задник
     if (y < 0.032) diffuseColor.rgb = vec3(0.62, 0.36, 0.12) * clamp(0.7 + l * 1.5, 0.6, 1.2);
     else if (vBind.z < -0.06 && y < 0.07) diffuseColor.rgb = vec3(0.55, 0.32, 0.1);` : ''}
@@ -7453,6 +7480,19 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     };
     ключ(мат, 'лицо' + (ёжик ? '-ё' : ''));
   }
+  // майка под расстёгнутой курткой: торс тела (от пояса до шеи, без рук) — в цвет одежды
+  function майка(мат, цвет, И) {
+    const старый = мат.onBeforeCompile;
+    мат.onBeforeCompile = (ш, р) => {
+      if (старый) старый(ш, р);
+      Object.assign(ш.uniforms, { uUnder: { value: ц(цвет) }, uH3: { value: И.рост }, uSh3: { value: И.плечоX } });
+      if (!/varying vec3 vBind/.test(ш.vertexShader)) ш.vertexShader = 'varying vec3 vBind;\n' + ш.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBind = position;');
+      ш.fragmentShader = 'uniform vec3 uUnder; uniform float uH3; uniform float uSh3;\n' + (/varying vec3 vBind/.test(ш.fragmentShader) ? '' : 'varying vec3 vBind;\n') + ш.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+  if (vBind.y > uH3 * 0.5 && vBind.y < uH3 * 0.815 && abs(vBind.x) < uSh3 + 0.03)
+    diffuseColor.rgb = uUnder * (0.88 + 0.12 * fract(sin(dot(floor(vBind.xy * 400.0), vec2(12.9898, 78.233))) * 43758.5453));`);
+    };
+    ключ(мат, 'майка');
+  }
   // чужая кофта на свой скелет: тот же риг MakeHuman, кости находим по именам
   function надетьКофту(корень, кости, г, И) {
     const к = г.кофта, из = мх(к.из); if (!из || typeof из !== 'object') return;
@@ -7464,7 +7504,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     for (const о of новые) {
       const н = new THREE.SkinnedMesh(о.geometry, о.material.clone()); н.castShadow = true; н.frustumCulled = false;
       н.material.name = о.material.name;
-      if (к.цвет) перекрас(н.material, 'худи', к.цвет, И);
+      if (к.цвет) перекрас(н.material, к.вид || 'худи', к.цвет, из);      // кофта в позе покоя своей модели — и мерки её
       род.parent.add(н);
       н.bind(new THREE.Skeleton(о.skeleton.bones.map(b => кости[b.name] || кости.pelvis), о.skeleton.boneInverses), род.bindMatrix);
     }
@@ -7570,6 +7610,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       о.material = о.material.clone();
       const имя = о.material.name;
       if (/_body_/.test(имя) && !г.голограмма) кожа(о.material);
+      if (/_body_/.test(имя) && г.майка) майка(о.material, г.майка, И);
       if (/_clothes_/.test(имя) && г.тон) о.material.color.multiplyScalar(г.тон);
       if (г.принт && г.принт[1].test(имя)) принт(о.material, г.принт[0], И);
       if (г.перекрас) for (const [рв, вид, цвет] of г.перекрас) if (рв.test(имя)) перекрас(о.material, вид, цвет, И);
