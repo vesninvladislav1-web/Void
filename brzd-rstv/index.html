@@ -7089,6 +7089,56 @@ window.ДЕТАЛИ.push(['Ярик', function (API) {
   window.__ярик = { я };
 }]);
 
+// Денис: сидит на скамейке в сквере, растрёпанный, в сером свитшоте с надписями NIKE.
+// Лицо — с фото (lyudi/lico_denis.jpg); модель — Ярика (у неё как раз растрёпанная стрижка и свитер),
+// свитер перекрашен в серый с надписями, волосы — в русый.
+window.ДЕТАЛИ.push(['Денис', function (API) {
+  const { THREE, сцена } = API, С = window.__сквер;
+  window.__денисВид = { мх: 'yarik', лицо: 'lico_denis.jpg', лицоНиз: 0.86,
+    перекрас: [[/sweater/, 'найк', '#A4A6A9'], [/_hair_/, 'волосы', '#9A7A50'], [/trousers/, 'штаны', '#2A2C30']] };
+  if (!С) return;
+  const ц = API.цвет, В = API.землиВысота;
+  const мат = h => new THREE.MeshStandardMaterial({ color: ц(h), roughness: 0.85 });
+  const куб = (w, h, d, м, x, y, z) => { const о = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), м); о.position.set(x, y, z); о.castShadow = true; return о; };
+  const д = new THREE.Group();
+  // блочная фигура — пока грузится 3D-модель: серый свитшот, русая копна
+  const серый = мат('#A4A6A9'), кожа = мат('#E8C0A2'), волосы = мат('#9A7A50'), тёмн = мат('#2A2C30');
+  д.add(куб(0.5, 0.6, 0.28, серый, 0, 0.8, 0), куб(0.28, 0.3, 0.28, кожа, 0, 1.28, 0), куб(0.34, 0.14, 0.34, волосы, 0, 1.46, 0));
+  for (const s of [-1, 1]) д.add(куб(0.2, 0.18, 0.5, тёмн, s * 0.12, 0.52, 0.2), куб(0.18, 0.5, 0.2, тёмн, s * 0.12, 0.25, 0.42));
+  // скамейка у длинной стороны сквера; сидит лицом внутрь сквера
+  const [x, z] = С.W(26, 5), [x2, z2] = С.W(26, 6);
+  д.position.set(x, В(x, z), z);
+  д.rotation.y = Math.atan2(x2 - x, z2 - z);
+  const голова = { y: 0 };
+  сцена.add(д);
+  (window.__герои3д = window.__герои3д || []).push({ ...window.__денисВид, группа: д, причёска: 'hair_short02', волосы: '#9A7A50', кожа: '#E8C0A2',
+    аним: () => 'Sitting_Idle_Loop', голова: () => голова.y, y: 0.02, z: 0.28 });
+
+  // ===================== РЕПЛИКИ =====================
+  const ФРАЗЫ = ['— Я не проспал. Я так причёсываюсь.', '— Квадрат гипотенузы равен… короче, чему-то равен.', '— Пифагор вон тоже не причёсывался. И ничего.',
+    '— Шпоры по геометрии не видел? Ветром сдуло.', '— Always be strong in life. Это не я, это кофта.', '— Сижу, готовлюсь. Морально.'];
+  let фраза = 0, рядом = false, снесло = false, t = 0;
+  const совет = т => window.__подсказки && window.__подсказки.совет('ДЕНИС: ' + т, 4);
+  window.__подписка && window.__подписка('апокалипсис-кончился', () => { снесло = true; });
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt) return;
+    t += dt;
+    const dx = поз.x - д.position.x, dz = поз.z - д.position.z, dd = Math.hypot(dx, dz);
+    // смотрит на тебя, если подошёл; иначе — в тетрадку и по сторонам
+    let цель = Math.sin(t * 0.25) * 0.35;
+    if (dd < 10) { const а = Math.atan2(dx, dz) - д.rotation.y; цель = Math.max(-0.8, Math.min(0.8, Math.atan2(Math.sin(а), Math.cos(а)))); }
+    голова.y += (цель - голова.y) * Math.min(1, dt * 2);
+    if (dd < 3.5 && !рядом) {
+      рядом = true;
+      if (снесло && !д.сказалПроСортиры) { д.сказалПроСортиры = true; совет('— Сортиры летают, а контрольную никто не отменял.'); }
+      else совет(ФРАЗЫ[фраза++ % ФРАЗЫ.length]);
+    }
+    if (dd > 6) рядом = false;
+  });
+  API.добавитьПрепятствие([[x - 0.5, z - 0.5], [x + 0.5, z - 0.5], [x + 0.5, z + 0.5], [x - 0.5, z + 0.5]], 'Денис');
+  window.__денис = { д };
+}]);
+
 </script>
 <script>
 // Люди: реалистичные модели MakeHuman (MPFB2; ассеты CC0 и CC-BY — список авторов в src/avtory.md),
@@ -7198,17 +7248,22 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     мат.customProgramCacheKey = () => 'принт-' + вид;
   }
   // перекрасить одежду по фото, сохранив складки текстуры: светлота ткани × новый цвет.
-  // вид: 'худи' (карман-кенгуру, манжеты), 'штаны' (резинки внизу), 'кроссы' (рыжая подошва)
+  // вид: 'худи' (карман-кенгуру, манжеты), 'штаны' (резинки внизу), 'кроссы' (рыжая подошва),
+  // 'найк' (серый свитшот, весь в чёрных надписях), 'волосы' (текстура светлая — красим мягче)
+  const текстНайк = (() => { const к = document.createElement('canvas'); к.width = 256; к.height = 128; const с = к.getContext('2d');
+    с.fillStyle = '#000'; с.textAlign = 'center'; с.font = '900 66px Impact, "Arial Black", sans-serif'; с.fillText('NIKE', 128, 72);
+    с.font = 'italic 600 17px Arial, sans-serif'; с.fillText('Always be strong in life.', 128, 98);
+    const т = new THREE.CanvasTexture(к); т.anisotropy = 4; return т; })();
   function перекрас(мат, вид, цвет, И) {
     const старый = мат.onBeforeCompile;
     мат.onBeforeCompile = (ш, р) => {
       if (старый) старый(ш, р);
-      Object.assign(ш.uniforms, { uCol: { value: ц(цвет) }, uH2: { value: И.рост }, uArm2: { value: И.рукаY }, uSh2: { value: И.плечоX } });
+      Object.assign(ш.uniforms, { uCol: { value: ц(цвет) }, uH2: { value: И.рост }, uArm2: { value: И.рукаY }, uSh2: { value: И.плечоX }, uLogo: { value: текстНайк } });
       if (!/varying vec3 vBind/.test(ш.vertexShader)) ш.vertexShader = 'varying vec3 vBind;\n' + ш.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vBind = position;');
-      ш.fragmentShader = 'uniform vec3 uCol; uniform float uH2; uniform float uArm2; uniform float uSh2;\n' + (/varying vec3 vBind/.test(ш.fragmentShader) ? '' : 'varying vec3 vBind;\n') + ш.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      ш.fragmentShader = 'uniform vec3 uCol; uniform float uH2; uniform float uArm2; uniform float uSh2;\n' + (вид === 'найк' ? 'uniform sampler2D uLogo;\n' : '') + (/varying vec3 vBind/.test(ш.fragmentShader) ? '' : 'varying vec3 vBind;\n') + ш.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
   {
     float l = dot(diffuseColor.rgb, vec3(0.3, 0.59, 0.11));
-    diffuseColor.rgb = uCol * clamp(0.62 + l * 3.2, 0.45, 1.45);
+    diffuseColor.rgb = uCol * ${вид === 'волосы' ? 'clamp(0.3 + l * 1.2, 0.25, 1.25)' : 'clamp(0.62 + l * 3.2, 0.45, 1.45)'};
     float ax = abs(vBind.x), y = vBind.y; bool front = vBind.z > 0.02;
     ${вид === 'худи' ? `// карман-кенгуру: шов по краю; манжеты на рукавах и резинка по низу — темнее
     float ky = (y - uH2 * 0.5) / (uH2 * 0.075), kx = ax / 0.12;
@@ -7219,7 +7274,13 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     ${вид === 'кроссы' ? `// чёрный верх, рыжая подошва и задник
     if (y < 0.032) diffuseColor.rgb = vec3(0.62, 0.36, 0.12) * clamp(0.7 + l * 1.5, 0.6, 1.2);
     else if (vBind.z < -0.06 && y < 0.07) diffuseColor.rgb = vec3(0.55, 0.32, 0.1);` : ''}
-  }`);
+    ${вид === 'найк' ? `// надписи шахматкой: на туловище — по фронту (сзади зеркально, чтобы читались), на рукавах — вдоль руки
+    bool рукав = ax > uSh2 + 0.06;
+    vec2 q = рукав ? vec2(ax - uSh2, vBind.z + 0.2) / vec2(0.15, 0.09) : vec2(vBind.x * (front ? 1.0 : -1.0), y) / vec2(0.15, 0.085);
+    q.x += 0.5 * mod(floor(q.y), 2.0);
+    vec4 надп = texture2D(uLogo, fract(q));
+    diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.02), надп.a * 0.92);` : ''}
+  }`.replace(/рукав/g, 'sl').replace(/надп/g, 'lg'));
     };
     мат.customProgramCacheKey = () => 'перекрас-' + вид + (старый ? '-п' : '');
   }
@@ -10702,12 +10763,14 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       вид: window.__ваняВид || { мх: 'vanya', принт: ['полоски', /tank_top/] } },
     люба: { имя: 'Люба', цвет: '#F070B0', задача: 'Собери чикенбургеры. Все. Никому не отдавай.', предмет: 'бургер', нужно: 5, подпись: 'Чикенбургеры',
       вид: window.__любаВид || { мх: 'lyuba', принт: ['олимпийка', /sweater/], чокер: true } },
+    денис: { имя: 'Денис', цвет: '#B8C0CC', задача: 'Собери шпоры по геометрии — ветром разнесло по всему посёлку. Пифагор не простит.', предмет: 'шпора', нужно: 6, подпись: 'Шпоры',
+      вид: window.__денисВид || { мх: 'yarik' } },
     яша: { имя: 'Яша', цвет: '#F0A040', задача: 'Ты кот. Лови кур. Мяу.', предмет: 'курица', нужно: 5, подпись: 'Куры', кот: true },
     житель: { имя: 'Житель', цвет: '#C8C0B0', задача: 'Собери семечки по посёлку. Святое.', предмет: 'семечки', нужно: 5, подпись: 'Пакеты семечек', много: true,
       вид: { мх: 'paren' } },
   };
   const есть = (о, к) => Object.prototype.hasOwnProperty.call(о, к);
-  const ПОРЯДОК = ['шторм', 'богдан', 'егор', 'ярик', 'ваня', 'люба', 'яша', 'житель'];
+  const ПОРЯДОК = ['шторм', 'богдан', 'егор', 'ярик', 'ваня', 'люба', 'денис', 'яша', 'житель'];
   const ФРАЗЫ = ['Сюда!', 'Бежим!', 'Ха-ха', 'Я тут', 'Помоги', 'Красава', 'Где все?', 'Это не баг, это фича'];
 
   // ===================== СОСТОЯНИЕ =====================
@@ -11255,6 +11318,14 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     посылка: () => { const г = new THREE.Group(); г.add(ящ(0.45, 0.32, 0.36, м('#C8A070'), 0, 0.16, 0), ящ(0.46, 0.06, 0.37, м('#1E5AE0'), 0, 0.2, 0), ящ(0.08, 0.33, 0.37, м('#D8C8A8'), 0, 0.165, 0)); return г; },
     qr: () => { const г = new THREE.Group(); г.add(ящ(0.06, 1.1, 0.06, м('#5A5A5A'), 0, 0.55, 0)); const п = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.4), new THREE.MeshBasicMaterial({ map: qrТекстура(), side: THREE.DoubleSide })); п.position.set(0, 1.05, 0.04); г.add(п); return г; },
     бургер: () => { const г = new THREE.Group(); г.add(ящ(0.3, 0.09, 0.3, м('#D89A48'), 0, 0.2, 0), ящ(0.32, 0.06, 0.32, м('#7A4A22'), 0, 0.13, 0), ящ(0.31, 0.025, 0.31, м('#6AA83A'), 0, 0.165, 0), ящ(0.3, 0.07, 0.3, м('#D89A48'), 0, 0.07, 0)); return г; },
+    // шпора: листок в клетку с формулами, лежит наискось
+    шпора: () => { const г = new THREE.Group(), к = document.createElement('canvas'); к.width = 96; к.height = 128; const с = к.getContext('2d');
+      с.fillStyle = '#F4F4EE'; с.fillRect(0, 0, 96, 128); с.strokeStyle = 'rgba(80,120,200,0.35)'; с.lineWidth = 1;
+      for (let i = 4; i < 128; i += 8) { с.beginPath(); с.moveTo(0, i); с.lineTo(96, i); с.stroke(); } for (let i = 4; i < 96; i += 8) { с.beginPath(); с.moveTo(i, 0); с.lineTo(i, 128); с.stroke(); }
+      с.fillStyle = '#1A2A8A'; с.font = 'italic 13px serif'; ['a²+b²=c²', 'S=½ah', 'sin=a/c', 'cos=b/c', 'π≈3,14'].forEach((т, i) => с.fillText(т, 8, 22 + i * 22));
+      const т = new THREE.CanvasTexture(к);
+      const л = new THREE.Mesh(new THREE.PlaneGeometry(0.34, 0.45), new THREE.MeshStandardMaterial({ map: т, roughness: 0.9, side: THREE.DoubleSide, emissive: new THREE.Color(0x222222) }));
+      л.rotation.set(-1.15, 0.4, 0); л.position.y = 0.16; л.castShadow = true; г.add(л); return г; },
     семечки: () => { const г = new THREE.Group(); г.add(ящ(0.22, 0.32, 0.08, м('#1A1A1A'), 0, 0.16, 0), ящ(0.18, 0.1, 0.081, м('#F2D040'), 0, 0.2, 0)); return г; },
     курица: () => { const г = new THREE.Group(); const тело = new THREE.Mesh(new THREE.SphereGeometry(0.18, 12, 8), м('#F2EFE6')); тело.scale.set(1, 0.9, 1.3); тело.position.y = 0.26;
       const гол = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), м('#F2EFE6')); гол.position.set(0, 0.45, 0.17);
