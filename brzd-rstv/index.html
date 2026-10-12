@@ -1,6 +1,15 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cut">
 <title>Бороздиновский</title>
+<!-- с экрана «Домой» игра открывается без панелей браузера (на iPhone по-другому их не убрать) -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#120C08">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Бороздиновский">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <style>
   /* Одна намеренная среда: вечер в посёлке. Тема не переключается. */
   :root { color-scheme: dark; --текст: #F2E6CC; --тусклый: #B9A887; --акцент: #E8C84A; --фон: #120C08; }
@@ -70,6 +79,7 @@
   #графика .кн { height: 36px; padding: 0 12px; font-size: 11px; }
   #графика .кн[aria-pressed="true"], #свет .кн[aria-pressed="true"] { border-color: var(--акцент); color: var(--акцент); opacity: 1; }
   #загрузка { color: var(--тусклый); font-size: 12px; letter-spacing: 1px; max-width: 92vw; overflow-wrap: anywhere; }
+  #безПанелей { color: var(--тусклый); font: 12px/1.4 system-ui, sans-serif; max-width: 46ch; }
 </style>
 
 <div id="мир"><canvas id="холст"></canvas></div>
@@ -97,6 +107,7 @@
     <button class="кн шрифт" data-к="высокая">ВЫСОКАЯ</button>
   </div>
   <button class="кн шрифт" id="гулять" hidden>ГУЛЯТЬ</button>
+  <div id="безПанелей" hidden></div>
   <div id="подпись" class="шрифт">Карта © участники OpenStreetMap · рельеф: Terrain Tiles (AWS)</div>
 </div>
 
@@ -11799,6 +11810,54 @@ window.ДЕТАЛИ.push(['настройки', function () {
     const обн = () => { const с = window.__свет ? window.__свет.какой() : 'день'; for (const б of кнопки) б.setAttribute('aria-pressed', String(б.dataset.к === с)); };
     обн(); строка('СВЕТ', гр);
   }
+  // ===================== ВЕСЬ ЭКРАН =====================
+  // Панели браузера (адресная строка, кнопки снизу) мешают: на «ГУЛЯТЬ» игра уходит на весь экран.
+  // Выкинуло из него (жест «назад», свернул браузер) — следующее касание вернёт, если в ⚙ не выключено.
+  // iPhone так не умеет — там подсказка: с экрана «Домой» игра открывается без панелей.
+  {
+    const д = document.documentElement;
+    const вПриложении = matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone === true;
+    const можно = !вПриложении && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled) && !!(д.requestFullscreen || д.webkitRequestFullscreen);
+    const включён = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+    let хочу = (() => { try { return localStorage.getItem('бороздиновский.весьЭкран') !== 'нет'; } catch (e) { return true; } })();
+    const закрепить = () => { try { screen.orientation.lock('landscape').catch(() => {}); } catch (e) {} };
+    // браузер отказал (окно внутри Telegram, ВК и т. п.) — один раз подскажем, где откроется на весь экран
+    let сказал = false;
+    const отказ = () => { if (сказал || !matchMedia('(pointer: coarse)').matches) return; сказал = true;
+      window.__подсказки && window.__подсказки.совет('Этот браузер не пускает игру на весь экран. Открой ссылку в Chrome или Яндекс Браузере (⋮ → «Открыть в браузере»).', 6); };
+    function вкл() {
+      if (!можно || включён()) return;
+      try {
+        const п = д.requestFullscreen ? д.requestFullscreen({ navigationUI: 'hide' }) : д.webkitRequestFullscreen();
+        if (п && п.then) п.then(закрепить).catch(отказ); else setTimeout(закрепить, 300);
+      } catch (e) { отказ(); }
+    }
+    function выкл() { try { if (включён()) (document.exitFullscreen || document.webkitExitFullscreen).call(document); } catch (e) {} }
+    // касание посреди игры — вернуть весь экран (только не в поле ввода: там клавиатура)
+    const вернуть = e => {
+      if (!хочу || !можно || включён() || !document.getElementById('старт').hidden) return;
+      const а = document.activeElement, ц = e.target;
+      if ((а && /^(INPUT|TEXTAREA|SELECT)$/.test(а.tagName)) || (ц && ц.closest && ц.closest('input, textarea, select'))) return;
+      вкл();
+    };
+    addEventListener('pointerup', вернуть, true); addEventListener('touchend', вернуть, true);
+    window.__весьЭкран = { вкл: () => { if (хочу) вкл(); }, выкл, можно, включён, вПриложении };
+    if (можно) {
+      const б = document.createElement('button'); б.className = 'кн шрифт';
+      const обн = () => { б.textContent = хочу ? 'ВКЛ' : 'ВЫКЛ'; б.setAttribute('aria-pressed', String(хочу)); };
+      б.addEventListener('click', () => { хочу = !хочу; try { localStorage.setItem('бороздиновский.весьЭкран', хочу ? 'да' : 'нет'); } catch (e) {} if (хочу) вкл(); else выкл(); обн(); });
+      обн(); строка('ВЕСЬ ЭКРАН', б);
+    } else if (!вПриложении && matchMedia('(pointer: coarse)').matches) {
+      // браузер на весь экран не умеет (iPhone, окно внутри Telegram и т. п.) — подсказываем на старте
+      const iOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+      const п = document.getElementById('безПанелей');
+      if (п) {
+        п.textContent = iOS ? '📱 Без панелей браузера: открой игру в Safari → «Поделиться» → «На экран „Домой“» и запускай оттуда.'
+          : '📱 Тут браузер не даёт убрать свои панели — открой игру в Chrome или Яндекс Браузере.';
+        п.hidden = false;
+      }
+    }
+  }
   // авторы ассетов (часть одежды людей — CC-BY, указывать обязательно)
   { const т = document.createElement('div'); т.style.cssText = 'font-size:9px;line-height:1.4;color:var(--тусклый);letter-spacing:0;max-width:230px';
     т.textContent = 'Карта © участники OpenStreetMap (ODbL); рельеф: Terrain Tiles (AWS). Люди: MakeHuman (CC0); одежда и волосы — Elvaerwyn, Mindfront, janexx, punkduck (CC-BY 4.0), MakeHuman community (CC0). Анимации и сортир: Quaternius, System G6 (CC0). Текстуры: Poly Haven (CC0).';
@@ -17795,10 +17854,7 @@ setTimeout(готов, 12000);            // медленный интернет
 эл('гулять').addEventListener('click', () => {
   эл('старт').hidden = true;
   // на весь экран и закрепить горизонтально — где браузер разрешает (в рамке может не разрешить)
-  try {
-    const д = document.documentElement, п = д.requestFullscreen && д.requestFullscreen({ navigationUI: 'hide' });
-    if (п && п.then) п.then(() => { try { screen.orientation.lock('landscape').catch(() => {}); } catch (e) {} }).catch(() => {});
-  } catch (e) {}
+  if (window.__весьЭкран) window.__весьЭкран.вкл();
 });
 document.querySelectorAll('#графика .кн').forEach(к => {
   к.setAttribute('aria-pressed', String(к.dataset.к === КАЧЕСТВО));
