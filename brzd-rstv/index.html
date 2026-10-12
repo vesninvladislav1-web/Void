@@ -11891,7 +11891,7 @@ window.ДЕТАЛИ.push(['никита: финал', function (API) {
 // запускает всех в космос на «ШТОРМ-1».
 window.ДЕТАЛИ.push(['онлайн', function (API) {
   const { сцена, землиВысота: В, ШИР, ГЛУБ } = API;
-  const ШТОРМ_КЛЮЧ = '';                       // открытый ключ Шторма (base64, 65 байт raw P-256); пусто — роль закрыта
+  const ШТОРМ_КЛЮЧ = 'BJ6LmbYETtMUGkHIIXQJdifCh9lggju75ik9p/Ku20L8IOldEa+HpitqlR3OsMxdISsxe9+Bo0jpSiRH8/jhmGo=';   // открытый ключ Шторма (base64, 65 байт raw P-256); пусто — роль закрыта
   // комнаты: общая (все подряд) или своя по коду — код можно скинуть ссылкой ?room=КОД
   const ОБЩАЯ = 'ОБЩАЯ';
   const кодКомнаты = к => String(к || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
