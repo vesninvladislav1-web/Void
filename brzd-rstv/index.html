@@ -7179,13 +7179,15 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
     const светМеха = THREE.ShaderChunk.lights_physical_pars_fragment.replace(
       'float dotNL = saturate( dot( geometry.normal, directLight.direction ) );',
       'float dotNL = saturate( ( dot( geometry.normal, directLight.direction ) + 0.5 ) / 1.5 );');
-    function мехМат(доля) {
-      const м = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, skinning: true });
+    // инст — слои одним вызовом: доля слоя приходит атрибутом экземпляра (у запечённого кота)
+    function мехМат(доля, инст) {
+      const м = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, skinning: !инст });
       м.onBeforeCompile = ш => {
-        ш.uniforms.uShell = { value: доля }; ш.uniforms.uDen = { value: ПЛОТН };
-        ш.vertexShader = 'attribute float aLen;\nattribute vec3 aComb;\nattribute float aDen;\nuniform float uShell;\nvarying vec3 vRest;\nvarying vec3 vRestN;\n' + ш.vertexShader
-          .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vRest = position * aDen; vRestN = normal;\n  transformed += normal * (uShell * aLen) + aComb * (uShell * uShell * aLen * 1.1);');
-        ш.fragmentShader = 'uniform float uShell;\nuniform float uDen;\nvarying vec3 vRest;\nvarying vec3 vRestN;\n'
+        ш.uniforms.uDen = { value: ПЛОТН }; if (!инст) ш.uniforms.uShell = { value: доля };
+        ш.vertexShader = 'attribute float aLen;\nattribute vec3 aComb;\nattribute float aDen;\nvarying vec3 vRest;\nvarying vec3 vRestN;\n'
+          + (инст ? 'attribute float aShell;\nvarying float vShell;\n#define uShell aShell\n' : 'uniform float uShell;\n') + ш.vertexShader
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vRest = position * aDen; vRestN = normal;' + (инст ? ' vShell = aShell;' : '') + '\n  transformed += normal * (uShell * aLen) + aComb * (uShell * uShell * aLen * 1.1);');
+        ш.fragmentShader = (инст ? 'varying float vShell;\n#define uShell vShell\n' : 'uniform float uShell;\n') + 'uniform float uDen;\nvarying vec3 vRest;\nvarying vec3 vRestN;\n'
           + 'float furHash(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.x + p.y) * p.z); }\n'
           + ш.fragmentShader
             .replace('#include <lights_physical_pars_fragment>', светМеха)
@@ -7211,7 +7213,7 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
               if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.2, 0.03, 0.045);
             #endif`);
       };
-      м.customProgramCacheKey = () => 'мех-яши-2';
+      м.customProgramCacheKey = () => инст ? 'мех-яши-инст' : 'мех-яши-2';
       return м;
     }
     const материалы = Array.from({ length: СЛОЁВ }, (_, i) => мехМат(Math.pow(i / (СЛОЁВ - 1), 1.15)));
@@ -7278,10 +7280,10 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
       кости.голова.add(new THREE.LineSegments(г, new THREE.LineBasicMaterial({ color: 0x5A2E22 }))); }
     const кЧелюсти = (об, x, y, z) => { об.position.set(x, y, z).sub(мир('челюсть')); кости.челюсть.add(об); return об; };
     const рот = [];
-    { кГолове(голый(new THREE.SphereGeometry(1, 16, 12).scale(0.026, 0.016, 0.04), '#4A141B', 0.85), Г.x, Г.y - 0.03, Г.z + 0.03);      // нёбо, глотка
+    { кГолове(голый(new THREE.SphereGeometry(1, 16, 12).scale(0.026, 0.016, 0.04), '#4A141B', 0.85), Г.x, Г.y - 0.03, Г.z + 0.03).userData.внутри = true;      // нёбо, глотка
       рот.push(кЧелюсти(голый(new THREE.SphereGeometry(1, 14, 10).scale(0.011, 0.0035, 0.022), '#E07A8A', 0.45), Г.x, Г.y - 0.05, Г.z + 0.03));   // язык
       for (const s of [-1, 1]) {
-        const в = голый(new THREE.ConeGeometry(0.0021, 0.0068, 6), '#FFFFF2', 0.3); в.rotation.x = Math.PI; кГолове(в, Г.x + s * 0.011, Г.y - 0.0435, Г.z + наЛице(s * 0.011, -0.041) - 0.011);
+        const в = голый(new THREE.ConeGeometry(0.0021, 0.0068, 6), '#FFFFF2', 0.3); в.rotation.x = Math.PI; в.userData.внутри = true; кГолове(в, Г.x + s * 0.011, Г.y - 0.0435, Г.z + наЛице(s * 0.011, -0.041) - 0.011);
         рот.push(кЧелюсти(голый(new THREE.ConeGeometry(0.0019, 0.0058, 6), '#FFFFF2', 0.3), Г.x + s * 0.0095, Г.y - 0.046, Г.z + наЛице(s * 0.0095, -0.046) - 0.01));
       } }
     // усы: белые, по 8 с каждой стороны, дугой вниз — из подушечек; над глазами — «брови»
@@ -7430,6 +7432,85 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
       яша.updateMatrixWorld(true);
     }
     поза({});
+
+    // ===================== СТАТИЧНЫЙ ЯША =====================
+    // Для Яшолётов на стоянках и чужих в небе: поза «сидит» запечена в обычную сетку (без костей),
+    // всё ниже среза (обода кабины) отрезано; все слои шерсти — один вызов отрисовки (экземпляры),
+    // детали морды — ещё один, усы, рот и кисточки — линиями. Сетки общие для всех таких котов.
+    const запечено = new Map();
+    function запечь(срез, слоёв) {
+      поза({ с: 1 });
+      корпус.updateMatrixWorld(true);
+      const обр = new THREE.Matrix4().copy(корпус.matrixWorld).invert();
+      const М = список.map((б, i) => new THREE.Matrix4().multiplyMatrices(обр, б.matrixWorld).multiply(скелет.boneInverses[i]).elements);
+      const в = { p: [], n: [], c: [], len: [], comb: [], den: [], idx: [] };
+      const e = new Array(16).fill(0), м4 = new THREE.Matrix4(), м3 = new THREE.Matrix3(), vP = V(), vN = V();
+      for (const г of [гТело, гХвост]) {
+        const P = г.attributes.position, N = г.attributes.normal, C = г.attributes.color, Lн = г.attributes.aLen, CB = г.attributes.aComb, D = г.attributes.aDen;
+        const KI = г.attributes.skinIndex.array, KW = г.attributes.skinWeight.array, n = P.count;
+        const pp = new Float32Array(n * 3), nn = new Float32Array(n * 3), cb = new Float32Array(n * 3);
+        for (let i = 0; i < n; i++) {
+          e.fill(0);
+          for (let k = 0; k < 4; k++) { const w = KW[i * 4 + k]; if (!w) continue; const me = М[KI[i * 4 + k]]; for (let j = 0; j < 16; j++) e[j] += me[j] * w; }
+          м4.fromArray(e); м3.setFromMatrix4(м4);
+          vP.fromBufferAttribute(P, i).applyMatrix4(м4); pp[i * 3] = vP.x; pp[i * 3 + 1] = vP.y; pp[i * 3 + 2] = vP.z;
+          vN.fromBufferAttribute(N, i).applyMatrix3(м3).normalize(); nn[i * 3] = vN.x; nn[i * 3 + 1] = vN.y; nn[i * 3 + 2] = vN.z;
+          vN.fromBufferAttribute(CB, i).applyMatrix3(м3).normalize(); cb[i * 3] = vN.x; cb[i * 3 + 1] = vN.y; cb[i * 3 + 2] = vN.z;
+        }
+        const карта = new Int32Array(n).fill(-1), I = г.index.array;
+        for (let t = 0; t < I.length; t += 3) {
+          const a = I[t], b = I[t + 1], c = I[t + 2];
+          if (Math.max(pp[a * 3 + 1], pp[b * 3 + 1], pp[c * 3 + 1]) < срез) continue;
+          for (const v of [a, b, c]) {
+            if (карта[v] < 0) {
+              карта[v] = в.p.length / 3;
+              в.p.push(pp[v * 3], pp[v * 3 + 1], pp[v * 3 + 2]); в.n.push(nn[v * 3], nn[v * 3 + 1], nn[v * 3 + 2]); в.comb.push(cb[v * 3], cb[v * 3 + 1], cb[v * 3 + 2]);
+              в.c.push(C.getX(v), C.getY(v), C.getZ(v)); в.len.push(Lн.getX(v)); в.den.push(D.getX(v));
+            }
+            в.idx.push(карта[v]);
+          }
+        }
+      }
+      const г = new THREE.BufferGeometry();
+      г.setAttribute('position', new THREE.Float32BufferAttribute(в.p, 3)); г.setAttribute('normal', new THREE.Float32BufferAttribute(в.n, 3));
+      г.setAttribute('color', new THREE.Float32BufferAttribute(в.c, 3)); г.setAttribute('aLen', new THREE.Float32BufferAttribute(в.len, 1));
+      г.setAttribute('aComb', new THREE.Float32BufferAttribute(в.comb, 3)); г.setAttribute('aDen', new THREE.Float32BufferAttribute(в.den, 1));
+      г.setAttribute('aShell', new THREE.InstancedBufferAttribute(new Float32Array(Array.from({ length: слоёв }, (_, i) => Math.pow(i / Math.max(1, слоёв - 1), 1.15))), 1));
+      г.setIndex(в.idx); г.computeBoundingSphere(); г.boundingSphere.radius += 0.12;
+      // детали головы (глаза, нос, уши изнутри) — одной сеткой с цветами вершин; усы, рот, кисточки — линиями
+      const дп = [], дн = [], дц = [], лп = [], лц = [], радужкаЦ = ЦВЕТ('#D29A34');
+      кости.голова.traverse(об => {
+        if (об.userData.внутри || об.isSkinnedMesh || рот.includes(об)) return;
+        const мм = new THREE.Matrix4().multiplyMatrices(обр, об.matrixWorld);
+        if (об.isLineSegments) {
+          const P = об.geometry.attributes.position, ц = об.material.color;
+          for (let i = 0; i < P.count; i++) { vP.fromBufferAttribute(P, i).applyMatrix4(мм); лп.push(vP.x, vP.y, vP.z); лц.push(ц.r, ц.g, ц.b); }
+        } else if (об.isMesh) {
+          const гг = об.geometry.index ? об.geometry.toNonIndexed() : об.geometry, P = гг.attributes.position, N = гг.attributes.normal;
+          const нм = new THREE.Matrix3().getNormalMatrix(мм), ц = об.material.map ? радужкаЦ : об.material.color;
+          for (let i = 0; i < P.count; i++) {
+            vP.fromBufferAttribute(P, i).applyMatrix4(мм); дп.push(vP.x, vP.y, vP.z);
+            vN.fromBufferAttribute(N, i).applyMatrix3(нм).normalize(); дн.push(vN.x, vN.y, vN.z); дц.push(ц.r, ц.g, ц.b);
+          }
+        }
+      });
+      const дет = new THREE.BufferGeometry(); дет.setAttribute('position', new THREE.Float32BufferAttribute(дп, 3)); дет.setAttribute('normal', new THREE.Float32BufferAttribute(дн, 3)); дет.setAttribute('color', new THREE.Float32BufferAttribute(дц, 3));
+      const лин = new THREE.BufferGeometry(); лин.setAttribute('position', new THREE.Float32BufferAttribute(лп, 3)); лин.setAttribute('color', new THREE.Float32BufferAttribute(лц, 3));
+      поза({});
+      return { г, мат: мехМат(0, true), дет, детМат: new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.3, metalness: 0, side: THREE.DoubleSide }),
+        лин, линМат: new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.85 }), вершин: в.p.length / 3 };
+    }
+    // о2.срез — всё, что ниже (в координатах кота), отрезается; о2.слоёв — слоёв шерсти
+    function статичный(о2 = {}) {
+      const срез = о2.срез !== undefined ? о2.срез : -1, слоёв = о2.слоёв || 6, ключ = срез + '|' + слоёв;
+      let з = запечено.get(ключ); if (!з) { з = запечь(срез, слоёв); запечено.set(ключ, з); }
+      const гр = new THREE.Group();
+      const мех = new THREE.InstancedMesh(з.г, з.мат, слоёв), ед = new THREE.Matrix4();
+      for (let i = 0; i < слоёв; i++) мех.setMatrixAt(i, ед);
+      гр.add(мех, new THREE.Mesh(з.дет, з.детМат), new THREE.LineSegments(з.лин, з.линМат));
+      гр.userData.вершин = з.вершин;
+      return гр;
+    }
     замеры.всего = performance.now() - т0;
     // подробность: шаг 1 — все слои шерсти, 2 — через один, 4 — каждый четвёртый (вдали не видно разницы)
     let шагСлоёв = 1;
@@ -7437,7 +7518,7 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
       if (шаг === шагСлоёв) return; шагСлоёв = шаг;
       слои.forEach((м, k) => { const i = k >> 1; м.visible = i % шаг === 0 || i === СЛОЁВ - 1; });
     }
-    return { яша, корпус, кости, хвост, глаза, рот, уши, поза, подробность, слоёв: СЛОЁВ, слои, материалы, замеры };
+    return { яша, корпус, кости, хвост, глаза, рот, уши, поза, подробность, статичный, слоёв: СЛОЁВ, слои, материалы, замеры };
   }
 
   // ===================== МОДЕЛЬ =====================
@@ -12542,7 +12623,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   const мояРоль = () => я.облик || я.роль;
   const рольПира = п => п.роль === 'шторм' && п.шторм && п.облик ? п.облик : п.роль;
   const пиры = new Map();   // ид → { роль, ник, t0, шторм, x, z, y, угол, цx, цz, цy, цугол, счёт, ав, табл, ск, связь }
-  let ws = null, подключён = false, таймПоз = 0, таймПривет = 0, ночь = false, камБыло = null;
+  let ws = null, подключён = false, таймПоз = 0, таймПривет = 0, ночь = false, камБыло = null, таймСтоянок = null;
   const последКоманда = new Map();   // ид → ts последней принятой команды Шторма (переживает переподключение пира)
 
   // ===================== ПОДПИСЬ ШТОРМА =====================
@@ -12720,32 +12801,51 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   // ---- Яшолёты: все разом в небо; стая Яш кружит над тобой ----
   const кнЯшолёты = эл('button', { onclick: () => сила('яшолёты') }, '✈ Яшолёты всем');
   const кнСтая = эл('button', { onclick: () => { const П = window.__мир.поз; сила('стая', { x: +П.x.toFixed(1), z: +П.z.toFixed(1), n: 10, с: Math.floor(Math.random() * 4294967295) }); } }, '🐈 Стая Яш');
+  // ---- Яшолёты на стоянках: ставишь где хочешь — сесть может кто угодно, Яша уже в задней кабине ----
+  const новыйИд = () => Math.random().toString(36).slice(2, 8).replace(/[^a-z0-9]/g, '') || 'y' + Date.now() % 1e5;
+  // в дом или в пруд не ставим — ищем рядом свободное место (до 16 м)
+  function свободноДляЯшолёта(x, z) {
+    const можно = (x2, z2) => !API.вДоме(x2, z2, 2.4) && !API.вВоде(x2, z2) && Math.abs(x2) < ШИР / 2 - 25 && Math.abs(z2) < ГЛУБ / 2 - 25;
+    if (можно(x, z)) return [x, z];
+    for (let r = 2; r <= 16; r += 2) for (let k = 0; k < 12; k++) { const а = k / 12 * Math.PI * 2, x2 = x + Math.sin(а) * r, z2 = z + Math.cos(а) * r; if (можно(x2, z2)) return [x2, z2]; }
+    return null;
+  }
+  function поставитьЯшолёт(x, z, курс) {
+    const Ф = window.__яшолёт; if (!Ф || !Ф.стоянки) return;
+    const т = свободноДляЯшолёта(x, z); if (!т) { совет('Тут Яшолёт не встанет — дома и вода кругом.', 2.5); return; }
+    [x, z] = т;
+    const сп = Ф.стоянки.список(); сп.push([новыйИд(), +x.toFixed(1), +z.toFixed(1), +курс.toFixed(2)]);
+    while (сп.length > Ф.стоянки.МАКС) сп.shift();                       // лишние — самые старые
+    сила('стоянки', { сп });
+  }
+  const кнЯшолётТут = эл('button', { onclick: () => { const П = window.__мир.поз; поставитьЯшолёт(П.x + Math.sin(П.угол) * 3.6, П.z + Math.cos(П.угол) * 3.6, П.угол); } }, '✈ Яшолёт сюда');
+  const кнЯшолётРадар = эл('button', { 'aria-pressed': 'false', onclick: () => целиться(целимся === 'яшолёт' ? null : 'яшолёт') }, '✈ Яшолёт по радару');
+  const кнЯшолётыПрочь = эл('button', { onclick: () => сила('стоянки', { сп: [] }) }, '🧹 Убрать');
   // ---- облик: играть за любого, оставаясь Штормом ----
   const селОблик = эл('select', { 'aria-label': 'Облик', onchange: () => сменитьОблик(селОблик.value || null) },
     эл('option', { value: '' }, '🎭 Облик: Шторм'), ...['богдан', 'егор', 'ярик', 'ваня', 'люба', 'денис', 'яша', 'житель'].map(к => эл('option', { value: к }, '🎭 ' + РОЛИ[к].имя)));
   const кнФеникс = эл('button', { onclick: () => сила('феникс') }, '🚛 Феникс');
 
-  // ---- точечный взрыв: взводим и жмём по радару ----
-  let целимся = false;
-  const кнВзрыв = эл('button', {
-    'aria-pressed': 'false',
-    onclick: () => {
-      целимся = !целимся;
-      кнВзрыв.setAttribute('aria-pressed', String(целимся));
-      кнВзрыв.textContent = целимся ? '🎯 Жми по радару…' : '💥 Взрыв по радару';
-      радар.classList.toggle('целимся', целимся);
-    },
-  }, '💥 Взрыв по радару');
+  // ---- по радару: взвёл (взрыв или Яшолёт) — и жмёшь в точку на радаре ----
+  let целимся = null;
+  const кнВзрыв = эл('button', { 'aria-pressed': 'false', onclick: () => целиться(целимся === 'взрыв' ? null : 'взрыв') }, '💥 Взрыв по радару');
+  function целиться(что) {
+    целимся = что;
+    кнВзрыв.setAttribute('aria-pressed', String(что === 'взрыв')); кнВзрыв.textContent = что === 'взрыв' ? '🎯 Жми по радару…' : '💥 Взрыв по радару';
+    кнЯшолётРадар.setAttribute('aria-pressed', String(что === 'яшолёт')); кнЯшолётРадар.textContent = что === 'яшолёт' ? '🎯 Жми по радару…' : '✈ Яшолёт по радару';
+    радар.classList.toggle('целимся', !!что);
+  }
   радар.addEventListener('click', e => {
     if (!целимся) return;
-    целимся = false; кнВзрыв.setAttribute('aria-pressed', 'false'); кнВзрыв.textContent = '💥 Взрыв по радару'; радар.classList.remove('целимся');
+    const что = целимся; целиться(null);
     const rect = радар.getBoundingClientRect();
     const cx = (e.clientX - rect.left) / rect.width * 240, cy = (e.clientY - rect.top) / rect.height * 240;
     const П = window.__мир.поз, R = 120, М = 0.4;
     const вз = Math.atan2(П.x - API.камера.position.x, П.z - API.камера.position.z);
     const px = (R - cx) / М, pz = (R - cy) / М;
     const dx = Math.cos(вз) * px - Math.sin(вз) * pz, dz = Math.sin(вз) * px + Math.cos(вз) * pz;
-    сила('взрыв-точка', { x: +(П.x + dx).toFixed(1), z: +(П.z + dz).toFixed(1) });
+    if (что === 'яшолёт') поставитьЯшолёт(П.x + dx, П.z + dz, П.угол);
+    else сила('взрыв-точка', { x: +(П.x + dx).toFixed(1), z: +(П.z + dz).toFixed(1) });
   });
 
   // на телефоне панель лежит в зоне джойстика — по умолчанию свёрнута в одну кнопку
@@ -12769,6 +12869,8 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     эл('div', { class: 'ряд2' }, инпОбъявление, кнОбъявить),
     эл('div', { class: 'ряд2' }, кнКуры, кнФеникс),
     эл('div', { class: 'ряд2' }, кнЯшолёты, кнСтая),
+    эл('div', { class: 'ряд2' }, кнЯшолётТут),
+    эл('div', { class: 'ряд2' }, кнЯшолётРадар, кнЯшолётыПрочь),
     эл('div', { class: 'ряд2' }, кнВзрыв));
   const полётВВ = эл('button', { id: 'полётВВ', 'aria-label': 'Вверх' }, '⬆');
   const полётВН = эл('button', { id: 'полётВН', 'aria-label': 'Вниз' }, '⬇');
@@ -12925,6 +13027,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       п.невидим = !!м.нв;
       const чис = (v, м0) => typeof v === 'number' && isFinite(v) ? Math.max(-м0, Math.min(м0, v)) : 0;
       п.лёт = !!м.лёт; п.кр = чис(м.кр, 3.2); п.тг = чис(м.тг, 1.6);
+      п.са = п.лёт && typeof м.са === 'string' && /^[a-zа-яё0-9]{1,12}$/.test(м.са) ? м.са : null;     // с какой стоянки взлетел
       return;
     }
     if (м.k === 'h') { приветОт(п, м); return; }
@@ -12976,6 +13079,10 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     п.t0 = isFinite(t0) ? Math.max(сейчас - 864e5, Math.min(сейчас + 6e4, t0)) : сейчас;   // нельзя «зайти раньше всех» числом -1
     п.счёт = Math.max(0, Math.min(99, м.счёт | 0));
     if (новый) {
+      // зашёл новенький — Шторм повторяет ему список Яшолётов на стоянках
+      if (я.роль === 'шторм' && пара && window.__яшолёт && window.__яшолёт.стоянки && window.__яшолёт.стоянки.все.size) {
+        clearTimeout(таймСтоянок); таймСтоянок = setTimeout(() => { const Ф = window.__яшолёт; if (я.роль === 'шторм' && Ф.стоянки.все.size) сила('стоянки', { сп: Ф.стоянки.список() }); }, 1500);
+      }
       const былРоль = п.роль; п.роль = роль; п.шторм = false; п.самозв = false; п.сменаРоли = Date.now(); п.поколение++;
       убратьТело(п); телоДля(п); обновитьNPCШторма();
       if (роль === 'шторм') { п.нонс = новыйНонс(); отправить(п.ид, { k: '?', n: п.нонс }); }   // докажи подписью
@@ -12999,7 +13106,12 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     const р = РОЛИ[к];
     if (р.кот) котВкл();
     else if (window.__люди3д) window.__люди3д.переодеть(р.вид);
-    if (к === 'шторм') селОблик.value = '';
+    if (к === 'шторм') {
+      селОблик.value = '';
+      // свои Яшолёты — снова на стоянки (у всех в комнате)
+      let сп = null; try { сп = JSON.parse(хран.взять('brzd-стоянки') || 'null'); } catch (e) {}
+      if (Array.isArray(сп) && сп.length) setTimeout(() => { if (я.роль === 'шторм') сила('стоянки', { сп }); }, 800);
+    }
     обновитьNPCШторма();
     разложить(к);
     закрытьОкно(); панель.classList.add('видно'); инстр.classList.toggle('видно', к === 'шторм');
@@ -13013,7 +13125,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     window.__полёт = false; window.__полётУпр = 0; полётВВ.classList.remove('видно'); полётВН.classList.remove('видно'); кнПолёт.setAttribute('aria-pressed', 'false');
     я.невидим = false; window.__игрокСкрыт = false; кнНев.setAttribute('aria-pressed', 'false');
     инстр.classList.remove('видно');
-    целимся = false; кнВзрыв.setAttribute('aria-pressed', 'false'); кнВзрыв.textContent = '💥 Взрыв по радару'; радар.classList.remove('целимся');
+    целиться(null);
     const р = РОЛИ[мояРоль()];
     if (р.кот) котВыкл();
     else if (window.__люди3д) window.__люди3д.переодеть(null);
@@ -13058,6 +13170,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     for (const ид of [...пиры.keys()]) ушёл(ид, true);
     if (ночь) { ночь = false; window.__кино && window.__кино.небо && window.__кино.небо(0); }
     комната = к;
+    window.__яшолёт && window.__яшолёт.стоянки && window.__яшолёт.стоянки.задать([]);       // у другой комнаты свои Яшолёты
     try { history.replaceState(null, '', location.pathname + (к === ОБЩАЯ ? '' : '?room=' + к)); } catch (e) {}
     подключиться(); выборРоли(к === ОБЩАЯ ? 'Ты в общей комнате.' : `Комната ${к}. Скинь друзьям ссылку или код.`);
   }
@@ -13265,7 +13378,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     выполнить(имя, { x: window.__мир.поз.x, z: window.__мир.поз.z }, true, доп);
   }
   async function команда(п, м) {
-    if (!['ночь0', 'ночь1', 'салют', 'сбор', 'запуск', 'призвать', 'небо-цвет', 'задача', 'никита-вызов', 'испуг', 'толпа', 'погода', 'объявление', 'взрыв-точка', 'куры', 'феникс', 'яшолёты', 'стая'].includes(м.cmd) || typeof м.ts !== 'number' || typeof м.sig !== 'string') return;
+    if (!['ночь0', 'ночь1', 'салют', 'сбор', 'запуск', 'призвать', 'небо-цвет', 'задача', 'никита-вызов', 'испуг', 'толпа', 'погода', 'объявление', 'взрыв-точка', 'куры', 'феникс', 'яшолёты', 'стая', 'стоянки'].includes(м.cmd) || typeof м.ts !== 'number' || typeof м.sig !== 'string') return;
     if (Math.abs(Date.now() - м.ts) > СВЕЖЕСТЬ || м.ts <= (последКоманда.get(п.ид) || 0)) return;   // старые и повторные — мимо
     const пэйлоуд = typeof м.доп === 'string' ? м.доп : '';
     if (!await верна(`brzd|c|${адресКомнаты()}|${п.ид}|${м.cmd}|${пэйлоуд}|${м.ts}`, м.sig)) return;
@@ -13360,6 +13473,12 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       const Ф = window.__яшолёт;
       совет('⚡ Шторм поднимает всех в небо на Яшолётах!', 3);
       if (Ф && Ф.старт && Ф.почемуНельзя && !Ф.почемуНельзя()) setTimeout(() => { if (!Ф.почемуНельзя()) Ф.старт(); }, 900);
+    } else if (имя === 'стоянки') {
+      const Ф = window.__яшолёт; if (!Ф || !Ф.стоянки || !доп) return;
+      const было = Ф.стоянки.все.size, стало = Ф.стоянки.задать(доп.сп);
+      if (сам) хран.положить('brzd-стоянки', JSON.stringify(Ф.стоянки.список()));       // Шторм помнит свои Яшолёты и после перезагрузки
+      if (стало > было) совет(сам ? '✈ Яшолёт поставлен. Сесть может любой — Яша уже в задней кабине.' : '⚡ Шторм поставил Яшолёт! Подойди и садись — Яша уже ждёт в задней кабине.', 3.5);
+      else if (!стало && было) совет('⚡ Шторм убрал Яшолёты со стоянок.', 2.5);
     } else if (имя === 'стая') {
       const Ф = window.__яшолёт;
       if (Ф && Ф.стая && доп) { Ф.стая(доп); совет('⚡ Шторм выпустил стаю Яш на Яшолётах!', 3); }
@@ -13401,7 +13520,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
         таймПоз = 0.125;
         const Ф = window.__яшолёт;
         if (Ф && Ф.летит && Ф.летит()) {                           // на Яшолёте — все видят самолёт (в кабине Яша)
-          const И = Ф.И; всем({ k: 'p', x: +И.P.x.toFixed(2), z: +И.P.z.toFixed(2), y: +И.P.y.toFixed(2), угол: +И.курс.toFixed(3), лёт: 1, кр: +И.крен.toFixed(2), тг: +И.тангаж.toFixed(2) });
+          const И = Ф.И; всем({ k: 'p', x: +И.P.x.toFixed(2), z: +И.P.z.toFixed(2), y: +И.P.y.toFixed(2), угол: +И.курс.toFixed(3), лёт: 1, кр: +И.крен.toFixed(2), тг: +И.тангаж.toFixed(2), са: И.откуда && И.откуда.ид || undefined, нв: я.невидим || undefined });
         } else {
           const y = window.__игрокY !== undefined ? window.__игрокY : window.__мир.высота ? window.__мир.высота() : В(поз.x, поз.z);
           всем({ k: 'p', x: +поз.x.toFixed(2), z: +поз.z.toFixed(2), y: +y.toFixed(2), угол: +поз.угол.toFixed(3), поза: window.__игрокПоза || null, нв: я.невидим || undefined });
@@ -13421,8 +13540,13 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       const ск = Math.hypot(п.x - пx, п.z - пz) / dt; п.ск = (п.ск || 0) + (ск - (п.ск || 0)) * Math.min(1, dt * 6);
       if (п.ждётТела && window.__люди3д) { const вид = видДля(п); if (!вид) п.ждётТела = false; else { п.ав = window.__люди3д.аватар(вид); if (п.ав) п.ждётТела = false; } }
       if (п.ав) {
-        const к = п.ав.корень; к.visible = !п.невидим && !п.лёт; к.position.set(п.x, п.y, п.z); к.rotation.y = п.угол;
-        п.ав.анимация = п.поза || (п.ск > 4.5 ? 'Sprint_Loop' : п.ск > 0.4 ? 'Walk_Loop' : 'Idle_Loop'); п.ав.темп = п.ав.анимация === 'Walk_Loop' ? Math.min(1.4, Math.max(0.7, п.ск / 2.2)) : 1;
+        const к = п.ав.корень; к.visible = !п.невидим;
+        if (п.ав.м && п.ав.м.проектор) п.ав.м.проектор.visible = !п.лёт;
+        if (п.лёт) { п.ав.анимация = 'Sitting_Idle_Loop'; п.ав.темп = 1; п.вКабине = true; }      // за штурвалом Яшолёта: место и наклон ставит Яшолёт
+        else {
+          к.position.set(п.x, п.y, п.z); if (п.вКабине) { п.вКабине = false; к.rotation.set(0, п.угол, 0); } else к.rotation.y = п.угол;
+          п.ав.анимация = п.поза || (п.ск > 4.5 ? 'Sprint_Loop' : п.ск > 0.4 ? 'Walk_Loop' : 'Idle_Loop'); п.ав.темп = п.ав.анимация === 'Walk_Loop' ? Math.min(1.4, Math.max(0.7, п.ск / 2.2)) : 1;
+        }
       }
       const кот = !п.ав && !п.лёт && РОЛИ[рольПира(п)] && РОЛИ[рольПира(п)].кот;
       if (п.табл) { п.табл.visible = !п.невидим; п.табл.position.set(п.x, п.y + (кот ? 1.0 : 2.15), п.z); }
@@ -13463,6 +13587,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       с.clearRect(0, 0, 240, 240); с.strokeStyle = 'rgba(244,196,48,0.35)'; for (const r of [40, 80, 118]) { с.beginPath(); с.arc(R, R, r, 0, 6.29); с.stroke(); }
       const вз = Math.atan2(поз.x - API.камера.position.x, поз.z - API.камера.position.z);
       const точка = (x, z, цв, р) => { const dx = x - поз.x, dz = z - поз.z, cs = Math.cos(-вз), sn = Math.sin(-вз); let px = (dx * cs - dz * sn) * М, pz = (dx * sn + dz * cs) * М; const L = Math.hypot(px, pz); if (L > 112) { px *= 112 / L; pz *= 112 / L; } с.fillStyle = цв; с.beginPath(); с.arc(R - px, R - pz, р, 0, 6.29); с.fill(); };
+      const Ф = window.__яшолёт; if (Ф && Ф.стоянки) for (const с of Ф.стоянки.все.values()) точка(с.x, с.z, '#E8641E', 4);
       for (const п of пиры.values()) if (п.роль && п.x !== null) точка(п.x, п.z, РОЛИ[п.роль].цвет, 6);
       с.fillStyle = '#F4C430'; с.beginPath(); с.moveTo(R, R - 9); с.lineTo(R - 6, R + 6); с.lineTo(R + 6, R + 6); с.fill();
     }
@@ -13943,6 +14068,28 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
   }
   const тр = (x, y, z, rx = 0, ry = 0, rz = 0, sx = 1, sy = 1, sz = 1) => new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz)), new THREE.Vector3(sx, sy, sz));
 
+  // ===================== КАБИНЫ =====================
+  // Впереди — пилот: человек сидит по плечи (корень модели — у ступней, таз над проёмом); если пилот
+  // сам Яша — он садится в переднюю кабину, крупнее. Сзади — пассажир Яша. Ниже тёмного проёма
+  // кабины кота не видно — у запечённого Яши эта часть отрезана.
+  const ПZ = 0.02, ЯZ = -0.62, КОТ_М = 1.3, КОТ_Y = 0.14;
+  const СРЕЗ = (0.41 - КОТ_Y) / КОТ_М - 0.02;
+  const статКоты = new Set();
+  const статКот = () => { const Яш = window.__яша; return Яш && Яш.кот && Яш.кот.статичный ? Яш.кот.статичный({ срез: СРЕЗ, слоёв: API.телефон ? 4 : 6 }) : null; };
+  let котZ = 0.2;            // середина видимой части сидящего кота (по запечённому — точнее)
+  { const к = статКот(); if (к) { const б = new THREE.Box3().setFromBufferAttribute(к.children[0].geometry.attributes.position); котZ = (б.min.z + б.max.z) / 2; } }
+  function кабины(тело) {
+    const пилот = new THREE.Object3D(); пилот.position.set(0, -0.46, ПZ + 0.34);
+    const пилотКот = new THREE.Object3D(); пилотКот.position.set(0, -0.12, ПZ - 0.14);
+    const пассажир = new THREE.Object3D(); пассажир.position.set(0, КОТ_Y, ЯZ - котZ * КОТ_М);
+    тело.add(пилот, пилотКот, пассажир);
+    return { пилот, пилотКот, пассажир, сиденье: пассажир };
+  }
+  function посадитьСтатКота(места) {
+    const к = статКот(); if (!к) return null;
+    к.scale.setScalar(КОТ_М); места.пассажир.add(к); статКоты.add(к); return к;
+  }
+
   // ===================== САМОЛЁТ ИЗ БОЧКИ =====================
   // Оранжевая бочка вдоль +z (нос — вперёд), крылья из старых досок, хвост — две доски и киль,
   // сзади — открытое «сопло». Винт крутится, на оборотах — размытый диск.
@@ -13966,11 +14113,12 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     for (const s of [0, Math.PI]) { const л = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.78, 0.035).translate(0, 0.4, 0), дерево); л.rotation.z = s; л.castShadow = true; винт.add(л); }
     const диск = new THREE.Mesh(new THREE.CircleGeometry(0.86, 32), new THREE.MeshBasicMaterial({ color: 0x4A3A2A, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
     диск.position.z = Д / 2 + 0.3; тело.add(диск);
-    // кабина: тёмный проём с резиновым ободом — Яша сидит в нём по плечи
-    const КZ = -0.05;
-    м(new THREE.TorusGeometry(0.37, 0.05, 8, 24).rotateX(Math.PI / 2), чёрн, 0, R - 0.04, КZ);
-    м(new THREE.CircleGeometry(0.36, 20).rotateX(-Math.PI / 2), чёрн, 0, R - 0.09, КZ);
-    const сиденье = new THREE.Object3D(); сиденье.position.set(0, -0.12, КZ - 0.14); тело.add(сиденье);
+    // кабины: тёмные проёмы с резиновым ободом — впереди пилот, сзади Яша
+    м(new THREE.TorusGeometry(0.34, 0.05, 8, 24).rotateX(Math.PI / 2), чёрн, 0, R - 0.04, ПZ);
+    м(new THREE.CircleGeometry(0.33, 20).rotateX(-Math.PI / 2), чёрн, 0, R - 0.09, ПZ);
+    м(new THREE.TorusGeometry(0.27, 0.045, 8, 22).rotateX(Math.PI / 2), чёрн, 0, R - 0.04, ЯZ);
+    м(new THREE.CircleGeometry(0.26, 18).rotateX(-Math.PI / 2), чёрн, 0, R - 0.09, ЯZ);
+    const места = кабины(тело);
     // крылья — три доски поперёк, хвост — две доски и киль, подкосы
     for (const [z, ш] of [[0.5, 4.4], [0.78, 4.5], [1.06, 4.3]]) м(new THREE.BoxGeometry(ш, 0.05, 0.26), доски, 0, R + 0.04, z);
     for (const z of [-0.98, -1.2]) м(new THREE.BoxGeometry(2.0, 0.045, 0.2), доски, 0, 0.1, z);
@@ -13979,16 +14127,17 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     // колёса и костыль — чтобы стоять на земле
     for (const s of [-1, 1]) { м(new THREE.CylinderGeometry(0.19, 0.19, 0.1, 14).rotateZ(Math.PI / 2), чёрн, s * 0.42, -R - 0.2, 0.7); м(new THREE.BoxGeometry(0.04, 0.3, 0.04), сталь, s * 0.36, -R - 0.06, 0.7); }
     м(new THREE.BoxGeometry(0.05, 0.3, 0.05), сталь, 0, -R - 0.1, -1.05);
-    return { гр, тело, винт, диск, сиденье, ВЫС: R + 0.39 };
+    return { гр, тело, винт, диск, ...места, ВЫС: R + 0.39 };
   }
   const сам = сделатьСамолёт();
   сам.тело.name = 'тело'; сам.винт.name = 'винт'; сам.сиденье.name = 'сиденье';
   сцена.add(сам.гр);
+  сам.кот = посадитьСтатКота(сам);             // на стоянке Яша ждёт в задней кабине
 
   // ===================== ЛЁГКИЙ ЯШОЛЁТ =====================
-  // Для чужих самолётов и стаи: тот же самолёт одним мешем с цветами вершин (без текстур), голова
-  // Яши в кабине — тоже одним. Винт застыл — его прячет полупрозрачный диск. Настоящий самолёт с
-  // настоящим котом — это ~90 мешей; восемь таких над посёлком телефон не потянет.
+  // Для стоянок, чужих самолётов и стаи: тот же самолёт одним мешем с цветами вершин (без текстур),
+  // Яша в кабине — запечённый (шерсть одним вызовом). Винт застыл — его прячет полупрозрачный диск.
+  // Настоящий самолёт с настоящим котом — это ~90 мешей; восемь таких над посёлком телефон не потянет.
   const R_ = 0.5, Д_ = 2.6;
   const ЛЁГКИЙ = слить([
     [new THREE.CylinderGeometry(R_, R_, Д_, 18, 1, true).rotateX(Math.PI / 2), '#E8641E'],
@@ -13999,8 +14148,10 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     [new THREE.SphereGeometry(R_, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2).rotateX(Math.PI / 2).scale(1, 1, 0.42), '#A8461A', тр(0, 0, Д_ / 2)],
     [new THREE.CylinderGeometry(0.07, 0.1, 0.18, 8).rotateX(Math.PI / 2), '#B4B8BC', тр(0, 0, Д_ / 2 + 0.27)],
     [new THREE.BoxGeometry(0.13, 1.56, 0.035), '#5A4632', тр(0, 0, Д_ / 2 + 0.27, 0, 0, 0.6)],
-    [new THREE.TorusGeometry(0.37, 0.05, 6, 16).rotateX(Math.PI / 2), '#16181C', тр(0, R_ - 0.04, -0.05)],
-    [new THREE.CircleGeometry(0.36, 14).rotateX(-Math.PI / 2), '#16181C', тр(0, R_ - 0.09, -0.05)],
+    [new THREE.TorusGeometry(0.34, 0.05, 6, 16).rotateX(Math.PI / 2), '#16181C', тр(0, R_ - 0.04, ПZ)],
+    [new THREE.CircleGeometry(0.33, 14).rotateX(-Math.PI / 2), '#16181C', тр(0, R_ - 0.09, ПZ)],
+    [new THREE.TorusGeometry(0.27, 0.045, 6, 14).rotateX(Math.PI / 2), '#16181C', тр(0, R_ - 0.04, ЯZ)],
+    [new THREE.CircleGeometry(0.26, 12).rotateX(-Math.PI / 2), '#16181C', тр(0, R_ - 0.09, ЯZ)],
     [new THREE.BoxGeometry(4.4, 0.05, 0.26), '#BBAE96', тр(0, R_ + 0.04, 0.5)],
     [new THREE.BoxGeometry(4.5, 0.05, 0.26), '#B2A58C', тр(0, R_ + 0.04, 0.78)],
     [new THREE.BoxGeometry(4.3, 0.05, 0.26), '#BBAE96', тр(0, R_ + 0.04, 1.06)],
@@ -14012,34 +14163,26 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     [new THREE.CylinderGeometry(0.19, 0.19, 0.1, 10).rotateZ(Math.PI / 2), '#16181C', тр(0.42, -R_ - 0.2, 0.7)],
     [new THREE.CylinderGeometry(0.19, 0.19, 0.1, 10).rotateZ(Math.PI / 2), '#16181C', тр(-0.42, -R_ - 0.2, 0.7)],
   ]);
-  const ГОЛОВА = слить([
-    [new THREE.SphereGeometry(1, 12, 8), '#D9822F', тр(0, 0.55, -0.18, 0, 0, 0, 0.26, 0.22, 0.26)],
-    [new THREE.SphereGeometry(1, 14, 10), '#E8913A', тр(0, 0.86, -0.06, 0, 0, 0, 0.21, 0.19, 0.2)],
-    [new THREE.SphereGeometry(1, 10, 8), '#F4D7B0', тр(0, 0.8, 0.12, 0, 0, 0, 0.1, 0.075, 0.07)],
-    [new THREE.ConeGeometry(0.07, 0.15, 4), '#D9822F', тр(0.12, 1.04, -0.08, 0, 0, -0.35)],
-    [new THREE.ConeGeometry(0.07, 0.15, 4), '#D9822F', тр(-0.12, 1.04, -0.08, 0, 0, 0.35)],
-    [new THREE.SphereGeometry(0.03, 8, 6), '#1E2A10', тр(0.075, 0.9, 0.13)],
-    [new THREE.SphereGeometry(0.03, 8, 6), '#1E2A10', тр(-0.075, 0.9, 0.13)],
-    [new THREE.SphereGeometry(0.018, 6, 5), '#E07A8A', тр(0, 0.83, 0.19)],
-  ]);
   const ЛЁГКИЙ_ДИСК = new THREE.CircleGeometry(0.86, 24).translate(0, 0, Д_ / 2 + 0.3);
   const лёгкийМат = мат({ vertexColors: true, roughness: 0.55, metalness: 0.15 });
   const дискМат = new THREE.MeshBasicMaterial({ color: 0x4A3A2A, transparent: true, opacity: 0.22, depthWrite: false, side: THREE.DoubleSide });
-  function лёгкийСамолёт(сГоловой) {
+  // сКотом — на пассажирском месте сидит Яша (запечённый: вся шерсть — один вызов отрисовки)
+  function лёгкийСамолёт(сКотом) {
     const гр = new THREE.Group(), тело = new THREE.Group(); гр.add(тело);
     const м = new THREE.Mesh(ЛЁГКИЙ, лёгкийМат); м.castShadow = true; тело.add(м);
     тело.add(new THREE.Mesh(ЛЁГКИЙ_ДИСК, дискМат));
-    if (сГоловой) { const г = new THREE.Mesh(ГОЛОВА, лёгкийМат); г.castShadow = true; тело.add(г); }
-    const сиденье = new THREE.Object3D(); сиденье.position.set(0, -0.12, -0.19); тело.add(сиденье);
-    сцена.add(гр); return { гр, тело, сиденье, сГоловой };
+    const места = кабины(тело);
+    const кот = сКотом ? посадитьСтатКота(места) : null;
+    сцена.add(гр); return { гр, тело, ...места, кот, сКотом };
   }
+  function убратьЛёгкий(с) { сцена.remove(с.гр); if (с.кот) статКоты.delete(с.кот); }
 
   // ===================== СТОЯНКА — НА СТАДИОНЕ =====================
   const стоянка = (() => {
     const С = window.__стадион;
-    if (С) { const [x, z] = С.W(-С.A + 12, -2), [x2, z2] = С.W(-С.A + 13, -2); return { x, z, курс: Math.atan2(x2 - x, z2 - z) }; }
-    const Д = window.__домИгрока; if (Д) { const [x, z] = Д.W(14, -6); return { x, z, курс: 0 }; }
-    return { x: 0, z: 0, курс: 0 };
+    if (С) { const [x, z] = С.W(-С.A + 12, -2), [x2, z2] = С.W(-С.A + 13, -2); return { x, z, курс: Math.atan2(x2 - x, z2 - z), ид: 'стадион' }; }
+    const Д = window.__домИгрока; if (Д) { const [x, z] = Д.W(14, -6); return { x, z, курс: 0, ид: 'стадион' }; }
+    return { x: 0, z: 0, курс: 0, ид: 'стадион' };
   })();
   // земля с учётом покрытия стадиона (оно ровное и местами выше рельефа)
   const стад = (() => { const С = window.__стадион; if (!С) return null; const [x0, z0] = С.W(0, 0), [x1, z1] = С.W(1, 0); return { С, x0, z0, ux: x1 - x0, uz: z1 - z0 }; })();
@@ -14054,6 +14197,58 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
   }
   наСтоянку();
   { const r = 1.3, x = стоянка.x, z = стоянка.z; API.добавитьПрепятствие([[x - r, z - r], [x + r, z - r], [x + r, z + r], [x - r, z + r]], 'яшолёт'); }
+
+  // ===================== СТОЯНКИ ШТОРМА =====================
+  // Шторм ставит Яшолёты где захочет (список общий — приходит подписанной командой). Сесть может кто
+  // угодно; пока на нём летают — у всех он пропадает со стоянки, после полёта — снова на месте.
+  const стоянки = new Map();             // ид → { ид, x, z, курс, с: лёгкий самолёт, преп }
+  const СТОЯНОК_МАКС = 12;
+  const снятьПреп = д => { if (!д) return; д.п = [[1e7, 1e7], [1e7 + 0.1, 1e7], [1e7, 1e7 + 0.1]]; д.cx = д.cz = 1e7; д.r = 0; };   // препятствия не удаляются — уводим за край света
+  function поставитьСтоянку(ид, x, z, курс) {
+    let с = стоянки.get(ид);
+    if (с && Math.hypot(с.x - x, с.z - z) < 0.05 && Math.abs(угл(с.курс - курс)) < 0.01) return;
+    if (!с) { с = { ид, с: лёгкийСамолёт(true) }; стоянки.set(ид, с); } else снятьПреп(с.преп);
+    Object.assign(с, { x, z, курс });
+    с.с.гр.position.set(x, земля(x, z) + сам.ВЫС, z); с.с.гр.rotation.set(0, курс, 0);
+    const r = 1.3; с.преп = API.добавитьПрепятствие([[x - r, z - r], [x + r, z - r], [x + r, z + r], [x - r, z + r]], 'яшолёт');
+  }
+  function убратьСтоянку(ид) { const с = стоянки.get(ид); if (!с) return; убратьЛёгкий(с.с); снятьПреп(с.преп); стоянки.delete(ид); }
+  // полный список от Шторма: [[ид, x, z, курс], …] — чего нет в списке, то убираем
+  function задатьСтоянки(сп) {
+    if (!Array.isArray(сп)) return 0;
+    const есть = new Set();
+    for (const з of сп.slice(0, СТОЯНОК_МАКС)) {
+      if (!Array.isArray(з) || typeof з[0] !== 'string' || !/^[a-z0-9]{1,12}$/.test(з[0]) || з[0] === 'стадион') continue;
+      const x = +з[1], z = +з[2], к = +з[3];
+      if (!isFinite(x) || !isFinite(z) || !isFinite(к) || Math.abs(x) > API.ШИР / 2 - 20 || Math.abs(z) > API.ГЛУБ / 2 - 20) continue;
+      есть.add(з[0]); поставитьСтоянку(з[0], x, z, угл(к));
+    }
+    for (const ид of [...стоянки.keys()]) if (!есть.has(ид)) убратьСтоянку(ид);
+    return есть.size;
+  }
+  const списокСтоянок = () => [...стоянки.values()].map(с => [с.ид, +с.x.toFixed(1), +с.z.toFixed(1), +с.курс.toFixed(2)]);
+  // на этом Яшолёте сейчас кто-то из онлайна летает
+  function занята(ид) { const О = window.__онлайн; if (!О || !О.пиры) return false; for (const п of О.пиры.values()) if (п.лёт && п.са === ид) return true; return false; }
+  // ближайший свободный Яшолёт (стадион или Штормов) — в пределах R
+  function ближайшая(П, R) {
+    let лучш = null, бд = R;
+    for (const с of [стоянка, ...стоянки.values()]) {
+      if (занята(с.ид)) continue;
+      const d = Math.hypot(П.x - с.x, П.z - с.z); if (d < бд) { бд = d; лучш = с; }
+    }
+    return лучш;
+  }
+  // запечённые Яши в кабинах: вблизи все слои шерсти, дальше меньше, совсем далеко — не рисуем
+  const vКам = new THREE.Vector3(), vКот = new THREE.Vector3();
+  function шагСтатКотов() {
+    API.камера.getWorldPosition(vКам);
+    for (const к of статКоты) {
+      if (!к.parent) continue;
+      к.getWorldPosition(vКот); const d = vКам.distanceTo(vКот), мех = к.children[0], все = мех.geometry.attributes.aShell.count;
+      к.visible = d < 160;
+      мех.count = d < 14 ? все : d < 40 ? Math.min(все, 3) : 1;
+    }
+  }
 
   // ===================== РЫБКИ И ВАЛЕРЬЯНКА =====================
   const РЫБ_МАКС = 64;
@@ -14289,7 +14484,8 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
   const камС = new THREE.Vector3(), камЦ = new THREE.Vector3();
   let былоFov = 50, былоБезТравы = false; const было = { кам: null, есть: false };
   const фокус = { x: 0, z: 0 };
-  const кот = { живой: false, клон: null, было: null, взгляд: { x: 0, z: 0 } };
+  const кот = { живой: false, стат: false, было: null, взгляд: { x: 0, z: 0 }, пилотом: false };
+  const пилот = { было: false, поза: undefined };
 
   // ===================== ЭКРАН =====================
   {
@@ -14450,21 +14646,42 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
   const вибро = у => window.__итоги && window.__итоги.вибрировать && window.__итоги.вибрировать(у);
   const Я = () => window.__бахЯдро;
 
-  // ===================== ЯША В КАБИНЕ =====================
-  // Настоящий Яша садится в кабину через «я.на» (так же он ездит на пылесосе) — моргает, дёргает
-  // ухом, машет хвостом. Если Яшей сейчас играет живой человек в онлайне — сажаем копию.
+  // ===================== ЯША И ПИЛОТ В КАБИНАХ =====================
+  // Пилот — ты сам: твой человек садится в переднюю кабину. Настоящий Яша садится в заднюю через
+  // «я.на» (так же он ездит на пылесосе) — моргает, дёргает ухом, зевает. Играешь самим Яшей — кот
+  // и есть пилот (передняя кабина). Если Яшей сейчас играет живой человек в онлайне — сзади летит
+  // запечённый Яша, который и так сидит в этой кабине на стоянке.
+  const яКот = () => { const О = window.__онлайн, мр = О && (О.я.облик || О.я.роль); return !!(мр && О.РОЛИ && О.РОЛИ[мр] && О.РОЛИ[мр].кот); };
   function посадитьКота() {
     const Яш = window.__яша; if (!Яш) return;
     const я = Яш.я;
+    кот.пилотом = яКот();
     if (я.игрок && я.игрок === window.__мир.поз) { кот.былИгрок = я.игрок; я.игрок = null; }     // в онлайне Яша — это ты: кот летит с тобой
-    if (я.игрок) { кот.клон = THREE.SkeletonUtils ? THREE.SkeletonUtils.clone(Яш.яша) : Яш.яша.clone(); сцена.add(кот.клон); кот.живой = false; return; }
+    кот.стат = !!я.игрок; кот.живой = false;
+    if (я.игрок) return;
     кот.было = { цель: я.цель || null };
-    я.на = сам.сиденье; я.наY = 0; я.цель = кот.взгляд; я.лежит = false; я.проснулся = true; я.вылезти = 0; я.прыжок = 0; я.охота = 0;
+    я.на = кот.пилотом ? сам.пилотКот : сам.пассажир; я.наY = 0; я.цель = кот.взгляд; я.лежит = false; я.проснулся = true; я.вылезти = 0; я.прыжок = 0; я.охота = 0;
     кот.живой = true;
+  }
+  // человек-пилот: модель игрока — в переднюю кабину, сидя; после полёта — обратно на ноги
+  function пилотВКабину(видно) {
+    const Л = window.__люди3д, м = Л && Л.игрок && Л.игрок();
+    if (кот.пилотом || !м) return;
+    if (!пилот.было) { пилот.было = true; пилот.поза = window.__игрокПоза; }
+    window.__игрокПоза = 'Sitting_Idle_Loop';
+    сам.пилот.getWorldPosition(v1); м.корень.position.copy(v1);
+    сам.тело.getWorldQuaternion(q1); м.корень.quaternion.copy(q1);
+    м.корень.visible = видно && !window.__игрокСкрыт;
+    if (м.проектор) м.проектор.visible = false;                 // у голограммы Шторма луч проектора в кабине ни к чему
+  }
+  function пилотВыйти() {
+    if (!пилот.было) return;
+    пилот.было = false; window.__игрокПоза = пилот.поза; пилот.поза = undefined;
+    const Л = window.__люди3д, м = Л && Л.игрок && Л.игрок(), П = window.__мир.поз;
+    if (м) { м.корень.rotation.set(0, П.угол, 0); if (м.проектор) м.проектор.visible = true; }
   }
   function высадитьКота() {
     const Яш = window.__яша;
-    if (кот.клон) { сцена.remove(кот.клон); кот.клон = null; }
     if (!Яш || !кот.живой) return;
     const я = Яш.я, П = window.__мир.поз;
     я.на = null; я.цель = кот.было ? кот.было.цель : null; я.наY = 0;
@@ -14477,12 +14694,13 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     кот.былИгрок = null;
   }
   function котВКабину(видно) {
-    const кошка = кот.живой ? window.__яша && window.__яша.яша : кот.клон; if (!кошка) return;
+    const кошка = кот.живой && window.__яша && window.__яша.яша; if (!кошка) return;
     const хв = кошка.getObjectByName('хвост'); if (хв) хв.visible = false;          // хвост в бочке — иначе торчит из сопла
-    сам.сиденье.getWorldPosition(v1); кошка.position.copy(v1);
-    сам.тело.getWorldQuaternion(q1); кошка.quaternion.copy(q1); кошка.scale.setScalar(1.15 * 1.7);
+    const место = кот.пилотом ? сам.пилотКот : сам.пассажир;
+    место.getWorldPosition(v1); кошка.position.copy(v1);
+    сам.тело.getWorldQuaternion(q1); кошка.quaternion.copy(q1); кошка.scale.setScalar(кот.пилотом ? 1.15 * 1.7 : КОТ_М);
     кошка.visible = видно;
-    сам.сиденье.userData.угол = И.курс;
+    место.userData.угол = И.курс;
     кот.взгляд.x = И.P.x + Math.sin(И.курс) * 40; кот.взгляд.z = И.P.z + Math.cos(И.курс) * 40;
   }
 
@@ -14501,13 +14719,13 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     clearTimeout(переход); шторка.style.opacity = 1;
     переход = setTimeout(() => { переход = null; ф(); шторка.style.opacity = 0; }, 320);
   }
-  function старт() {
+  function старт(откуда) {
     const нельзя = почемуНельзя();
     if (нельзя) { window.__подсказки && window.__подсказки.совет(нельзя, 3); return false; }
     const П = window.__мир.поз;
-    // со стоянки — с места; из меню — самолёт ставим перед игроком
-    const рядом = Math.hypot(П.x - стоянка.x, П.z - стоянка.z) < 12;
-    И.откуда = рядом ? { x: стоянка.x, z: стоянка.z, курс: стоянка.курс, стоянка: true } : { x: П.x + Math.sin(П.угол) * 3.5, z: П.z + Math.cos(П.угол) * 3.5, курс: П.угол };
+    // со стоянки (стадион или где поставил Шторм) — с места; из меню — самолёт ставим перед игроком
+    const ст = откуда && откуда.ид ? откуда : ближайшая(П, 12);
+    И.откуда = ст ? { x: ст.x, z: ст.z, курс: ст.курс, стоянка: true, ид: ст.ид } : { x: П.x + Math.sin(П.угол) * 3.5, z: П.z + Math.cos(П.угол) * 3.5, курс: П.угол, ид: null };
     И.эт = 'шторка'; window.__летитЯша = true;
     заШторкой(начатьПолёт);
     return true;
@@ -14535,7 +14753,7 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     посадитьКота();
     моторВкл();
     обновитьВерх();
-    сообщение('Яша взлетает!', 1.6);
+    сообщение(кот.пилотом ? 'Яша взлетает!' : 'Взлетаем! Яша — штурман.', 1.6);
   }
   function конец(причина) {
     if (И.эт === 'конец' || И.эт === 'нет') return;
@@ -14586,7 +14804,9 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     рыбДанные.length = 0; рыбы.count = 0; валер.акт = false; валер.г.visible = false;
     убратьВеликанов();
     высадитьКота();
+    пилотВыйти();
     наСтоянку();
+    И.откуда = null;
     for (const е of [сообщЭл, репликаЭл, подсказкаЭл]) е.style.opacity = 0;
   }
   кнВыход.addEventListener('click', выйти);
@@ -14910,6 +15130,8 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     сам.тело.visible = видно;
     сам.гр.updateMatrixWorld(true);
     котВКабину(видно);
+    пилотВКабину(видно);
+    if (сам.кот) сам.кот.visible = !!кот.стат && видно;   // сзади — настоящий Яша (запечённый — если Яшей играет другой; пусто — если пилот сам кот)
     // выхлоп из «сопла»; на валерьянке — искры
     if (И.эт === 'летим' || И.эт === 'взлёт') {
       И.тДым -= dt;
@@ -14935,8 +15157,8 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
   кнКуры.addEventListener('click', () => старт());
 
   // ===================== ЧУЖИЕ ЯШОЛЁТЫ (онлайн) =====================
-  // Кто летит — шлёт координаты самолёта с флагом «лёт». У остальных рисуем лёгкий самолёт: в кабине
-  // голова Яши, а у того, кто играет самим Яшей, — настоящий кот (он и так ходит за этим игроком).
+  // Кто летит — шлёт координаты самолёта с флагом «лёт». У остальных рисуем лёгкий самолёт: в передней
+  // кабине сидит его человек, в задней — Яша; а кто играет самим Яшей — тот настоящим котом за штурвалом.
   const чужие = new Map();
   let котЧужой = null;
   function вернутьКота() {
@@ -14948,21 +15170,25 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     const О = window.__онлайн, Яш = window.__яша;
     for (const [ид, ч] of чужие) {
       const п = О && О.пиры.get(ид);
-      if (!п || !п.лёт || п.x === null) { сцена.remove(ч.гр); чужие.delete(ид); if (котЧужой && (!п || котЧужой === п)) вернутьКота(); }
+      if (!п || !п.лёт || п.x === null || п.невидим) { убратьЛёгкий(ч); чужие.delete(ид); if (котЧужой && (!п || котЧужой === п)) вернутьКота(); }
     }
     if (котЧужой && !(Яш && Яш.я.игрок === котЧужой)) вернутьКота();      // Яша пересел к другому игроку
     if (!О || !О.пиры) return;
     for (const п of О.пиры.values()) {
-      if (!п.лёт || п.x === null) continue;
+      if (!п.лёт || п.x === null || п.невидим) continue;                 // невидимый Шторм летает незаметно
       const настоящий = !!(Яш && Яш.я.игрок === п);
       let ч = чужие.get(п.ид);
-      if (ч && ч.сГоловой === настоящий) { сцена.remove(ч.гр); чужие.delete(п.ид); ч = null; }   // сменился пилот
+      if (ч && ч.сКотом === настоящий) { убратьЛёгкий(ч); чужие.delete(п.ид); ч = null; }   // сменился пилот
       if (!ч) { ч = лёгкийСамолёт(!настоящий); чужие.set(п.ид, ч); }
       ч.гр.position.set(п.x, п.y, п.z); ч.гр.rotation.set(0, п.угол, 0); ч.тело.rotation.set(-(п.тг || 0), 0, п.кр || 0);
+      ч.гр.updateMatrixWorld(true);
+      if (!настоящий && п.ав) {                       // человек за штурвалом: позу «сидит» ставит онлайн
+        ч.пилот.getWorldPosition(v1); п.ав.корень.position.copy(v1);
+        ч.тело.getWorldQuaternion(q1); п.ав.корень.quaternion.copy(q1);
+      }
       if (настоящий) {
-        ч.гр.updateMatrixWorld(true);
         const кошка = Яш.яша; котЧужой = п;
-        ч.сиденье.getWorldPosition(v1); кошка.position.copy(v1);
+        ч.пилотКот.getWorldPosition(v1); кошка.position.copy(v1);
         ч.тело.getWorldQuaternion(q1); кошка.quaternion.copy(q1); кошка.scale.setScalar(1.15 * 1.7);
         const хв = кошка.getObjectByName('хвост'); if (хв) хв.visible = false;
       }
@@ -14971,11 +15197,22 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
 
   // ===================== СТАЯ ЯШ (сила Шторма) =====================
   // Десять Яш на лёгких Яшолётах кружат над местом, где стоит Шторм, минуту — и улетают по касательной.
-  // Зерно одно у всех, поэтому строй у всех игроков одинаковый. Вся стая — три вызова отрисовки.
-  const СТАЯ_МАКС = 24;
-  const стаяТела = new THREE.InstancedMesh(ЛЁГКИЙ, лёгкийМат, СТАЯ_МАКС), стаяГоловы = new THREE.InstancedMesh(ГОЛОВА, лёгкийМат, СТАЯ_МАКС), стаяДиски = new THREE.InstancedMesh(ЛЁГКИЙ_ДИСК, дискМат, СТАЯ_МАКС);
-  for (const м of [стаяТела, стаяГоловы, стаяДиски]) { м.count = 0; м.frustumCulled = false; сцена.add(м); }
-  стаяТела.castShadow = стаяГоловы.castShadow = true;
+  // Зерно одно у всех, поэтому строй у всех игроков одинаковый. Вся стая — четыре вызова отрисовки:
+  // самолёты, диски винтов, шерсть Яш за штурвалом (экземпляр на самолёт и слой) и их морды.
+  const СТАЯ_МАКС = 24, СТАЯ_СЛОИ = API.телефон ? 2 : 3;
+  const стаяТела = new THREE.InstancedMesh(ЛЁГКИЙ, лёгкийМат, СТАЯ_МАКС), стаяДиски = new THREE.InstancedMesh(ЛЁГКИЙ_ДИСК, дискМат, СТАЯ_МАКС);
+  const стаяКот = (() => {
+    const о = статКот(); if (!о) return null;
+    const мех = о.children[0], дет = о.children[1], г = new THREE.BufferGeometry();
+    for (const [имя, атр] of Object.entries(мех.geometry.attributes)) if (имя !== 'aShell') г.setAttribute(имя, атр);
+    г.setIndex(мех.geometry.index);
+    г.setAttribute('aShell', new THREE.InstancedBufferAttribute(new Float32Array(СТАЯ_МАКС * СТАЯ_СЛОИ).map((_, i) => (i % СТАЯ_СЛОИ) / СТАЯ_СЛОИ * 0.8), 1));
+    return { мех: new THREE.InstancedMesh(г, мех.material, СТАЯ_МАКС * СТАЯ_СЛОИ), дет: new THREE.InstancedMesh(дет.geometry, дет.material, СТАЯ_МАКС) };
+  })();
+  const стаяВсе = [стаяТела, стаяДиски, ...(стаяКот ? [стаяКот.мех, стаяКот.дет] : [])];
+  for (const м of стаяВсе) { м.count = 0; м.frustumCulled = false; сцена.add(м); }
+  стаяТела.castShadow = true;
+  const мКот = new THREE.Matrix4().compose(new THREE.Vector3(0, -0.12, ПZ - 0.14), new THREE.Quaternion(), new THREE.Vector3().setScalar(1.15 * 1.7)), м4К = new THREE.Matrix4();   // Яша за штурвалом — в передней кабине
   const стая = [];
   function запуститьСтаю(о) {
     if (!о || typeof о.x !== 'number' || typeof о.z !== 'number' || !isFinite(о.x) || !isFinite(о.z)) return;
@@ -15004,16 +15241,24 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
       const м = Math.min(1, с.t / 0.6) * (уход > 18 ? Math.max(0.001, 1 - (уход - 18) / 4) : 1);
       еС.set(уход ? -0.12 : -0.05, с.курс, уход ? 0 : 0.42 * с.напр); qС.setFromEuler(еС);       // крен — в поворот
       м4.compose(v1.set(с.x, с.y, с.z), qС, sv.setScalar(м));
-      стаяТела.setMatrixAt(n, м4); стаяГоловы.setMatrixAt(n, м4); стаяДиски.setMatrixAt(n, м4); n++;
+      стаяТела.setMatrixAt(n, м4); стаяДиски.setMatrixAt(n, м4);
+      if (стаяКот) { м4К.multiplyMatrices(м4, мКот); стаяКот.дет.setMatrixAt(n, м4К); for (let j = 0; j < СТАЯ_СЛОИ; j++) стаяКот.мех.setMatrixAt(n * СТАЯ_СЛОИ + j, м4К); }
+      n++;
     }
-    стаяТела.count = стаяГоловы.count = стаяДиски.count = n;
-    стаяТела.instanceMatrix.needsUpdate = стаяГоловы.instanceMatrix.needsUpdate = стаяДиски.instanceMatrix.needsUpdate = true;
+    стаяТела.count = стаяДиски.count = n;
+    if (стаяКот) { стаяКот.мех.count = n * СТАЯ_СЛОИ; стаяКот.дет.count = n; }
+    for (const м of стаяВсе) м.instanceMatrix.needsUpdate = true;
   }
 
   API.каждыйКадр.push((dt, ms, поз) => {
     if (window.__перемотка) { кнопкаСесть(false); кнопкаКуры(0); return; }
     if (dt) { шагКур(dt); шагЧужих(dt); шагСтаи(dt); }
-    кнопкаСесть(И.эт === 'нет' && Math.hypot(поз.x - стоянка.x, поз.z - стоянка.z) < 5 && !почемуНельзя());
+    // на чьей стоянке сейчас летают — там пусто (свою, с которой взлетел, тоже прячем)
+    const моя = И.эт !== 'нет' && И.откуда ? И.откуда.ид : null;
+    for (const с of стоянки.values()) с.с.гр.visible = с.ид !== моя && !занята(с.ид);
+    if (И.эт === 'нет') { сам.гр.visible = !занята('стадион'); if (сам.кот) сам.кот.visible = true; }
+    шагСтатКотов();
+    кнопкаСесть(И.эт === 'нет' && !почемуНельзя() && !!ближайшая(поз, 5));
     кнопкаКуры(И.эт === 'нет' && !почемуНельзя() ? курВНебе() : 0);
     if (И.эт === 'нет' || И.эт === 'шторка' || !dt) return;
     // сюжет позвал (кино, поездка) — полёт заканчивается сам
@@ -15031,6 +15276,7 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     }
   }
   window.__яшолёт = { старт, выйти, ещё, шаг, И, великаны, рыбы: рыбДанные, сортиры, валер, сам, стоянка, почемуНельзя, попал, схвачен, конец,
+    стоянки: { задать: задатьСтоянки, список: списокСтоянок, все: стоянки, ближайшая, занята, МАКС: СТОЯНОК_МАКС }, лёгкийСамолёт,
     летит: () => И.эт !== 'нет' && И.эт !== 'шторка', сказать: сообщение, стая: запуститьСтаю, чужие,
     куры: { добавить: добавитьКур, убрать: убратьКур, сколько: курВНебе, модель: курица, махнуть, список: небо, сбить, кудах } };
 }]);
