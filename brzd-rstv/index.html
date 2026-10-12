@@ -6712,136 +6712,743 @@ window.ДЕТАЛИ.push(['люди', function (API) {
 window.ДЕТАЛИ.push(['Яша', function (API) {
   const { THREE, сцена } = API;
   const В = API.землиВысота;
-  const СЛОЁВ = API.УЛЬТРА ? 20 : 12;
+  // Детальный Яша: скелет (~34 кости); туловище с шеей и лапами вылеплено одним куском из поля
+  // расстояний (грудная клетка, живот, таз, лопатки, бёдра, голени, подушечки плавно перетекают
+  // друг в друга) и обтянуто сеткой; голова — вылепленная сфера, уши, хвост — пушистая труба.
+  // Шерсть слоями: длина, цвет и направление волоса заданы по вершинам. Лапы ставятся обратной
+  // кинематикой: задаём, где подушечка, — плечо, локоть и кисть сгибаются сами.
+  function СделатьКота(THREE, о) {
+    о = о || {};
+    const СЛОЁВ = о.слоёв || 16, ШАГ = о.воксель || 0.005;
+    const ЦВЕТ = о.цвет || (h => new THREE.Color(h));
+    const V = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
+    const зажать = (v, a, b) => Math.max(a, Math.min(b, v));
+    const гладко = (a, b, x) => { const t = зажать((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+    const смесь = (a, b, t) => a + (b - a) * t;
+    const т0 = performance.now(), замеры = {};
 
-  // ===================== ТЕКСТУРА ШЕРСТИ =====================
-  // по u — вокруг тела, по v — вдоль. Рыжий с тёмными тигровыми полосами.
-  // Яша по фото: светло-рыжий, длинношёрстный, полоски мягкие, бледнее основного тона.
-  function шерсть(голова) {
-    const к = document.createElement('canvas'); к.width = 512; к.height = 512; const с = к.getContext('2d');
-    const г = с.createLinearGradient(0, 0, 0, 512); г.addColorStop(0, '#E9A461'); г.addColorStop(0.55, '#EDB072'); г.addColorStop(1, '#F4CFA0'); с.fillStyle = г; с.fillRect(0, 0, 512, 512);
-    for (let i = 0; i < 12; i++) {                      // «макрель»: волнистые поперечные полосы
-      const y = i * 42 + 10; с.fillStyle = 'rgba(190,100,40,0.34)'; с.beginPath();
-      for (let x = 0; x <= 512; x += 8) с.lineTo(x, y + Math.sin(x * 0.03 + i) * 8 + Math.sin(x * 0.11) * 3);
-      for (let x = 512; x >= 0; x -= 8) с.lineTo(x, y + 13 + Math.sin(x * 0.03 + i * 1.3) * 8);
-      с.fill();
+    // ===================== СКЕЛЕТ =====================
+    // кости в позе «стоит», ориентация у всех единичная; позиция — смещение от родителя
+    const кости = {}, список = [];
+    function кость(имя, родитель, x, y, z) {
+      const б = new THREE.Bone(); б.name = имя; б.userData.мир = V(x, y, z);
+      const п = родитель ? кости[родитель] : null;
+      if (п) { б.position.copy(б.userData.мир).sub(п.userData.мир); п.add(б); } else б.position.copy(б.userData.мир);
+      б.userData.покой = б.position.clone();
+      кости[имя] = б; б.userData.инд = список.length; список.push(б); return б;
     }
-    if (голова) {                                       // «М» на лбу и полоски от глаз к ушам (перёд головы — u≈0.25)
-      с.strokeStyle = 'rgba(170,85,30,0.7)'; с.lineWidth = 7; с.lineCap = 'round';
-      const cx = 128, cy = 175;
-      с.beginPath(); с.moveTo(cx - 34, cy + 22); с.lineTo(cx - 20, cy - 16); с.lineTo(cx, cy + 10); с.lineTo(cx + 20, cy - 16); с.lineTo(cx + 34, cy + 22); с.stroke();
-      for (const s2 of [-1, 1]) { с.beginPath(); с.moveTo(cx + s2 * 30, cy + 70); с.quadraticCurveTo(cx + s2 * 60, cy + 64, cx + s2 * 78, cy + 44); с.stroke(); }
-      for (let k = 0; k < 3; k++) { с.beginPath(); с.moveTo(cx - 8 + k * 8, cy - 40); с.lineTo(cx - 8 + k * 8, cy - 80); с.stroke(); }
-      с.fillStyle = 'rgba(255,245,230,0.8)'; с.beginPath(); с.ellipse(cx, cy + 160, 55, 40, 0, 0, 6.28); с.fill();   // светлый подбородок
+    кость('таз', null, 0, 0.30, -0.15);
+    кость('сп1', 'таз', 0, 0.315, -0.07);
+    кость('сп2', 'сп1', 0, 0.32, 0.01);
+    кость('грудь', 'сп2', 0, 0.318, 0.09);
+    кость('шея', 'грудь', 0, 0.338, 0.165);
+    кость('голова', 'шея', 0, 0.398, 0.212);
+    кость('челюсть', 'голова', 0, 0.402, 0.253);          // шарнир нижней челюсти — для зевка
+    const ХВОСТ = 10, хвостТочки = [];
+    { let пред = 'таз'; for (let i = 0; i < ХВОСТ; i++) { const y = 0.335 - i * 0.004, z = -0.244 - i * 0.04; кость('хвост' + i, пред, 0, y, z); хвостТочки.push(V(0, y, z)); пред = 'хвост' + i; } хвостТочки.push(V(0, 0.335 - ХВОСТ * 0.004, -0.244 - ХВОСТ * 0.04 + 0.006)); }
+    const ГОЛОВА_Ц = V(0, 0.432, 0.258);                 // центр черепа (покой)
+    const ЛАПЫ = {};
+    for (const s of [-1, 1]) {
+      const Л = s < 0 ? 'Л' : 'П';
+      кость('лопатка' + Л, 'грудь', s * 0.042, 0.34, 0.112);
+      кость('плечо' + Л, 'лопатка' + Л, s * 0.058, 0.255, 0.135);
+      кость('локоть' + Л, 'плечо' + Л, s * 0.06, 0.158, 0.104);
+      кость('кисть' + Л, 'локоть' + Л, s * 0.058, 0.042, 0.134);
+      кость('бедро' + Л, 'таз', s * 0.055, 0.30, -0.165);
+      кость('колено' + Л, 'бедро' + Л, s * 0.064, 0.19, -0.104);
+      кость('скакат' + Л, 'колено' + Л, s * 0.06, 0.104, -0.21);
+      кость('стопа' + Л, 'скакат' + Л, s * 0.058, 0.03, -0.172);
+      кость('ухо' + Л, 'голова', s * 0.04, 0.485, 0.248);
+      ЛАПЫ['перед' + Л] = { s, пальцы: V(s * 0.058, 0.012, 0.174) };
+      ЛАПЫ['зад' + Л] = { s, пальцы: V(s * 0.058, 0.012, -0.126) };
     }
-    for (let i = 0; i < 7000; i++) {                    // волоски — светлые и тёмные, вдоль шерсти
-      const x = Math.random() * 512, y = Math.random() * 512, l = 4 + Math.random() * 10;
-      с.strokeStyle = Math.random() < 0.55 ? 'rgba(255,215,160,0.35)' : 'rgba(160,80,30,0.25)';
-      с.lineWidth = 1; с.beginPath(); с.moveTo(x, y); с.lineTo(x + (Math.random() - 0.5) * 3, y + l); с.stroke();
-    }
-    const т = API.цветнаяТекстура(к); т.wrapS = т.wrapT = THREE.RepeatWrapping; т.anisotropy = API.АНИЗ; return т;
-  }
-  const полосы = шерсть(false), полосыГолова = шерсть(true);
-  // слой шерсти: вершины раздуваются по нормали, в верхних слоях — только волоски
-  function матШерсти(длина, цвет, плотность = 260, карта = полосы) {
-    const м = new THREE.MeshStandardMaterial({ map: карта, color: API.цвет(цвет), roughness: 0.95, metalness: 0, alphaTest: 0.5, transparent: false });
-    м.onBeforeCompile = ш => {
-      ш.uniforms.uLen = { value: длина }; ш.uniforms.uDen = { value: плотность };
-      ш.vertexShader = 'attribute float aShell;\nuniform float uLen;\nvarying float vShell;\n' + ш.vertexShader
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vShell = aShell;\n  transformed += normal * aShell * uLen;\n  transformed.y -= aShell * aShell * uLen * 0.35;');
-      ш.fragmentShader = 'uniform float uDen;\nvarying float vShell;\n' + ш.fragmentShader
-        .replace('#include <map_fragment>', `#include <map_fragment>
-          vec2 cell = floor(vUv * uDen);
-          float strand = fract(sin(dot(cell, vec2(12.9898, 78.233))) * 43758.5453);
-          float thin = length(fract(vUv * uDen) - 0.5) * 2.0;
-          if (vShell > 0.02 && (strand < vShell * 0.95 || thin > 1.15 - vShell)) discard;
-          diffuseColor.rgb *= mix(0.62, 1.1, vShell);`);
-    };
-    м.customProgramCacheKey = () => 'шерсть';
-    return м;
-  }
-  function часть(геом, мат, родитель, x, y, z) {
-    const n = СЛОЁВ, м = new THREE.InstancedMesh(геом, мат, n), ед = new THREE.Matrix4(), слой = new Float32Array(n);
-    for (let i = 0; i < n; i++) { м.setMatrixAt(i, ед); слой[i] = i / (n - 1); }
-    геом.setAttribute('aShell', new THREE.InstancedBufferAttribute(слой, 1));
-    м.castShadow = true; м.frustumCulled = false; м.position.set(x, y, z); родитель.add(м); return м;
-  }
-  const шар = (rx, ry, rz, сег = 18) => new THREE.SphereGeometry(1, сег, Math.round(сег * 0.7)).scale(rx, ry, rz);
-  const голый = (г, цв, rough = 0.4) => { const м = new THREE.Mesh(г, new THREE.MeshStandardMaterial({ color: API.цвет(цв), roughness: rough, metalness: 0 })); м.castShadow = true; return м; };
+    const мир = имя => кости[имя].userData.мир;
+    const инд = имя => кости[имя].userData.инд;
 
-  // ===================== ТЕЛО =====================
-  const яша = new THREE.Group(), корпус = new THREE.Group(); яша.add(корпус);
-  const уши = [];
-  const РЫЖ = '#FFFFFF', СВЕТЛ = '#FFE9D2', БЕЛ = '#FFF6EC';
-  const мТело = матШерсти(0.05, РЫЖ, 200), мГрудь = матШерсти(0.07, СВЕТЛ, 150), мЛапы = матШерсти(0.024, РЫЖ, 300), мБелЛапы = матШерсти(0.018, БЕЛ, 300);
-  const мХвост = матШерсти(0.085, РЫЖ, 130), мГолова = матШерсти(0.02, РЫЖ, 320, полосыГолова), мЩёки = матШерсти(0.035, СВЕТЛ, 200), мМорда = матШерсти(0.014, БЕЛ, 340);
-  часть(шар(0.12, 0.125, 0.23), мТело, корпус, 0, 0.3, 0);
-  часть(шар(0.105, 0.12, 0.09), мГрудь, корпус, 0, 0.31, 0.17);
-  // голова
-  const голова = new THREE.Group(); голова.position.set(0, 0.46, 0.27); корпус.add(голова);
-  часть(шар(0.09, 0.083, 0.086), мГолова, голова, 0, 0, 0);
-  часть(шар(0.105, 0.062, 0.065), мЩёки, голова, 0, -0.045, -0.008);
-  часть(шар(0.04, 0.03, 0.035), мМорда, голова, 0, -0.035, 0.075);
-  const глаза = [];
-  const радужка = (() => { const к = document.createElement('canvas'); к.width = к.height = 64; const с = к.getContext('2d');
-    const г = с.createRadialGradient(32, 32, 4, 32, 32, 32); г.addColorStop(0, '#C8A020'); г.addColorStop(0.6, '#D8B040'); г.addColorStop(1, '#8A6A18'); с.fillStyle = г; с.fillRect(0, 0, 64, 64);
-    с.strokeStyle = 'rgba(90,60,10,0.4)'; for (let i = 0; i < 40; i++) { const а = i / 40 * 6.28; с.beginPath(); с.moveTo(32 + Math.cos(а) * 8, 32 + Math.sin(а) * 8); с.lineTo(32 + Math.cos(а) * 30, 32 + Math.sin(а) * 30); с.stroke(); }
-    return API.цветнаяТекстура(к); })();
-  for (const s of [-1, 1]) {
-    const ухо = new THREE.ConeGeometry(0.038, 0.08, 10); ухо.translate(0, 0.04, 0);
-    const у = часть(ухо, матШерсти(0.012, РЫЖ, 300), голова, s * 0.05, 0.06, -0.005); у.rotation.set(-0.15, 0, s * -0.3);
-    уши.push({ у, s });
-    const внутри = голый(new THREE.ConeGeometry(0.024, 0.055, 8).translate(0, 0.027, 0), '#E8A89A', 0.7); внутри.position.set(s * 0.05, 0.063, 0.006); внутри.rotation.copy(у.rotation); голова.add(внутри); уши[уши.length - 1].вн = внутри;
-    // пушистые кисточки внутри уха и на кончике (как на фото — «рысьи»)
-    const кисть = new THREE.Group(); кисть.position.copy(внутри.position); кисть.rotation.copy(у.rotation); голова.add(кисть); уши[уши.length - 1].кисть = кисть;
-    const волосМ = new THREE.LineBasicMaterial({ color: 0xFFF2E0, transparent: true, opacity: 0.85 }), вп = [];
-    for (let k = 0; k < 14; k++) { const а = (k / 14 - 0.5) * 1.2; вп.push(0, 0.005, 0.004, Math.sin(а) * 0.02, 0.045 + (k % 3) * 0.01, 0.012 + Math.cos(а) * 0.006); }
-    for (let k = 0; k < 5; k++) вп.push(0, 0.075, 0, (k - 2) * 0.004, 0.1 + k % 2 * 0.01, -0.004);
-    const гв = new THREE.BufferGeometry(); гв.setAttribute('position', new THREE.Float32BufferAttribute(вп, 3)); кисть.add(new THREE.LineSegments(гв, волосМ));
-    // глаз: радужка с щелевидным зрачком, блик, «веко» — схлопывается при моргании
-    const гл = new THREE.Group(); гл.position.set(s * 0.036, 0.012, 0.082); гл.rotation.set(0, s * 0.35, 0); голова.add(гл);
-    const яб = new THREE.Mesh(new THREE.SphereGeometry(0.019, 16, 12), new THREE.MeshStandardMaterial({ map: радужка, roughness: 0.08, metalness: 0 })); яб.rotation.y = -Math.PI / 2; гл.add(яб);
-    const зрачок = голый(new THREE.SphereGeometry(0.01, 10, 8).scale(0.28, 1.25, 0.4), '#050505', 0.05); зрачок.position.set(0, 0, 0.016); гл.add(зрачок);
-    const блик = new THREE.Mesh(new THREE.SphereGeometry(0.004, 6, 4), new THREE.MeshBasicMaterial({ color: 0xFFFFFF })); блик.position.set(-0.005, 0.007, 0.018); гл.add(блик);
-    const обвод = голый(new THREE.TorusGeometry(0.019, 0.0025, 5, 20), '#3A2210', 0.6); обвод.position.z = 0.004; гл.add(обвод);
-    глаза.push({ гл, зрачок });
+    // ===================== ОКРАС =====================
+    // Яша по фото: светло-рыжий, длинношёрстный; полоски мягкие, бледнее основного тона;
+    // подбородок, грудь, «жабо» и носочки — светлые.
+    const ЦВ = { рыж: ЦВЕТ('#E89A52'), рыжТ: ЦВЕТ('#C46E2E'), спина: ЦВЕТ('#D9843E'), крем: ЦВЕТ('#F4D2A2'), бел: ЦВЕТ('#FBF1E4') };
+    const мешать = (a, b, t) => a.clone().lerp(b, зажать(t, 0, 1));
+    const полоса = (x, период, резкость = 3) => Math.pow(0.5 + 0.5 * Math.sin(x * Math.PI * 2 / период), резкость);
+
+    // кусок меша: позиция, нормаль, цвет, длина шерсти, направление укладки, кости (до четырёх)
+    function кусок(плотн = 1) { return { p: [], n: [], c: [], len: [], comb: [], ki: [], kw: [], idx: [], плотн }; }
+    function вершина(к, p, n, ц, дл, гр, веса) {
+      к.p.push(p.x, p.y, p.z); к.n.push(n.x, n.y, n.z); к.c.push(ц.r, ц.g, ц.b); к.len.push(дл); к.comb.push(гр.x, гр.y, гр.z);
+      for (let i = 0; i < 4; i++) { const в = веса[i]; к.ki.push(в ? в[0] : 0); к.kw.push(в ? в[1] : 0); }
+    }
+    function слить(куски) {
+      const в = кусок(), den = []; let база = 0;
+      for (const к of куски) {
+        for (const ключ of ['p', 'n', 'c', 'len', 'comb', 'ki', 'kw']) { const м = в[ключ], и = к[ключ]; for (let i = 0; i < и.length; i++) м.push(и[i]); }
+        for (let i = 0; i < к.p.length / 3; i++) den.push(к.плотн);
+        for (const i of к.idx) в.idx.push(i + база);
+        база += к.p.length / 3;
+      }
+      const г = new THREE.BufferGeometry();
+      г.setAttribute('position', new THREE.Float32BufferAttribute(в.p, 3));
+      г.setAttribute('normal', new THREE.Float32BufferAttribute(в.n, 3));
+      г.setAttribute('color', new THREE.Float32BufferAttribute(в.c, 3));
+      г.setAttribute('aLen', new THREE.Float32BufferAttribute(в.len, 1));
+      г.setAttribute('aComb', new THREE.Float32BufferAttribute(в.comb, 3));
+      г.setAttribute('aDen', new THREE.Float32BufferAttribute(den, 1));
+      г.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(в.ki, 4));
+      г.setAttribute('skinWeight', new THREE.Float32BufferAttribute(в.kw, 4));
+      г.setIndex(в.idx);
+      г.computeBoundingSphere();
+      return г;
+    }
+    const куски = [], хвостКуски = [], лицо = [];
+    // z передней поверхности морды (от центра черепа) в точке (x, y) — по ближайшим вершинам головы
+    function наЛице(x, y) {
+      let сум = 0, вес = 0;
+      for (const [px, py, pz] of лицо) { const d2 = (px - x) ** 2 + (py - y) ** 2; if (d2 < 4e-5) { const w = 1 / (d2 + 2e-6); сум += pz * w; вес += w; } }
+      return вес ? сум / вес : 0.07;
+    }
+
+    // ===================== ТУЛОВИЩЕ С ЛАПАМИ: ПОЛЕ РАССТОЯНИЙ =====================
+    // фигуры (эллипсоиды, конусы со скруглёнными концами, шары) сливаются мягким минимумом:
+    // k — радиус «перетекания» в то, что слеплено раньше; гр — к какой части тела относится
+    const фигуры = [];
+    function элл(гр, k, c, r, оси) {
+      const [rx, ry, rz] = r, cx = c.x, cy = c.y, cz = c.z, ix2 = 1 / (rx * rx), iy2 = 1 / (ry * ry), iz2 = 1 / (rz * rz), мин = Math.min(rx, ry, rz);
+      const f = (a, b, c2) => { const k0 = Math.sqrt(a * a * ix2 + b * b * iy2 + c2 * c2 * iz2), k1 = Math.sqrt(a * a * ix2 * ix2 + b * b * iy2 * iy2 + c2 * c2 * iz2 * iz2); return k1 < 1e-9 ? -мин : k0 * (k0 - 1) / k1; };
+      let d;
+      if (!оси) d = (x, y, z) => f(x - cx, y - cy, z - cz);
+      else { const [u, v, w] = оси; d = (x, y, z) => { const a = x - cx, b = y - cy, c2 = z - cz; return f(a * u.x + b * u.y + c2 * u.z, a * v.x + b * v.y + c2 * v.z, a * w.x + b * w.y + c2 * w.z); }; }
+      фигуры.push({ гр, k, d });
+    }
+    function конус(гр, k, a, b, r1, r2) {           // r1 у a, r2 у b
+      const bax = b.x - a.x, bay = b.y - a.y, baz = b.z - a.z, ax = a.x, ay = a.y, az = a.z;
+      const l2 = bax * bax + bay * bay + baz * baz, rr = r1 - r2, a2 = l2 - rr * rr, il2 = 1 / l2, зн = Math.sign(rr);
+      const d = (x, y, z) => {
+        const px = x - ax, py = y - ay, pz = z - az;
+        const yy = px * bax + py * bay + pz * baz, zz = yy - l2;
+        const qx = px * l2 - bax * yy, qy = py * l2 - bay * yy, qz = pz * l2 - baz * yy;
+        const x2 = qx * qx + qy * qy + qz * qz, y2 = yy * yy * l2, z2 = zz * zz * l2, kk = зн * rr * rr * x2;
+        if (Math.sign(zz) * a2 * z2 > kk) return Math.sqrt(x2 + z2) * il2 - r2;
+        if (Math.sign(yy) * a2 * y2 < kk) return Math.sqrt(x2 + y2) * il2 - r1;
+        return (Math.sqrt(x2 * a2 * il2) + yy * rr) * il2 - r1;
+      };
+      фигуры.push({ гр, k, d });
+    }
+    function шар(гр, k, c, r) { const cx = c.x, cy = c.y, cz = c.z; фигуры.push({ гр, k, d: (x, y, z) => Math.sqrt((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2) - r }); }
+    // базис эллипсоида, вытянутого вдоль направления (вторая ось — вдоль него)
+    const вдоль = (a, b, боком = V(1, 0, 0)) => { const v = b.clone().sub(a).normalize(), w = боком.clone().cross(v).normalize(), u = v.clone().cross(w).normalize(); return [u, v, w]; };
+
+    // туловище
+    элл('тело', 0, V(0, 0.272, 0.062), [0.07, 0.088, 0.118]);                         // грудная клетка — глубокая и узкая
+    элл('тело', 0.06, V(0, 0.272, -0.066), [0.066, 0.079, 0.105]);                    // живот, поясница
+    элл('тело', 0.06, V(0, 0.293, -0.168), [0.07, 0.068, 0.086]);                     // таз, круп
+    элл('тело', 0.05, V(0, 0.214, -0.095), [0.05, 0.036, 0.08]);                      // мягкий «фартук» внизу живота
+    конус('тело', 0.05, V(0, 0.326, 0.138), V(0, 0.404, 0.224), 0.055, 0.042);           // шея (верх уходит в голову)
+    элл('тело', 0.05, V(0, 0.244, 0.163), [0.05, 0.058, 0.042]);                      // грудь спереди, меж лапами
+    for (const s of [-1, 1]) {
+      const Л = s < 0 ? 'Л' : 'П', гП = 'перед' + Л, гЗ = 'зад' + Л;
+      const [пл, пп, пл2, пк] = ['лопатка', 'плечо', 'локоть', 'кисть'].map(и => мир(и + Л));
+      const [зб, зк, зс, зст] = ['бедро', 'колено', 'скакат', 'стопа'].map(и => мир(и + Л));
+      // передняя: лопатка лежит на рёбрах, плечо уходит под грудь, предплечье, пясть, подушечка, пальцы
+      конус(гП, 0.035, V(s * 0.034, 0.336, 0.098), V(s * 0.052, 0.262, 0.13), 0.026, 0.031);
+      конус(гП, 0.025, пп, пл2, 0.03, 0.021);
+      конус(гП, 0.016, пл2, пк, 0.02, 0.0135);
+      элл(гП, 0.012, пл2.clone().lerp(пк, 0.28).add(V(0, 0, 0.004)), [0.019, 0.042, 0.02], вдоль(пл2, пк));      // мышцы предплечья
+      конус(гП, 0.012, пк, V(s * 0.058, 0.02, 0.152), 0.0135, 0.015);
+      элл(гП, 0.012, V(s * 0.058, 0.0145, 0.16), [0.0185, 0.0135, 0.022]);
+      for (let j = 0; j < 4; j++) шар(гП, 0.006, V(s * 0.058 + (j - 1.5) * 0.0098, 0.0095, 0.1765 - Math.abs(j - 1.5) * 0.0045), 0.0078);
+      // задняя: мощное бедро («окорок»), голень с икрой, пятка, плюсна, подушечка, пальцы
+      конус(гЗ, 0.035, зб, зк, 0.05, 0.03);
+      элл(гЗ, 0.03, V(s * 0.058, 0.247, -0.182), [0.036, 0.062, 0.046]);                         // задняя поверхность бедра
+      конус(гЗ, 0.02, зк, зс, 0.026, 0.0145);
+      элл(гЗ, 0.014, зк.clone().lerp(зс, 0.33).add(V(0, 0.002, -0.012)), [0.019, 0.042, 0.024], вдоль(зк, зс));  // икра
+      шар(гЗ, 0.01, зс.clone().add(V(0, 0.004, -0.008)), 0.0125);
+      конус(гЗ, 0.012, зс, зст, 0.012, 0.013);
+      элл(гЗ, 0.012, V(s * 0.058, 0.0145, -0.143), [0.018, 0.0135, 0.026]);
+      for (let j = 0; j < 4; j++) шар(гЗ, 0.006, V(s * 0.058 + (j - 1.5) * 0.0095, 0.0095, -0.1235 - Math.abs(j - 1.5) * 0.0045), 0.0075);
+    }
+    const smin = (a, b, k) => { if (k <= 0) return Math.min(a, b); const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
+    const поле = (сп, x, y, z) => { let d = сп[0].d(x, y, z); for (let i = 1; i < сп.length; i++) d = smin(d, сп[i].d(x, y, z), сп[i].k); return d; };
+
+    {
+      // сетка: значения поля в узлах; далеко от поверхности не считаем (блоки 4×4×4 — только нужные фигуры)
+      const МИН = [-0.135, -0.004, -0.275], МАКС = [0.135, 0.462, 0.255], h = ШАГ;
+      const nx = Math.ceil((МАКС[0] - МИН[0]) / h) + 1, ny = Math.ceil((МАКС[1] - МИН[1]) / h) + 1, nz = Math.ceil((МАКС[2] - МИН[2]) / h) + 1;
+      const вал = new Float32Array(nx * ny * nz), Б = 4, блокФиг = [], блокУзла = new Int32Array(nx * ny * nz);
+      const nbx = Math.ceil(nx / Б), nby = Math.ceil(ny / Б), nbz = Math.ceil(nz / Б), запас = 0.018;
+      for (let bk = 0; bk < nbz; bk++) for (let bj = 0; bj < nby; bj++) for (let bi = 0; bi < nbx; bi++) {
+        const i0 = bi * Б, j0 = bj * Б, k0 = bk * Б, i1 = Math.min(nx, i0 + Б), j1 = Math.min(ny, j0 + Б), k1 = Math.min(nz, k0 + Б);
+        const cx = МИН[0] + (i0 + i1 - 1) / 2 * h, cy = МИН[1] + (j0 + j1 - 1) / 2 * h, cz = МИН[2] + (k0 + k1 - 1) / 2 * h, rb = Math.sqrt(3) * (Б - 1) / 2 * h;
+        const сп = []; let внутри = false;
+        for (const ф of фигуры) { const d = ф.d(cx, cy, cz); if (d < rb + ф.k + запас) сп.push(ф); if (d < -rb - запас) внутри = true; }
+        const бн = блокФиг.length; блокФиг.push(сп);
+        for (let k = k0; k < k1; k++) for (let j = j0; j < j1; j++) for (let i = i0; i < i1; i++) {
+          const ин = i + nx * (j + ny * k); блокУзла[ин] = бн;
+          вал[ин] = !сп.length ? 1 : внутри ? -1 : поле(сп, МИН[0] + i * h, МИН[1] + j * h, МИН[2] + k * h);
+        }
+      }
+      замеры.поле = performance.now() - т0;
+      // «поверхностные сети»: вершина в каждой ячейке, через которую идёт поверхность, — среднее
+      // точек пересечения рёбер; четырёхугольник на каждое ребро сетки, которое она пересекает
+      const ячейка = new Int32Array((nx - 1) * (ny - 1) * (nz - 1)).fill(-1), Р = [], блокВ = [];
+      const УГ = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
+      const РЁБ = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+      const в8 = new Float32Array(8), СДВ = УГ.map(([a, b, c]) => a + nx * (b + ny * c)), РА = РЁБ.map(р => р[0]), РБ = РЁБ.map(р => р[1]);
+      const УX = УГ.map(у => у[0]), УY = УГ.map(у => у[1]), УZ = УГ.map(у => у[2]);
+      for (let k = 0; k < nz - 1; k++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+        const база = i + nx * (j + ny * k);
+        let маска = 0;
+        for (let u = 0; u < 8; u++) { const v = вал[база + СДВ[u]]; в8[u] = v; if (v < 0) маска |= 1 << u; }
+        if (маска === 0 || маска === 255) continue;
+        let sx = 0, sy = 0, sz = 0, n = 0;
+        for (let r = 0; r < 12; r++) {
+          const a = РА[r], b = РБ[r], va = в8[a], vb = в8[b]; if ((va < 0) === (vb < 0)) continue;
+          const t = va / (va - vb);
+          sx += УX[a] + (УX[b] - УX[a]) * t; sy += УY[a] + (УY[b] - УY[a]) * t; sz += УZ[a] + (УZ[b] - УZ[a]) * t; n++;
+        }
+        ячейка[i + (nx - 1) * (j + (ny - 1) * k)] = Р.length / 3;
+        Р.push(МИН[0] + (i + sx / n) * h, МИН[1] + (j + sy / n) * h, МИН[2] + (k + sz / n) * h);
+        блокВ.push(блокУзла[i + nx * (j + ny * k)]);
+      }
+      const я = (i, j, k) => ячейка[i + (nx - 1) * (j + (ny - 1) * k)];
+      const тр = [];
+      const квад = (a, b, c, d, прям) => { if (a < 0 || b < 0 || c < 0 || d < 0) return; if (прям) тр.push(a, b, c, a, c, d); else тр.push(a, c, b, a, d, c); };
+      for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        const v0 = вал[i + nx * (j + ny * k)], вн = v0 < 0;
+        if (i < nx - 1 && j > 0 && k > 0 && j < ny - 1 && k < nz - 1 && (вал[i + 1 + nx * (j + ny * k)] < 0) !== вн) квад(я(i, j - 1, k - 1), я(i, j, k - 1), я(i, j, k), я(i, j - 1, k), вн);
+        if (j < ny - 1 && i > 0 && k > 0 && i < nx - 1 && k < nz - 1 && (вал[i + nx * (j + 1 + ny * k)] < 0) !== вн) квад(я(i - 1, j, k - 1), я(i, j, k - 1), я(i, j, k), я(i - 1, j, k), !вн);
+        if (k < nz - 1 && i > 0 && j > 0 && i < nx - 1 && j < ny - 1 && (вал[i + nx * (j + ny * (k + 1))] < 0) !== вн) квад(я(i - 1, j - 1, k), я(i, j - 1, k), я(i, j, k), я(i - 1, j, k), вн);
+      }
+      замеры.сетка = performance.now() - т0;
+      // вершины — точно на поверхность (шаг Ньютона), нормаль — градиент поля
+      const к = кусок(), е = h * 0.35, p = V(), nn = V();
+      const τ = 0.009, дд = new Float64Array(фигуры.length);
+      // цепи костей для весов
+      const цепи = { тело: null };
+      for (const Л of ['Л', 'П']) {
+        цепи['перед' + Л] = { т: [мир('лопатка' + Л), мир('плечо' + Л), мир('локоть' + Л), мир('кисть' + Л), ЛАПЫ['перед' + Л].пальцы], к: ['лопатка', 'плечо', 'локоть', 'кисть'].map(и => инд(и + Л)) };
+        цепи['зад' + Л] = { т: [мир('бедро' + Л), мир('колено' + Л), мир('скакат' + Л), мир('стопа' + Л), ЛАПЫ['зад' + Л].пальцы], к: ['бедро', 'колено', 'скакат', 'стопа'].map(и => инд(и + Л)) };
+      }
+      const СП_Z = [-1, -0.11, -0.03, 0.05, 0.13, 0.205], СП_К = ['таз', 'сп1', 'сп2', 'грудь', 'шея', 'голова'].map(инд);
+      const поЦепи = (сустав, кс, x, ширина) => {
+        let k = 0; while (k < сустав.length - 1 && x >= сустав[k + 1]) k++;
+        const до = x - сустав[k], после = (k + 1 < сустав.length ? сустав[k + 1] : Infinity) - x;
+        if (k > 0 && до < ширина) { const w = 0.5 + 0.5 * гладко(0, 1, до / ширина); return [[кс[k], w], [кс[k - 1], 1 - w]]; }
+        if (k + 1 < сустав.length && после < ширина) { const w = 0.5 + 0.5 * гладко(0, 1, после / ширина); return [[кс[k], w], [кс[k + 1], 1 - w]]; }
+        return [[кс[k], 1]];
+      };
+      const ab = V(), ap = V();
+      const весЛапы = (ц, p) => {
+        let лк = 0, лт = 0, лд = Infinity;
+        for (let k = 0; k < ц.т.length - 1; k++) {
+          ab.copy(ц.т[k + 1]).sub(ц.т[k]); ap.copy(p).sub(ц.т[k]);
+          const t = зажать(ap.dot(ab) / ab.lengthSq(), 0, 1), d = ap.addScaledVector(ab, -t).length();
+          if (d < лд) { лд = d; лк = k; лт = t; }
+        }
+        const L = ц.т[лк + 1].distanceTo(ц.т[лк]), до = лт * L, после = (1 - лт) * L, ш = 0.02, кс = ц.к, n = кс.length;
+        if (лк > 0 && до < ш) { const w = 0.5 + 0.5 * гладко(0, 1, до / ш); return [[кс[лк], w], [кс[лк - 1], 1 - w]]; }
+        if (лк < n - 1 && после < ш) { const w = 0.5 + 0.5 * гладко(0, 1, после / ш); return [[кс[лк], w], [кс[лк + 1], 1 - w]]; }
+        return [[кс[Math.min(лк, n - 1)], 1]];
+      };
+      for (let в = 0; в < Р.length / 3; в++) {
+        const сп = блокФиг[блокВ[в]] && блокФиг[блокВ[в]].length ? блокФиг[блокВ[в]] : фигуры;
+        p.set(Р[в * 3], Р[в * 3 + 1], Р[в * 3 + 2]);
+        // один шаг Ньютона на поверхность; нормаль — градиент там же (сдвиг меньше полвокселя)
+        const d0 = поле(сп, p.x, p.y, p.z);
+        nn.set(поле(сп, p.x + е, p.y, p.z) - d0, поле(сп, p.x, p.y + е, p.z) - d0, поле(сп, p.x, p.y, p.z + е) - d0).divideScalar(е);
+        const g2 = nn.lengthSq(); if (g2 > 1e-8) p.addScaledVector(nn, -d0 / g2 * 0.95);
+        nn.normalize();
+        // к какой части тела ближе: мягко по расстояниям до фигур
+        const гр = { тело: 0, передЛ: 0, передП: 0, задЛ: 0, задП: 0 };
+        let дмин = Infinity; for (let i = 0; i < фигуры.length; i++) { const d = фигуры[i].d(p.x, p.y, p.z); дд[i] = d; if (d < дмин) дмин = d; }
+        let сум = 0; for (let i = 0; i < фигуры.length; i++) { const x = (дд[i] - дмин) / τ; if (x > 9) continue; const w = Math.exp(-x); гр[фигуры[i].гр] += w; сум += w; }
+        for (const г in гр) гр[г] /= сум;
+        // веса костей: туловище — по цепи хребта (по z), лапы — по своей цепи
+        const мап = new Map(), доб = (пары, м) => { for (const [кс, w] of пары) мап.set(кс, (мап.get(кс) || 0) + w * м); };
+        if (гр.тело > 1e-3) доб(поЦепи(СП_Z, СП_К, p.z, 0.035), гр.тело);
+        for (const г of ['передЛ', 'передП', 'задЛ', 'задП']) if (гр[г] > 1e-3) доб(весЛапы(цепи[г], p), гр[г]);
+        const веса = [...мап.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4), сумВ = веса.reduce((s2, [, w]) => s2 + w, 0);
+        for (const w of веса) w[1] /= сумВ;
+        const м = окрасТела(p, nn, гр);
+        вершина(к, p, nn, м.ц, м.дл, м.гр, веса);
+      }
+      for (const i of тр) к.idx.push(i);
+      куски.push(к);
+      замеры.вершин = Р.length / 3; замеры.треуг = тр.length / 3; замеры.тело = performance.now() - т0;
+    }
+
+    function окрасТела(p, n, g) {
+      const перед = g.передЛ + g.передП, зад = g.задЛ + g.задП, лапа = зажать(перед + зад, 0, 1);
+      const s = p.x >= 0 ? 1 : -1;
+      // туловище: h — от живота (-1) к хребту (+1)
+      const h = зажать((p.y - 0.27) / 0.09 * 0.55 + n.y * 0.6, -1, 1);
+      let ц = мешать(ЦВ.крем, ЦВ.рыж, гладко(-0.75, 0.05, h));
+      ц = мешать(ц, ЦВ.спина, гладко(0.45, 0.95, h) * 0.75);
+      // «скумбрия»: полосы от хребта вниз по бокам, книзу загибаются назад
+      const фаза = p.z + 0.3 * (0.35 - p.y) + 0.006 * Math.sin(p.y * 70 + p.x * 30);
+      const пол = полоса(фаза, 0.046, 3) * гладко(-0.45, 0.25, h) * (1 - гладко(0.1, 0.16, p.z));
+      ц = мешать(ц, ЦВ.рыжТ, пол * 0.72);
+      ц = мешать(ц, ЦВ.рыжТ, 0.35 * гладко(0.8, 0.97, n.y) * гладко(0.03, 0.0, Math.abs(p.x)) * (1 - гладко(0.12, 0.2, p.z)));   // ремень по хребту
+      // грудь, горло — белые
+      const середина = гладко(0.075, 0.035, Math.abs(p.x));
+      const грудь = гладко(0.1, 0.17, p.z) * гладко(0.35, -0.2, h) * (0.35 + 0.65 * середина);
+      const горло = гладко(0.15, 0.2, p.z) * гладко(0.15, 0.55, n.z) * гладко(0.55, 0.0, n.y) * (0.4 + 0.6 * середина);
+      const бел = зажать(Math.max(грудь, горло), 0, 1);
+      ц = мешать(ц, ЦВ.бел, бел * 0.92);
+      let дл = 0.04 + 0.02 * гладко(0, -0.8, h) + 0.035 * бел + 0.022 * гладко(0.12, 0.2, p.z) * (1 - бел);
+      const гр = V(0, -0.35 - 0.45 * гладко(0.2, -0.8, h), -1);
+      if (p.z > 0.12) гр.lerp(V(0, -1, 0.1), гладко(0.12, 0.2, p.z));
+      if (лапа > 0.01) {
+        const пЛ = перед > зад, наружу = s * n.x;
+        let цЛ = мешать(ЦВ.рыж, ЦВ.крем, гладко(0.3, -0.6, наружу) * 0.7);
+        const полЛ = полоса(p.y + 0.004 * Math.sin(p.z * 80), 0.036, 4) * гладко(-0.1, 0.5, наружу) * гладко(0.06, 0.1, p.y);
+        цЛ = мешать(цЛ, ЦВ.рыжТ, полЛ * 0.6);
+        const носок = пЛ ? гладко(0.078, 0.05, p.y) : Math.max(гладко(0.062, 0.04, p.y), гладко(0.11, 0.075, p.y) * гладко(-0.2, -0.6, n.z));   // сзади на плюсне — белое «голенище»
+        цЛ = мешать(цЛ, ЦВ.бел, носок);
+        const штаны = пЛ ? 0 : гладко(0.14, 0.2, p.y) * гладко(-0.1, -0.6, n.z);
+        цЛ = мешать(цЛ, ЦВ.крем, штаны * 0.6);
+        let длЛ = смесь(0.013, 0.04, гладко(0.07, 0.24, p.y)) + 0.035 * штаны;
+        if (пЛ) длЛ += 0.014 * гладко(-0.2, -0.7, n.z) * гладко(0.05, 0.1, p.y) * гладко(0.2, 0.15, p.y);     // очёсы сзади на предплечье
+        длЛ *= 1 - 0.45 * гладко(0.035, 0.012, p.y);
+        const гЛ = V(0, -1, -0.15 * штаны - (пЛ ? 0.1 : 0));
+        ц = мешать(ц, цЛ, лапа); дл = смесь(дл, длЛ, лапа); гр.lerp(гЛ, лапа);
+      }
+      гр.addScaledVector(n, -гр.dot(n)); if (гр.lengthSq() < 1e-6) гр.set(0, -1, 0); гр.normalize();
+      return { ц, дл, гр };
+    }
+
+    // ===================== ГОЛОВА: СФЕРА, ВЫЛЕПЛЕННАЯ В КОШАЧЬЮ =====================
+    // по линии рта сфера разрезана: верхняя губа — на голове, нижняя — на челюсти (зевок)
+    {
+      const ШИР = 56, ВЫС = 40, РТ = 28, столб = ШИР + 1;
+      const г = new THREE.SphereGeometry(1, ШИР, ВЫС), к = кусок(1.45), Р = { x: 0.074, y: 0.066, z: 0.07 };
+      const инГ = инд('голова'), инЧ = инд('челюсть');
+      const pos = г.attributes.position;
+      const тянуть = (x, y, z, cx, cy, cz, σ2, сила) => { const g = Math.exp(-((x - cx) ** 2 + (y - cy) ** 2 + (z - cz) ** 2) / σ2); const l = Math.hypot(x, y, z) || 1; return [x / l * сила * g, y / l * сила * g, z / l * сила * g]; };
+      const точки = [];
+      for (let i = 0; i < pos.count; i++) {
+        const ux = pos.getX(i), uy = pos.getY(i), uz = pos.getZ(i);
+        let x = ux, y = uy, z = uz;
+        x *= 1 + 0.3 * гладко(0.35, 0.95, Math.abs(ux)) * гладко(0.35, -0.35, uy);       // щёки
+        if (y > 0.5) y = 0.5 + (y - 0.5) * 0.84;                                          // лоб плоский
+        z += 0.22 * гладко(0.4, 0.95, uz) * гладко(-0.9, -0.5, uy) * гладко(0.25, -0.05, uy);   // морда
+        for (const s of [-1, 1]) { const д = тянуть(ux, uy, uz, s * 0.3, -0.36, 0.92, 0.07, 0.13); x += д[0]; y += д[1]; z += д[2]; }   // подушечки усов
+        { const д = тянуть(ux, uy, uz, 0, -0.8, 0.58, 0.05, 0.08); x += д[0]; y += д[1]; z += д[2]; }      // подбородок
+        { const д = тянуть(ux, uy, uz, 0, 0.12, 0.98, 0.03, 0.05); x += д[0]; y += д[1]; z += д[2]; }      // переносица
+        for (const s of [-1, 1]) { const д = тянуть(ux, uy, uz, s * 0.44, 0.2, 0.86, 0.025, -0.07); x += д[0]; y += д[1]; z += д[2]; }   // глазницы
+        for (const s of [-1, 1]) { const д = тянуть(ux, uy, uz, s * 0.62, 0.38, 0.62, 0.03, 0.04); x += д[0]; y += д[1]; z += д[2]; }    // надбровья
+        if (uz < -0.3) z *= 1.05;
+        точки.push([ux, uy, uz]);
+        pos.setXYZ(i, ГОЛОВА_Ц.x + x * Р.x, ГОЛОВА_Ц.y + y * Р.y, ГОЛОВА_Ц.z + z * Р.z);
+      }
+      г.computeVertexNormals();
+      // шов сферы (u=0/1): одинаковые позиции — усредняем нормали
+      { const n = г.attributes.normal, карта = new Map();
+        for (let i = 0; i < pos.count; i++) { const ключ = pos.getX(i).toFixed(5) + ',' + pos.getY(i).toFixed(5) + ',' + pos.getZ(i).toFixed(5); (карта.get(ключ) || карта.set(ключ, []).get(ключ)).push(i); }
+        for (const сп of карта.values()) if (сп.length > 1) { const с = V(); for (const i of сп) с.add(V(n.getX(i), n.getY(i), n.getZ(i))); с.normalize(); for (const i of сп) n.setXYZ(i, с.x, с.y, с.z); } }
+      const n = г.attributes.normal, p = V(), nn = V(), мех = [];
+      for (let i = 0; i < pos.count; i++) {
+        const [ux, uy, uz] = точки[i];
+        p.set(pos.getX(i), pos.getY(i), pos.getZ(i)); nn.set(n.getX(i), n.getY(i), n.getZ(i));
+        let ц = ЦВ.рыж.clone();
+        ц = мешать(ц, ЦВ.спина, гладко(0.3, 0.9, uy) * гладко(0.2, -0.6, uz) * 0.6);
+        // «М» на лбу и полоски к ушам
+        const лоб = гладко(0.25, 0.55, uy) * гладко(0.2, 0.6, uz);
+        const м = полоса(ux * 0.9 + Math.abs(ux) * 0.4, 0.13, 4) * лоб; ц = мешать(ц, ЦВ.рыжТ, м * 0.75);
+        for (const s of [-1, 1]) { const л = Math.exp(-((ux - s * 0.66) ** 2 / 0.02 + (uy - 0.06 + (s * ux - 0.66) * 0.5) ** 2 / 0.004)) * гладко(0.6, 0.2, uz); ц = мешать(ц, ЦВ.рыжТ, л * 0.7); }
+        // светлая морда, подбородок, щёки снизу, «очки» вокруг глаз
+        const морда = гладко(0.6, 0.88, uz) * гладко(0.0, -0.3, uy);
+        const подб = гладко(-0.5, -0.78, uy);
+        const щеки = гладко(0.5, 0.85, Math.abs(ux)) * гладко(-0.05, -0.5, uy);
+        ц = мешать(ц, ЦВ.бел, Math.max(морда, подб) * 0.95); ц = мешать(ц, ЦВ.крем, щеки * 0.65);
+        let глаз = 0; for (const s of [-1, 1]) глаз = Math.max(глаз, Math.exp(-((ux - s * 0.44) ** 2 + (uy - 0.2) ** 2 + (uz - 0.86) ** 2) / 0.05));
+        ц = мешать(ц, ЦВ.крем, глаз * 0.5);
+        // шерсть: на морде и у глаз коротко, на затылке и «бакенбардах» длинно
+        let дл = 0.009 + 0.016 * гладко(0.2, -0.6, uz) + 0.034 * гладко(0.55, 0.95, Math.abs(ux)) * гладко(0.25, -0.5, uy);
+        дл *= 1 - 0.65 * морда;
+        дл *= 1 - 0.85 * гладко(0.35, 0.8, глаз);
+        дл *= 1 - 0.75 * Math.exp(-(ux * ux + (uy + 0.2) ** 2 + (uz - 1) ** 2) / 0.05);
+        дл += 0.012 * подб * гладко(0.2, -0.2, uz + 0.3);
+        const гр = V(Math.sign(ux) * гладко(0.3, 0.9, Math.abs(ux)) * 0.6, -0.25 - 0.5 * подб, -1);
+        гр.addScaledVector(nn, -гр.dot(nn)).normalize();
+        // нижняя челюсть: всё ниже линии рта спереди
+        const ряд = Math.floor(i / столб), wЧ = ряд > РТ ? гладко(-0.15, 0.35, uz) : 0;
+        if (Math.abs(ряд - РТ - 0.5) < 2 && uz > 0.3) дл *= 0.15;                      // губы
+        вершина(к, p, nn, ц, дл, гр, wЧ > 0.001 ? [[инЧ, wЧ], [инГ, 1 - wЧ]] : [[инГ, 1]]);
+        мех.push({ ц, дл, гр: гр.clone() });
+        if (uz > 0.1 && nn.z > 0.15) лицо.push([p.x - ГОЛОВА_Ц.x, p.y - ГОЛОВА_Ц.y, p.z - ГОЛОВА_Ц.z]);
+      }
+      // разрез: вершины линии рта на передней дуге раздваиваются — копия уходит с челюстью
+      const дубль = new Map();
+      for (let j = 0; j <= ШИР; j++) {
+        const i = РТ * столб + j; if (точки[i][2] < 0.42) continue;
+        дубль.set(i, к.p.length / 3);
+        p.set(pos.getX(i), pos.getY(i), pos.getZ(i)); nn.set(n.getX(i), n.getY(i), n.getZ(i));
+        вершина(к, p, nn, мех[i].ц, мех[i].дл, мех[i].гр, [[инЧ, 1]]);
+      }
+      for (let t = 0; t < г.index.count; t += 3) {
+        const тр = [г.index.getX(t), г.index.getX(t + 1), г.index.getX(t + 2)];
+        const ниже = тр.some(i => Math.floor(i / столб) === РТ + 1);
+        for (const i of тр) к.idx.push(ниже && дубль.has(i) ? дубль.get(i) : i);
+      }
+      куски.push(к);
+    }
+
+    // ===================== УШИ: на своих костях; снаружи короткая шерсть =====================
+    const внутриУха = [];
+    for (const s of [-1, 1]) {
+      const Л = s < 0 ? 'Л' : 'П', инУ = инд('ухо' + Л), база = мир('ухо' + Л);
+      const г = new THREE.ConeGeometry(1, 1, 16, 6, false).translate(0, 0.5, 0), pos = г.attributes.position, к = кусок(1.8);
+      const пов = new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(-0.18, s * 0.3, s * -0.34, 'YXZ'));   // наружу, к макушке, раковиной вперёд-вбок
+      for (let i = 0; i < pos.count; i++) {
+        let x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+        const ok = 1 - y;
+        z *= 0.42; if (z > 0) z -= 0.25 * ok * (1 - Math.abs(x)) * 0.9;     // передняя сторона вогнутая
+        x *= 1 + 0.25 * y * (1 - y);                                          // кончик скруглён
+        const p = V(x * 0.032, y * 0.068, z * 0.032).applyMatrix4(пов).add(база);
+        pos.setXYZ(i, p.x, p.y, p.z);
+      }
+      г.computeVertexNormals();
+      const n = г.attributes.normal, p = V(), nn = V();
+      for (let i = 0; i < pos.count; i++) {
+        p.set(pos.getX(i), pos.getY(i), pos.getZ(i)); nn.set(n.getX(i), n.getY(i), n.getZ(i));
+        const ц = мешать(ЦВ.рыж, ЦВ.рыжТ, 0.2);
+        вершина(к, p, nn, ц, 0.008, V(0, 1, -0.3).addScaledVector(nn, -V(0, 1, -0.3).dot(nn)).normalize(), [[инУ, 1]]);
+      }
+      for (let i = 0; i < г.index.count; i++) к.idx.push(г.index.getX(i));
+      куски.push(к);
+      внутриУха.push({ s, Л, пов, база });
+    }
+
+    // ===================== ХВОСТ: длинная пушистая труба по цепи костей =====================
+    {
+      const опоры = хвостТочки.map((p, i) => { const t = i / ХВОСТ; return { p: p.clone(), ш: смесь(0.03, 0.016, t), в: смесь(0.028, 0.015, t) }; });
+      const крив = new THREE.CatmullRomCurve3(опоры.map(о2 => о2.p), false, 'centripetal');
+      const НА = 3, всего = (опоры.length - 1) * НА, путь = [];
+      for (let i = 0; i <= всего; i++) {
+        const u = i / всего, f = u * (опоры.length - 1), k = Math.min(опоры.length - 2, Math.floor(f)), t = f - k;
+        путь.push({ p: крив.getPoint(u), ш: смесь(опоры[k].ш, опоры[k + 1].ш, t), в: смесь(опоры[k].в, опоры[k + 1].в, t) });
+      }
+      const дл = [0]; for (let i = 1; i < путь.length; i++) дл.push(дл[i - 1] + путь[i].p.distanceTo(путь[i - 1].p));
+      const суставы = хвостТочки.slice(0, ХВОСТ).map(q => { let лучш = 0, мин = 1e9; путь.forEach((пт, i) => { const d = пт.p.distanceTo(q); if (d < мин) { мин = d; лучш = i; } }); return дл[лучш]; });
+      суставы[0] = -1;
+      const кХв = Array.from({ length: ХВОСТ }, (_, i) => инд('хвост' + i));
+      const весХв = x => {
+        let k = 0; while (k < суставы.length - 1 && x >= суставы[k + 1]) k++;
+        const до = x - суставы[k], после = (k + 1 < суставы.length ? суставы[k + 1] : Infinity) - x, ш = 0.016;
+        if (k > 0 && до < ш) { const w = 0.5 + 0.5 * гладко(0, 1, до / ш); return [[кХв[k], w], [кХв[k - 1], 1 - w]]; }
+        if (k + 1 < суставы.length && после < ш) { const w = 0.5 + 0.5 * гладко(0, 1, после / ш); return [[кХв[k], w], [кХв[k + 1], 1 - w]]; }
+        return [[кХв[k], 1]];
+      };
+      const к = кусок(0.85), n = путь.length, СЕГ = 20, кольца = [], L = дл[n - 1];
+      const T = путь.map((пт, i) => путь[Math.min(n - 1, i + 1)].p.clone().sub(путь[Math.max(0, i - 1)].p).normalize());
+      for (let i = 0; i < n; i++) кольца.push({ c: путь[i].p, t: T[i], ш: путь[i].ш, в: путь[i].в, s: дл[i], нк: 0 });
+      // скруглённый кончик и основание (утоплено в круп)
+      for (const [i, зн] of [[n - 1, 1], [0, -1]]) {
+        const res = [];
+        for (let m = 1; m <= 5; m++) { const ang = m / 5 * Math.PI / 2, пт = путь[i], r = Math.max(пт.ш, пт.в) * (зн > 0 ? 1.0 : 0.6);
+          res.push({ c: пт.p.clone().addScaledVector(T[i], зн * Math.sin(ang) * r), t: T[i], ш: пт.ш * Math.cos(ang) + 1e-4, в: пт.в * Math.cos(ang) + 1e-4, s: дл[i] + зн * Math.sin(ang) * r, нк: зн * Math.sin(ang) }); }
+        if (зн > 0) кольца.push(...res); else кольца.unshift(...res.reverse());
+      }
+      const A = V(), B = V(), p = V(), nE = V();
+      кольца.forEach(к2 => {
+        A.set(1, 0, 0).addScaledVector(к2.t, -к2.t.x).normalize(); B.crossVectors(к2.t, A);
+        for (let j = 0; j <= СЕГ; j++) {
+          const θ = j / СЕГ * Math.PI * 2, cs = Math.cos(θ), sn = Math.sin(θ);
+          p.copy(к2.c).addScaledVector(A, к2.ш * cs).addScaledVector(B, к2.в * sn);
+          nE.set(0, 0, 0).addScaledVector(A, cs / к2.ш).addScaledVector(B, sn / к2.в).normalize().multiplyScalar(Math.sqrt(1 - к2.нк * к2.нк)).addScaledVector(к2.t, к2.нк).normalize();
+          const доля = зажать(к2.s / L, 0, 1);
+          const низ = -nE.y;
+          let ц = мешать(ЦВ.рыж, ЦВ.крем, гладко(0.1, 0.8, низ) * 0.55);
+          ц = мешать(ц, ЦВ.рыжТ, полоса(к2.s, 0.05, 3) * 0.68 * гладко(0.5, -0.3, низ));
+          ц = мешать(ц, ЦВ.рыжТ, гладко(0.85, 1, доля) * 0.4);                                   // кончик темнее
+          const гр = к2.t.clone().add(V(0, -0.15, 0)); гр.addScaledVector(nE, -гр.dot(nE)).normalize();
+          вершина(к, p, nE, ц, 0.075 + 0.02 * Math.sin(доля * Math.PI), гр, весХв(зажать(к2.s, 0, L)));
+        }
+      });
+      const ряд = СЕГ + 1;
+      for (let r = 0; r < кольца.length - 1; r++) for (let j = 0; j < СЕГ; j++) { const a = r * ряд + j, b = a + 1, c = a + ряд, d = c + 1; к.idx.push(a, b, c, b, d, c); }
+      хвостКуски.push(к);
+    }
+
+    // ===================== МЕХ: СЛОИ =====================
+    // каждый слой — тот же меш, раздутый по нормали на свою долю длины шерсти и уложенный по
+    // направлению волоса; узор волосков — от положения в покое (в пространстве, без развёртки):
+    // ячейка ~3 мм, у каждой своя высота волоска; волосок к кончику тоньше и светлее.
+    // Свет «обёрнут»: шерсть рассеивает, теневая сторона не проваливается в черноту.
+    const ПЛОТН = о.плотность || 320;
+    const светМеха = THREE.ShaderChunk.lights_physical_pars_fragment.replace(
+      'float dotNL = saturate( dot( geometry.normal, directLight.direction ) );',
+      'float dotNL = saturate( ( dot( geometry.normal, directLight.direction ) + 0.5 ) / 1.5 );');
+    function мехМат(доля) {
+      const м = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0, skinning: true });
+      м.onBeforeCompile = ш => {
+        ш.uniforms.uShell = { value: доля }; ш.uniforms.uDen = { value: ПЛОТН };
+        ш.vertexShader = 'attribute float aLen;\nattribute vec3 aComb;\nattribute float aDen;\nuniform float uShell;\nvarying vec3 vRest;\nvarying vec3 vRestN;\n' + ш.vertexShader
+          .replace('#include <begin_vertex>', '#include <begin_vertex>\n  vRest = position * aDen; vRestN = normal;\n  transformed += normal * (uShell * aLen) + aComb * (uShell * uShell * aLen * 1.1);');
+        ш.fragmentShader = 'uniform float uShell;\nuniform float uDen;\nvarying vec3 vRest;\nvarying vec3 vRestN;\n'
+          + 'float furHash(vec3 p) { p = fract(p * vec3(0.1031, 0.1030, 0.0973)); p += dot(p, p.yxz + 33.33); return fract((p.x + p.y) * p.z); }\n'
+          + ш.fragmentShader
+            .replace('#include <lights_physical_pars_fragment>', светМеха)
+            .replace('#include <color_fragment>', `#include <color_fragment>
+            {
+              vec3 cellP = vRest * uDen;
+              vec3 cellId = floor(cellP);
+              vec3 fo = fract(cellP) - 0.5;
+              vec3 rn = normalize(vRestN);
+              vec3 ft = fo - rn * dot(fo, rn);
+              float rnd = furHash(cellId);
+              float rnd2 = furHash(cellId + 17.31);
+              float hgt = 0.3 + 0.7 * rnd;
+              if (uShell > 0.001) {
+                if (uShell > hgt) discard;
+                float tap = 1.0 - uShell / hgt;
+                if (length(ft) * 2.0 > 0.25 + 1.15 * tap) discard;
+              }
+              float tip = uShell / hgt;
+              diffuseColor.rgb *= mix(0.74, 1.08, uShell) * (0.9 + 0.2 * rnd2) * (1.0 + 0.06 * tip);
+            }
+            #ifdef DOUBLE_SIDED
+              if (!gl_FrontFacing) diffuseColor.rgb = vec3(0.2, 0.03, 0.045);
+            #endif`);
+      };
+      м.customProgramCacheKey = () => 'мех-яши-2';
+      return м;
+    }
+    const материалы = Array.from({ length: СЛОЁВ }, (_, i) => мехМат(Math.pow(i / (СЛОЁВ - 1), 1.15)));
+    материалы[0].side = THREE.DoubleSide;
+    // тень: тело с половиной шерсти
+    const тень = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, skinning: true });
+    тень.onBeforeCompile = ш => { ш.vertexShader = 'attribute float aLen;\n' + ш.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  transformed += normal * aLen * 0.55;'); };
+    тень.customProgramCacheKey = () => 'тень-яши';
+
+    // ===================== СБОРКА =====================
+    const яша = new THREE.Group(), корпус = new THREE.Group(); яша.add(корпус);
+    корпус.add(кости.таз);
+    корпус.updateMatrixWorld(true);
+    const скелет = new THREE.Skeleton(список);
+    const гТело = слить(куски), гХвост = слить(хвостКуски);
+    гТело.boundingSphere = new THREE.Sphere(V(0, 0.24, 0), 0.62); гХвост.boundingSphere = new THREE.Sphere(V(0, 0.3, -0.25), 0.7);
+    const хвост = new THREE.Group(); хвост.name = 'хвост'; корпус.add(хвост);
+    const слои = [];
+    for (let i = 0; i < СЛОЁВ; i++) {
+      for (const [г, род] of [[гТело, корпус], [гХвост, хвост]]) {
+        const м = new THREE.SkinnedMesh(г, материалы[i]);
+        м.castShadow = i === 0; м.receiveShadow = i < 2;
+        if (i === 0) м.customDepthMaterial = тень;
+        м.renderOrder = i;
+        род.add(м); м.bind(скелет); слои.push(м);
+      }
+    }
+
+    // ===================== ДЕТАЛИ: ГЛАЗА, НОС, РОТ, УСЫ, УШИ ВНУТРИ, ПОДУШЕЧКИ =====================
+    const голый = (г, цвет, rough = 0.45, доп = {}) => { const м = new THREE.Mesh(г, new THREE.MeshStandardMaterial(Object.assign({ color: ЦВЕТ(цвет), roughness: rough, metalness: 0 }, доп))); м.castShadow = false; return м; };
+    const кГолове = (об, x, y, z) => { об.position.set(x, y, z).sub(мир('голова')); кости.голова.add(об); return об; };
+    // радужка: янтарь с прожилками, тёмный ободок
+    const радужка = (() => { const к = document.createElement('canvas'); к.width = к.height = 128; const с = к.getContext('2d');
+      const г = с.createRadialGradient(64, 64, 6, 64, 64, 64); г.addColorStop(0, '#E9C252'); г.addColorStop(0.45, '#DCA23A'); г.addColorStop(0.8, '#B87A24'); г.addColorStop(0.95, '#5A3C12'); с.fillStyle = г; с.fillRect(0, 0, 128, 128);
+      for (let i = 0; i < 90; i++) { const а = i / 90 * 6.283 + Math.random() * 0.05, r0 = 14 + Math.random() * 8, r1 = 40 + Math.random() * 18; с.strokeStyle = Math.random() < 0.5 ? 'rgba(120,80,20,0.35)' : 'rgba(255,230,140,0.25)'; с.lineWidth = 1.2;
+        с.beginPath(); с.moveTo(64 + Math.cos(а) * r0, 64 + Math.sin(а) * r0); с.lineTo(64 + Math.cos(а) * r1, 64 + Math.sin(а) * r1); с.stroke(); }
+      if (о.текстура) return о.текстура(к);
+      const т = new THREE.CanvasTexture(к); if (о.sRGB) т.encoding = THREE.sRGBEncoding; return т; })();
+    const глаза = [];
+    for (const s of [-1, 1]) {
+      const гл = new THREE.Group();
+      кГолове(гл, ГОЛОВА_Ц.x + s * 0.0325, ГОЛОВА_Ц.y + 0.0135, ГОЛОВА_Ц.z + наЛице(s * 0.0325, 0.0135) - 0.0078);
+      гл.rotation.set(-0.05, s * 0.42, s * -0.12); гл.scale.set(1.12, 0.84, 1);       // миндаль, внешний угол чуть выше
+      const яб = new THREE.Mesh(new THREE.SphereGeometry(0.016, 24, 18), new THREE.MeshPhysicalMaterial({ map: радужка, roughness: 0.05, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03 }));
+      яб.rotation.y = -Math.PI / 2; гл.add(яб);
+      const зрачок = голый(new THREE.SphereGeometry(0.01, 12, 10).scale(0.3, 1.15, 0.35), '#060606', 0.05); зрачок.position.set(0, 0, 0.0134); гл.add(зрачок);
+      const блик = new THREE.Mesh(new THREE.SphereGeometry(0.0026, 8, 6), new THREE.MeshBasicMaterial({ color: 0xFFFFFF })); блик.position.set(-0.0048, 0.0058, 0.0149); гл.add(блик);
+      const обвод = голый(new THREE.TorusGeometry(0.0162, 0.0013, 6, 32), '#2A1A0C', 0.6); обвод.position.z = 0.0036; гл.add(обвод);
+      глаза.push({ гл, зрачок });
+    }
+    // нос: мочка — скруглённый треугольник; ноздри
+    const Г = ГОЛОВА_Ц;
+    { const г = new THREE.SphereGeometry(1, 18, 12), pos = г.attributes.position;
+      for (let i = 0; i < pos.count; i++) { const y = pos.getY(i); pos.setXYZ(i, pos.getX(i) * 0.0125 * (0.62 + 0.38 * (y + 1) / 2), y * 0.0085, pos.getZ(i) * 0.008); }
+      г.computeVertexNormals();
+      const нос = голый(г, '#DC8C86', 0.32); нос.rotation.x = 0.35; кГолове(нос, Г.x, Г.y - 0.0205, Г.z + наЛице(0, -0.0205) - 0.0035);
+      for (const s of [-1, 1]) { const н = голый(new THREE.SphereGeometry(0.0022, 8, 6).scale(1, 0.6, 0.8), '#3A1E1A', 0.6); н.position.set(s * 0.004, -0.003, 0.0068); нос.add(н); }
+    }
+    // рот: линия «игрек» под носом (по коже); внутри — нёбо, язык и клыки на челюсти
+    { const на = (x, y) => [x, y, наЛице(x, y) + 0.0007];
+      const вп = [...на(0, -0.029), ...на(0, -0.041)];
+      for (const s of [-1, 1]) { let пр = на(0, -0.041); for (let k = 1; k <= 5; k++) { const t = k / 5, т = на(s * t * 0.021, -0.041 - Math.sin(t * Math.PI) * 0.003 + t * 0.002); вп.push(...пр, ...т); пр = т; } }
+      const г = new THREE.BufferGeometry(); г.setAttribute('position', new THREE.Float32BufferAttribute(вп.map((v, i) => v + [Г.x, Г.y, Г.z][i % 3] - мир('голова').getComponent(i % 3)), 3));
+      кости.голова.add(new THREE.LineSegments(г, new THREE.LineBasicMaterial({ color: 0x5A2E22 }))); }
+    const кЧелюсти = (об, x, y, z) => { об.position.set(x, y, z).sub(мир('челюсть')); кости.челюсть.add(об); return об; };
+    const рот = [];
+    { кГолове(голый(new THREE.SphereGeometry(1, 16, 12).scale(0.026, 0.016, 0.04), '#4A141B', 0.85), Г.x, Г.y - 0.03, Г.z + 0.03);      // нёбо, глотка
+      рот.push(кЧелюсти(голый(new THREE.SphereGeometry(1, 14, 10).scale(0.011, 0.0035, 0.022), '#E07A8A', 0.45), Г.x, Г.y - 0.05, Г.z + 0.03));   // язык
+      for (const s of [-1, 1]) {
+        const в = голый(new THREE.ConeGeometry(0.0021, 0.0068, 6), '#FFFFF2', 0.3); в.rotation.x = Math.PI; кГолове(в, Г.x + s * 0.011, Г.y - 0.0435, Г.z + наЛице(s * 0.011, -0.041) - 0.011);
+        рот.push(кЧелюсти(голый(new THREE.ConeGeometry(0.0019, 0.0058, 6), '#FFFFF2', 0.3), Г.x + s * 0.0095, Г.y - 0.046, Г.z + наЛице(s * 0.0095, -0.046) - 0.01));
+      } }
+    // усы: белые, по 8 с каждой стороны, дугой вниз — из подушечек; над глазами — «брови»
+    { const вп = [];
+      for (const s of [-1, 1]) for (let k = 0; k < 8; k++) {
+        const y0 = -0.026 - (k % 4) * 0.0045, x0 = s * (0.022 - Math.floor(k / 4) * 0.004), z0 = наЛице(x0, y0) - 0.001, дл = 0.1 + (k % 3) * 0.018, а = ((k % 4) - 1.5) * 0.12;
+        for (let j = 0; j < 5; j++) { const P = t => [x0 + s * t * дл, y0 + Math.sin(а) * t * дл - t * t * 0.022, z0 - t * 0.03]; вп.push(...P(j / 5), ...P((j + 1) / 5)); }
+      }
+      for (const s of [-1, 1]) for (let k = 0; k < 4; k++) { const x0 = s * (0.02 + k * 0.006); вп.push(x0, 0.034, наЛице(x0, 0.034) - 0.001, s * (0.036 + k * 0.011), 0.058 + k * 0.004, 0.052 - k * 0.004); }
+      const сдв = [Г.x - мир('голова').x, Г.y - мир('голова').y, Г.z - мир('голова').z];
+      const г = new THREE.BufferGeometry(); г.setAttribute('position', new THREE.Float32BufferAttribute(вп.map((v, i) => v + сдв[i % 3]), 3));
+      кости.голова.add(new THREE.LineSegments(г, new THREE.LineBasicMaterial({ color: 0xFFFFF8, transparent: true, opacity: 0.92 })));
+    }
+    // уши изнутри: розовая чаша и светлые кисточки (у Яши «рысьи»)
+    const уши = [];
+    for (const { s, Л, пов, база } of внутриУха) {
+      const г = new THREE.ConeGeometry(1, 1, 12, 3, true).translate(0, 0.5, 0), pos = г.attributes.position;
+      for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i); const p = V(x * 0.024, y * 0.056, z * 0.008 + 0.006).applyMatrix4(пов).add(база).sub(мир('ухо' + Л)); pos.setXYZ(i, p.x, p.y, p.z); }
+      г.computeVertexNormals();
+      const вн = голый(г, '#E6A39A', 0.75, { side: THREE.DoubleSide }); кости['ухо' + Л].add(вн);
+      const вп = [];
+      for (let k = 0; k < 24; k++) { const а = (k / 24 - 0.5) * 1.4, h = 0.003 + (k % 5) * 0.006; const p0 = V(Math.sin(а) * 0.011, h, 0.006).applyMatrix4(пов), p1 = V(Math.sin(а) * 0.019, h + 0.013 + (k % 3) * 0.005, 0.013).applyMatrix4(пов); вп.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z); }
+      for (let k = 0; k < 6; k++) { const p0 = V((k - 2.5) * 0.0012, 0.06, 0).applyMatrix4(пов), p1 = V((k - 2.5) * 0.0026, 0.075 + (k % 2) * 0.005, -0.002).applyMatrix4(пов); вп.push(p0.x, p0.y, p0.z, p1.x, p1.y, p1.z); }
+      const гк = new THREE.BufferGeometry(); гк.setAttribute('position', new THREE.Float32BufferAttribute(вп, 3));
+      кости['ухо' + Л].add(new THREE.LineSegments(гк, new THREE.LineBasicMaterial({ color: 0xFFEBD6, transparent: true, opacity: 0.6 })));
+      уши.push({ s, к: кости['ухо' + Л] });
+    }
+    // подушечки: розовые, видно, когда лапа поднята
+    for (const s of [-1, 1]) for (const перед of [true, false]) {
+      const Л = s < 0 ? 'Л' : 'П', кс = кости[(перед ? 'кисть' : 'стопа') + Л], п = ЛАПЫ[(перед ? 'перед' : 'зад') + Л].пальцы;
+      const zц = перед ? 0.158 : -0.145;
+      const гл = голый(new THREE.SphereGeometry(0.011, 10, 6).scale(1, 0.3, 0.9), '#E39AA2', 0.5); гл.position.set(п.x, 0.0025, zц).sub(кс.userData.мир); кс.add(гл);
+      for (let k = 0; k < 4; k++) { const п2 = голый(new THREE.SphereGeometry(0.0042, 8, 5).scale(1, 0.4, 1), '#E39AA2', 0.5); п2.position.set(п.x + (k - 1.5) * 0.0098, 0.0028, zц + 0.017 - Math.abs(k - 1.5) * 0.004).sub(кс.userData.мир); кс.add(п2); }
+    }
+
+    // ===================== ПОЗА =====================
+    // п: скорость (м/с), dt, с — сидит 0…1, к — крадётся/прижался 0…1, лежит 0…1, виль — виляние,
+    // взгляд {y, x}, ухо — подёргивание {s, k}, морг 0…1, зев 0…1, умыв 0…1, хвост {вверх, волна, t}
+    const Б = кости, qР = new THREE.Quaternion(), vA = V(), vB = V(), vC = V(), vD = V(), vП = V();
+    const ось = (из, в) => мир(в).clone().sub(мир(из)).normalize();
+    const ОСИ = {};
+    for (const Л of ['Л', 'П']) {
+      ОСИ['плечо' + Л] = ось('плечо' + Л, 'локоть' + Л); ОСИ['локоть' + Л] = ось('локоть' + Л, 'кисть' + Л); ОСИ['кисть' + Л] = ЛАПЫ['перед' + Л].пальцы.clone().sub(мир('кисть' + Л)).normalize();
+      ОСИ['бедро' + Л] = ось('бедро' + Л, 'колено' + Л); ОСИ['колено' + Л] = ось('колено' + Л, 'скакат' + Л); ОСИ['скакат' + Л] = ось('скакат' + Л, 'стопа' + Л); ОСИ['стопа' + Л] = ЛАПЫ['зад' + Л].пальцы.clone().sub(мир('стопа' + Л)).normalize();
+    }
+    const длин = (а, б) => мир(а).distanceTo(мир(б));
+    function нацелить(кс, осьП, куда) {
+      кс.parent.getWorldQuaternion(qР); кс.getWorldPosition(vA);
+      vB.copy(куда).sub(vA); if (vB.lengthSq() < 1e-10) return; vB.normalize().applyQuaternion(qР.invert());
+      кс.quaternion.setFromUnitVectors(осьП, vB); кс.updateMatrixWorld(true);
+    }
+    // два звена: S — начало, Ц — цель, полюс — куда сгиб (мир); пишет точку сустава
+    function дваЗвена(S, Ц, L1, L2, полюс, out) {
+      vD.copy(Ц).sub(S); let L = vD.length() || 1e-5; vD.divideScalar(L);
+      L = зажать(L, Math.abs(L1 - L2) + 1e-4, (L1 + L2) * 0.999);
+      const ca = зажать((L1 * L1 + L * L - L2 * L2) / (2 * L1 * L), -1, 1), sa = Math.sqrt(1 - ca * ca);
+      vП.copy(полюс).addScaledVector(vD, -полюс.dot(vD)); if (vП.lengthSq() < 1e-8) vП.set(0, 0, 1); vП.normalize();
+      return out.copy(S).addScaledVector(vD, L1 * ca).addScaledVector(vП, L1 * sa);
+    }
+    const ДЛ = {};
+    for (const Л of ['Л', 'П']) { ДЛ['перед' + Л] = [длин('плечо' + Л, 'локоть' + Л), длин('локоть' + Л, 'кисть' + Л)]; ДЛ['зад' + Л] = [длин('бедро' + Л, 'колено' + Л), длин('колено' + Л, 'скакат' + Л)]; }
+    // шаг: лапы по очереди, как у кошки; на бегу — галоп: задние вместе, передние вместе
+    const ГАЙТ = { задЛ: 0, передЛ: 0.25, задП: 0.5, передП: 0.75 }, ГАЛОП = { задЛ: 0, передЛ: 0.55, задП: 0.1, передП: 0.65 };
+    let фаза = 0;
+    const лок = (x, y, z) => корпус.localToWorld(V(x, y, z));
+    function поза(п) {
+      п = п || {};
+      const dt = п.dt || 0, ск = п.скорость || 0, с = п.с || 0, к = п.к || 0, лж = п.лежит || 0, t = п.t || 0;
+      for (const б of список) { б.quaternion.identity(); б.position.copy(б.userData.покой); }
+      // шаг: частота — чтобы лапа на земле не скользила (размах ограничен — на бегу чуть скользит)
+      const гал = гладко(2.4, 3.6, ск);
+      const размах = зажать(0.025 + 0.035 * ск, 0, 0.12 + 0.035 * гал), опора = 0.62 - 0.07 * Math.min(ск, 4);
+      if (ск > 0.05) фаза = (фаза + dt * ск * опора / (2 * размах)) % 1;
+      const идёт = гладко(0.05, 0.4, ск) * (1 - с) * (1 - лж);
+      const гиб = Math.cos(фаза * Math.PI * 2) * гал * идёт;            // галоп: спина то сгибается, то вытягивается
+      // корпус: высота, наклон, сидя — таз вниз и на хвост, грудь вверх
+      // сидя: таз у земли и запрокинут, спина круглая, грудь над прямыми передними лапами
+      const сид = с * (1 - лж), опуск = 0.085 * к + 0.17 * лж;
+      Б.таз.position.y -= опуск + 0.2 * сид - Math.abs(Math.sin(фаза * Math.PI * 4)) * 0.006 * идёт;
+      Б.таз.position.z += 0.03 * сид;
+      Б.таз.rotation.set(-0.95 * сид, Math.sin(фаза * Math.PI * 2) * 0.05 * идёт, (п.виль || 0) + Math.sin(фаза * Math.PI * 2) * 0.03 * идёт);
+      Б.таз.rotation.x -= 0.1 * гиб;
+      Б.сп1.rotation.x = 0.04 * к + 0.12 * сид + 0.09 * гиб; Б.сп2.rotation.x = 0.12 * сид + 0.09 * гиб; Б.грудь.rotation.x = -0.05 * к + 0.18 * сид;
+      // голова держится ровно; смотрит на цель
+      const вз = п.взгляд || { y: 0, x: 0 };
+      Б.шея.rotation.set(0.28 * сид + 0.15 * к + (п.вниз || 0) - 0.08 * гиб, вз.y * 0.35, 0);
+      Б.голова.rotation.set(0.25 * сид - 0.1 * к + (вз.x || 0), вз.y * 0.65, (п.наклон || 0));
+      корпус.updateMatrixWorld(true);
+      // лапы: цели подушечек (в корпусе), обратная кинематика
+      for (const имя of ['передЛ', 'передП', 'задЛ', 'задП']) {
+        const перед = имя.startsWith('перед'), Л = имя.slice(-1), s = ЛАПЫ[имя].s;
+        const ф = (фаза + смесь(ГАЙТ[имя], ГАЛОП[имя], гал) + 1) % 1;
+        // в опоре лапа едет назад, в переносе — вперёд по дуге
+        let dz, подъём;
+        if (ф < опора) { dz = размах * (1 - 2 * ф / опора); подъём = 0; }
+        else { const u = (ф - опора) / (1 - опора); dz = размах * (-1 + 2 * (u * u * (3 - 2 * u))); подъём = Math.sin(u * Math.PI) * (0.03 + 0.012 * ск); }
+        dz *= идёт; подъём *= идёт;
+        const пальцы = ЛАПЫ[имя].пальцы;
+        if (перед) {
+          let цx = s * (0.052 + 0.01 * к), цy = 0.042 + подъём, цz = 0.134 + dz + 0.03 * к - 0.02 * лж;
+          if (сид > 0) { const пл = корпус.worldToLocal(Б['плечо' + Л].getWorldPosition(V())); цz = смесь(цz, пл.z + 0.012, сид); цx = смесь(цx, пл.x * 0.95, сид); }
+          let пx = пальцы.x, пy = 0.012 + подъём * 0.8, пz = цz + 0.04;
+          if (лж) { цy = смесь(цy, 0.035, лж); пy = смесь(пy, 0.01, лж); цz = смесь(цz, 0.16, лж); пz = смесь(пz, 0.2, лж); }
+          if (п.умыв && s > 0) { const у = п.умыв, тр = Math.sin(t * 5); цx = смесь(цx, 0.02, у); цy = смесь(цy, 0.34 + 0.012 * тр, у); цz = смесь(цz, 0.27 + 0.006 * тр, у); пx = смесь(пx, 0.0, у); пy = смесь(пy, 0.39 + 0.014 * тр, у); пz = смесь(пz, 0.29, у); }
+          const S = Б['плечо' + Л].getWorldPosition(V()), Ц = лок(цx, цy, цz);
+          const E = дваЗвена(S, Ц, ДЛ[имя][0], ДЛ[имя][1], лок(0, 0, -1).sub(лок(0, 0, 0)).add(лок(s, 0, 0).sub(лок(0, 0, 0)).multiplyScalar(0.25)).normalize(), vC);
+          нацелить(Б['плечо' + Л], ОСИ['плечо' + Л], E);
+          нацелить(Б['локоть' + Л], ОСИ['локоть' + Л], Ц);
+          нацелить(Б['кисть' + Л], ОСИ['кисть' + Л], лок(пx, пy, пz));
+        } else {
+          // скакательный сустав: стоя — над подушечкой и чуть сзади; сидя и лёжа — на земле (плюсна лежит)
+          const лечь = Math.max(с, лж);
+          const пz0 = -0.126 + dz + 0.06 * с - 0.01 * к;
+          const скx = s * (0.06 + 0.012 * к), скy = смесь(0.104 + подъём, 0.022, лечь), скz = смесь(-0.21 + dz, пz0 - 0.1, лечь);
+          const Ст = лок(s * 0.058, смесь(0.03 + подъём * 0.9, 0.016, лечь), смесь(-0.172 + dz, пz0 - 0.045, лечь));
+          const S = Б['бедро' + Л].getWorldPosition(V()), Ц = лок(скx, скy, скz);
+          const полюс = лок(0, 0, 1).sub(лок(0, 0, 0)).add(лок(s, 0, 0).sub(лок(0, 0, 0)).multiplyScalar(0.2)).normalize();
+          const E = дваЗвена(S, Ц, ДЛ[имя][0], ДЛ[имя][1], полюс, vC);
+          нацелить(Б['бедро' + Л], ОСИ['бедро' + Л], E);
+          нацелить(Б['колено' + Л], ОСИ['колено' + Л], Ц);
+          нацелить(Б['скакат' + Л], ОСИ['скакат' + Л], Ст);
+          нацелить(Б['стопа' + Л], ОСИ['стопа' + Л], лок(s * 0.058, 0.012 + подъём * 0.7 * (1 - лечь), пz0));
+        }
+      }
+      // хвост: вверх «трубой», волна; сидя — обвивает лапы по земле; крадётся — низко, кончик дёргается
+      const х = п.хвост || {}, вверх = х.вверх !== undefined ? х.вверх : (1 - с) * (1 - к) * (1 - лж) * (1 - 0.6 * гал), вол = х.волна || 0;
+      for (let i = 0; i < ХВОСТ; i++) {
+        const б = Б['хвост' + i], ii = i / (ХВОСТ - 1);
+        const подн = вверх * (i === 0 ? 1.15 : i < 3 ? 0.18 : -0.06);                 // «вопросик» на конце
+        const низ = (к + лж * 0.6) * (i === 0 ? -0.55 : 0.05) + сид * (i === 0 ? 0.95 : 0);
+        const обвив = сид * (i > 0 ? 0.3 : 0);
+        const волна = Math.sin(t * (1.6 + 4 * к) - i * 0.55) * (0.08 + ii * 0.12) * (к > 0.5 ? (ii > 0.6 ? 1.6 : 0.25) : 1) + вол * Math.sin(t * 6 - i * 0.7) * 0.15;
+        б.rotation.set(подн + низ, волна + обвив, 0);
+      }
+      // уши: прижаты, когда крадётся; одно иногда дёргается
+      for (const у of уши) {
+        const дёрг = п.ухо && п.ухо.s === у.s ? Math.sin(п.ухо.k * Math.PI * 2) * 0.5 : 0;
+        у.к.rotation.set(-0.35 * к, у.s * (-0.6 * к) + дёрг * 0.4, у.s * (-0.25 * к) + дёрг * у.s * 0.3);
+      }
+      // глаза: моргание, прищур; рот: зевок
+      const зев = зажать(п.зев || 0, 0, 1);
+      const морг = Math.max(зажать(п.морг || 0, 0, 1), зев * 0.8), прищ = 0.15 * к;
+      for (const { гл } of глаза) гл.scale.y = 0.84 * (1 - 0.9 * Math.max(морг, прищ));
+      Б.челюсть.rotation.x = 0.62 * зев;
+      if (зев) Б.голова.rotation.x -= 0.35 * зев;
+      яша.updateMatrixWorld(true);
+    }
+    поза({});
+    замеры.всего = performance.now() - т0;
+    // подробность: шаг 1 — все слои шерсти, 2 — через один, 4 — каждый четвёртый (вдали не видно разницы)
+    let шагСлоёв = 1;
+    function подробность(шаг) {
+      if (шаг === шагСлоёв) return; шагСлоёв = шаг;
+      слои.forEach((м, k) => { const i = k >> 1; м.visible = i % шаг === 0 || i === СЛОЁВ - 1; });
+    }
+    return { яша, корпус, кости, хвост, глаза, рот, уши, поза, подробность, слоёв: СЛОЁВ, слои, материалы, замеры };
   }
-  const нос = голый(new THREE.ConeGeometry(0.013, 0.012, 3).rotateX(Math.PI / 2).rotateZ(Math.PI), '#E0948C', 0.45); нос.position.set(0, -0.02, 0.124); голова.add(нос);
-  // рот: при зевке раскрывается — розовая пасть, язык, клыки
-  const рот = new THREE.Group(); рот.position.set(0, -0.058, 0.108); голова.add(рот);
-  const пасть = голый(new THREE.SphereGeometry(0.024, 12, 8).scale(1, 0.1, 0.7), '#B84A58', 0.6); рот.add(пасть);
-  const язык = голый(new THREE.SphereGeometry(0.014, 10, 6).scale(1, 0.35, 1.3), '#F08A98', 0.5); язык.position.set(0, -0.004, 0.006); рот.add(язык);
-  const клыки = []; for (const s of [-1, 1]) for (const в of [1, -1]) { const к2 = голый(new THREE.ConeGeometry(0.0028, 0.011, 5), '#FFFFF4', 0.3); к2.rotation.x = в > 0 ? Math.PI : 0; к2.position.set(s * 0.012, 0, 0.012); рот.add(к2); клыки.push({ к2, в }); }
-  рот.scale.set(1, 0.001, 1);
-  // усы: белые, дугой, по 6 с каждой стороны; и «брови»
-  { const вп = [];
-    for (const s of [-1, 1]) for (let k = 0; k < 6; k++) { const y0 = -0.03 - k * 0.004, дл = 0.11 + (k % 3) * 0.02, а = (k - 2.5) * 0.12;
-      for (let j = 0; j < 4; j++) { const t0 = j / 4, t1 = (j + 1) / 4, P = t => [s * (0.028 + t * дл), y0 + Math.sin(а) * t * дл - t * t * 0.02, 0.085 - t * 0.03]; вп.push(...P(t0), ...P(t1)); } }
-    for (const s of [-1, 1]) for (let k = 0; k < 3; k++) вп.push(s * (0.025 + k * 0.006), 0.035, 0.078, s * (0.04 + k * 0.012), 0.085 + k * 0.006, 0.07);
-    const гв = new THREE.BufferGeometry(); гв.setAttribute('position', new THREE.Float32BufferAttribute(вп, 3));
-    голова.add(new THREE.LineSegments(гв, new THREE.LineBasicMaterial({ color: 0xFFFFFA, transparent: true, opacity: 0.9 }))); }
-  // пушистое «жабо» на груди — отдельный слой длинной шерсти
-  часть(шар(0.09, 0.08, 0.06), матШерсти(0.075, БЕЛ, 120), корпус, 0, 0.36, 0.22);
-  // лапы: шарнир сверху
-  const лапы = [];
-  for (const [x, z, перед] of [[-0.065, 0.15, 1], [0.065, 0.15, 1], [-0.07, -0.15, 0], [0.07, -0.15, 0]]) {
-    const шарнир = new THREE.Group(); шарнир.position.set(x, 0.27, z); корпус.add(шарнир);
-    часть(шар(0.035, 0.13, 0.038).translate(0, -0.12, 0), мЛапы, шарнир, 0, 0, 0);
-    часть(шар(0.035, 0.022, 0.045), мБелЛапы, шарнир, 0, -0.24, 0.01);
-    { const под = голый(new THREE.SphereGeometry(0.014, 8, 6).scale(1, 0.4, 1), '#E89AA0', 0.5); под.position.set(0, -0.258, 0.008); шарнир.add(под);
-      for (let k = 0; k < 4; k++) { const п2 = голый(new THREE.SphereGeometry(0.006, 6, 4).scale(1, 0.5, 1), '#E89AA0', 0.5); п2.position.set((k - 1.5) * 0.011, -0.258, 0.034 - Math.abs(k - 1.5) * 0.004); шарнир.add(п2); } }
-    лапы.push({ шарнир, перед });
-  }
-  // хвост — цепочка из 7 звеньев, пушистый
-  const хвост = []; let звено = корпус, zz = -0.22, yy = 0.33;
-  for (let i = 0; i < 9; i++) {
-    const г = new THREE.Group(); г.position.set(0, i === 0 ? yy : 0, i === 0 ? zz : -0.07); звено.add(г);
-    часть(шар(0.05 - i * 0.0015, 0.05 - i * 0.0015, 0.048).translate(0, 0, -0.033), мХвост, г, 0, 0, 0);
-    хвост.push(г); звено = г;
-  }
-  хвост[0].name = 'хвост';
+
+  // ===================== МОДЕЛЬ =====================
+  // слоёв шерсти и шаг «лепки»: на телефоне скромнее (и на «ультра» тоже), на компьютере с «ультра» — гуще
+  const кот = СделатьКота(THREE, { цвет: API.цвет, текстура: API.цветнаяТекстура,
+    слоёв: API.телефон ? (API.УЛЬТРА ? 12 : 8) : API.УЛЬТРА ? 24 : 16, воксель: API.телефон ? 0.007 : API.УЛЬТРА ? 0.005 : 0.006 });
+  const ЛОД = API.телефон ? [4, 10] : [7, 18];
+  const яша = кот.яша;
   яша.scale.setScalar(1.15);
   сцена.add(яша);
+  const вКам = new THREE.Vector3();
 
   // ===================== ПОВЕДЕНИЕ =====================
   const я = { x: 0, z: 0, угол: 0, фаза: 0, сидит: 0, t: 0, готов: false, кр: 0, таймОхоты: 5, охота: 0, прыжок: 0,
@@ -6879,6 +7486,14 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
 
   // в траве — не на дороге
   const вТраве = (x, z) => { const д = API.ближайшаяДорога(x, z); return !д || д.d > API.ШИРИНА[д.д.т] / 2 + 0.8; };
+  // стадион: покрытие на 12 см выше земли — Яша ходит по нему, а не утопает
+  let стад = null;
+  function земляЯши(x, z) {
+    const g = В(x, z), С = window.__стадион; if (!С) return g;
+    if (!стад) { const [x0, z0] = С.W(0, 0), [x1, z1] = С.W(1, 0); стад = { x0, z0, ux: x1 - x0, uz: z1 - z0 }; }
+    const dx = x - стад.x0, dz = z - стад.z0, a = dx * стад.ux + dz * стад.uz, b = -dx * стад.uz + dz * стад.ux;
+    return Math.abs(a) < С.A + 1 && Math.abs(b) < С.Б + 1 ? Math.max(g, С.Y) + 0.12 : g;
+  }
   API.каждыйКадр.push((dt, ms, поз) => {
     if (!я.готов) { я.x = поз.x + 1.8; я.z = поз.z + 1.2; я.угол = Math.atan2(поз.x - я.x, поз.z - я.z); я.готов = true; поставитьЛежак(); }   // на старте — в простыне на лежаке у дома
     if (!dt) return;
@@ -6914,10 +7529,11 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
       if (!я.проснулся && (дИгрок < 2.6 || я.лежитТ > 25)) { я.проснулся = true; я.зев = 2.2; я.вылезти = 2.4; }
       if (я.вылезти > 0) { я.вылезти -= dt; if (я.вылезти <= 0) { я.лежит = false; я.на = null; я.прыжок = 0.45; } }
     }
-    const трава = (я.лежит || (!я.на && (я.крадётся || вТраве(я.x, я.z)))) && скорость < 4;
+    // в траве: просто ждёт — сидит; перед охотой прижимается, виляет задом — и прыжок на добычу
+    const вТр = !я.на && (я.крадётся || вТраве(я.x, я.z));
+    const трава = (я.лежит || (вТр && (я.крадётся || я.охота > 0 || (!скорость && я.таймОхоты < 2.5 && !я.цель && !я.игрок)))) && скорость < 4;
     я.кр += ((трава ? 1 : 0) - я.кр) * Math.min(1, dt * 4);
-    // иногда: замер, виляет задом — и прыжок вперёд, на добычу
-    if (трава && !скорость && !я.цель && !я.игрок) {
+    if (вТр && !скорость && !я.цель && !я.игрок) {
       я.таймОхоты -= dt;
       if (я.таймОхоты <= 0 && !я.охота) { я.охота = 1.4; я.таймОхоты = 7 + Math.random() * 8; }
     }
@@ -6929,25 +7545,14 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
     }
     я.сидит += ((скорость ? 0 : 1) - я.сидит) * Math.min(1, dt * 3);
     я.фаза += dt * скорость * 6.5;
-    const к = я.кр, с = я.сидит * (1 - к), бег = Math.min(1, скорость / 4);
+    const к = я.кр, с = я.сидит * (1 - к);
     const прыг = я.прыжок > 0 ? Math.sin((0.45 - я.прыжок) / 0.45 * Math.PI) * 0.25 : 0;
-    яша.position.set(я.x, (я.на ? наY + (я.наY || 0.12) : В(я.x, я.z)) + Math.abs(Math.sin(я.фаза)) * 0.02 * бег + прыг, я.z); яша.rotation.y = я.угол;
-    // поза: сидя — зад опущен, грудь вверх
-    // пригнулся: брюхо у земли, зад чуть выше; при «охоте» — виляет задом
+    яша.position.set(я.x, (я.на ? наY + (я.наY || 0.12) : земляЯши(я.x, я.z)) + прыг, я.z); яша.rotation.y = я.угол;
+    // пригнулся: брюхо у земли; при «охоте» — виляет задом
     const виль = я.охота > 0 ? Math.sin(я.t * 22) * 0.12 * Math.min(1, я.охота) : 0;
-    корпус.rotation.x = -0.55 * с + 0.06 * к; корпус.rotation.z = виль;
-    корпус.position.set(0, -0.06 * с - 0.15 * к, -0.08 * с);
-    лапы.forEach(({ шарнир, перед }, i) => {
-      const шаг = Math.sin(я.фаза + (i === 0 || i === 3 ? 0 : Math.PI)) * 0.55 * (1 - с) * (1 - 0.5 * к);
-      const согнуты = перед ? 1.15 : -1.2;                 // лапы подобраны под себя
-      шарнир.rotation.x = (перед ? шаг + 0.55 * с : шаг - 1.2 * с) * (1 - к) + (согнуты + шаг) * к;
-    });
     // голова смотрит на игрока, иногда — по сторонам
     const наИгрока = Math.atan2(dx, dz) - я.угол;
-    голова.rotation.y = Math.max(-0.8, Math.min(0.8, Math.atan2(Math.sin(наИгрока), Math.cos(наИгрока)))) * с + Math.sin(я.t * 0.7) * 0.15;
-    голова.rotation.x = 0.35 * с - 0.1 + 0.12 * к;
-    голова.position.set(0, 0.46 - 0.07 * к, 0.27 + 0.03 * к);            // голову вытянул вперёд и вниз
-    if (я.лежит) { голова.rotation.x = -0.05; голова.rotation.y = Math.sin(я.t * 0.4) * 0.25; корпус.position.y = -0.1; }
+    const взY = Math.max(-0.8, Math.min(0.8, Math.atan2(Math.sin(наИгрока), Math.cos(наИгрока)))) * с + Math.sin(я.t * 0.7) * 0.15;
     // ---- живость: моргает, дёргает ухом, зевает, умывается ----
     я.моргТ -= dt; if (я.моргТ <= 0) { я.морг = 0.16; я.моргТ = 2.5 + Math.random() * 4; }
     if (я.морг > 0) я.морг -= dt;
@@ -6956,23 +7561,22 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
     if (с > 0.8 && !я.цель) { я.зевТ -= dt; if (я.зевТ <= 0 && !я.зев) { я.зев = 2.2; я.зевТ = 25 + Math.random() * 30; }
       я.умыТ -= dt; if (я.умыТ <= 0 && !я.умыв && !я.зев) { я.умыв = 3.5; я.умыТ = 30 + Math.random() * 30; } }
     let открыт = 0;
-    if (я.зев > 0) { я.зев -= dt; const t2 = 2.2 - я.зев; открыт = Math.min(1, t2 / 0.5) * Math.min(1, Math.max(0, я.зев) / 0.6); голова.rotation.x -= 0.45 * открыт; }
-    рот.scale.set(1, Math.max(0.001, открыт * 1.6), 1); рот.position.y = -0.058 - 0.012 * открыт;
-    const закрыты = я.морг > 0 ? 1 : Math.min(1, открыт * 1.4) * 0.9;
-    for (const { гл } of глаза) гл.scale.y = 1 - 0.9 * закрыты;
-    const умыв = я.умыв > 0; if (умыв) я.умыв -= dt;
-    if (умыв) { const ш = лапы[1].шарнир, t3 = я.t * 5; ш.rotation.x = -1.6 + Math.sin(t3) * 0.35; голова.rotation.x = 0.25 + Math.sin(t3) * 0.1; голова.rotation.y = -0.4; рот.scale.y = 0.3 + Math.max(0, Math.sin(t3)) * 0.4; }
-    // уши: пригнулся — прижаты и развёрнуты в стороны; иногда одно дёргается
-    for (const { у, s, вн, кисть } of уши) { const дёрг = я.ухо > 0 && s === я.ухоS ? Math.sin((0.35 - я.ухо) / 0.35 * Math.PI * 2) * 0.5 : 0;
-      у.rotation.set(-0.15 - 0.5 * к, дёрг * 0.6, s * (-0.3 - 1.05 * к) + дёрг * s * 0.4); if (вн) вн.rotation.copy(у.rotation); if (кисть) кисть.rotation.copy(у.rotation); }
-    // хвост: при ходьбе — трубой, сидя — обёрнут и кончиком машет
-    хвост.forEach((г, i) => {
-      const волна = Math.sin(я.t * (к > 0.5 ? 6 : с > 0.5 ? 1.6 : 3) - i * 0.6) * (0.12 + i * 0.04) * (к > 0.5 ? (i > 4 ? 1.4 : 0.3) : 1);   // на охоте дёргается только кончик
-      г.rotation.x = ((1 - с) * (i === 0 ? -0.9 : -0.12) + с * (i === 0 ? 0.7 : 0.1)) * (1 - к) + к * (i === 0 ? -0.45 : 0.03);   // пригнулся — хвост по земле
-      г.rotation.y = волна + с * (i < 4 ? 0.28 : 0.1);
+    if (я.зев > 0) { я.зев -= dt; const t2 = 2.2 - я.зев; открыт = Math.min(1, t2 / 0.5) * Math.min(1, Math.max(0, я.зев) / 0.6); }
+    const умыв = я.умыв > 0 ? Math.max(0, Math.min(1, я.умыв * 3, (3.5 - я.умыв) * 3)) : 0; if (я.умыв > 0) я.умыв -= dt;
+    const лёжа = я.лежит ? 1 : 0;
+    кот.поза({
+      dt, t: я.t, скорость: (я.прыжок > 0 ? 3.4 : скорость) / 1.15,
+      с: лёжа ? 0 : с, к: лёжа ? 0 : к, лежит: лёжа, виль,
+      взгляд: { y: лёжа ? Math.sin(я.t * 0.4) * 0.25 : взY * (1 - умыв) - 0.4 * умыв, x: 0 },
+      ухо: я.ухо > 0 ? { s: я.ухоS, k: (0.35 - я.ухо) / 0.35 } : null,
+      морг: я.морг > 0 ? 1 : 0, зев: открыт,
+      умыв, вниз: умыв * (0.2 + Math.sin(я.t * 5) * 0.1), наклон: -0.2 * умыв,
     });
+    // вдали слоёв шерсти меньше — не видно, а кадр дешевле
+    API.камера.getWorldPosition(вКам); const дк = вКам.distanceTo(яша.position) / яша.scale.x * 1.15;
+    кот.подробность(дк < ЛОД[0] ? 1 : дк < ЛОД[1] ? 2 : 4);
   });
-  window.__яша = { яша, я, зевнуть: () => { я.зев = 2.2; }, умыться: () => { я.умыв = 3.5; } };
+  window.__яша = { яша, я, кот, зевнуть: () => { я.зев = 2.2; }, умыться: () => { я.умыв = 3.5; } };
 }]);
 
 </script>
@@ -13853,7 +14457,7 @@ window.ДЕТАЛИ.push(['яшолёт', function (API) {
     const Яш = window.__яша; if (!Яш) return;
     const я = Яш.я;
     if (я.игрок && я.игрок === window.__мир.поз) { кот.былИгрок = я.игрок; я.игрок = null; }     // в онлайне Яша — это ты: кот летит с тобой
-    if (я.игрок) { кот.клон = Яш.яша.clone(); сцена.add(кот.клон); кот.живой = false; return; }
+    if (я.игрок) { кот.клон = THREE.SkeletonUtils ? THREE.SkeletonUtils.clone(Яш.яша) : Яш.яша.clone(); сцена.add(кот.клон); кот.живой = false; return; }
     кот.было = { цель: я.цель || null };
     я.на = сам.сиденье; я.наY = 0; я.цель = кот.взгляд; я.лежит = false; я.проснулся = true; я.вылезти = 0; я.прыжок = 0; я.охота = 0;
     кот.живой = true;
