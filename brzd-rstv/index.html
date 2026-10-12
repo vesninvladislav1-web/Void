@@ -38,7 +38,8 @@
   #ручка { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%;
            background: rgba(242,230,204,0.55); }
 
-  #подпись { position: fixed; left: 10px; bottom: calc(4px + env(safe-area-inset-bottom, 0px)); color: rgba(242,230,204,0.55);
+  /* источники карты — внизу стартового экрана; в игре не мешают (полностью — в ⚙) */
+  #подпись { position: absolute; left: 10px; bottom: calc(4px + env(safe-area-inset-bottom, 0px)); color: rgba(242,230,204,0.55);
              font-size: 9px; letter-spacing: .3px; pointer-events: none; }
 
   /* Игра — только горизонтально: вертикально показываем просьбу повернуть */
@@ -80,7 +81,6 @@
   <button class="кн шрифт" id="подписи" aria-pressed="true">ПОДПИСИ</button>
   <button class="кн шрифт" id="сверху">С ВЫСОТЫ</button>
 </div>
-<div id="подпись" class="шрифт">Карта © участники OpenStreetMap · рельеф: Terrain Tiles (AWS)</div>
 <div id="поверни" hidden>
   <div class="телефон"></div>
   <p class="шрифт">ПОВЕРНИ ТЕЛЕФОН</p>
@@ -97,6 +97,7 @@
     <button class="кн шрифт" data-к="высокая">ВЫСОКАЯ</button>
   </div>
   <button class="кн шрифт" id="гулять" hidden>ГУЛЯТЬ</button>
+  <div id="подпись" class="шрифт">Карта © участники OpenStreetMap · рельеф: Terrain Tiles (AWS)</div>
 </div>
 
 <!-- 3D-библиотека лежит прямо в файлах игры: внешний сервер (cdnjs) у части
@@ -11765,7 +11766,8 @@ window.ДЕТАЛИ.push(['настройки', function () {
                 font-size: 20px; line-height: 36px; text-align: center; padding: 0; cursor: pointer; }
     #шестерня:focus-visible { outline: 2px solid var(--акцент); outline-offset: 2px; }
     #меню { position: fixed; top: calc(54px + env(safe-area-inset-top, 0px)); right: 12px; z-index: 10; min-width: 230px; padding: 12px; border-radius: 14px;
-            background: rgba(18,12,8,0.92); border: 1px solid rgba(242,230,204,0.25); display: none; flex-direction: column; gap: 10px; }
+            background: rgba(18,12,8,0.92); border: 1px solid rgba(242,230,204,0.25); display: none; flex-direction: column; gap: 10px;
+            box-sizing: border-box; max-height: calc(100% - 66px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); overflow-y: auto; overscroll-behavior: contain; }
     #меню.открыто { display: flex; }
     #меню .строка { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--тусклый); font-size: 11px; letter-spacing: 2px; }
     #меню .кн { height: 34px; min-width: 0; padding: 0 12px; font-size: 11px; }
@@ -11799,7 +11801,7 @@ window.ДЕТАЛИ.push(['настройки', function () {
   }
   // авторы ассетов (часть одежды людей — CC-BY, указывать обязательно)
   { const т = document.createElement('div'); т.style.cssText = 'font-size:9px;line-height:1.4;color:var(--тусклый);letter-spacing:0;max-width:230px';
-    т.textContent = 'Люди: MakeHuman (CC0); одежда и волосы — Elvaerwyn, Mindfront, janexx, punkduck (CC-BY 4.0), MakeHuman community (CC0). Анимации и сортир: Quaternius, System G6 (CC0). Текстуры: Poly Haven (CC0). Карта © OpenStreetMap.';
+    т.textContent = 'Карта © участники OpenStreetMap (ODbL); рельеф: Terrain Tiles (AWS). Люди: MakeHuman (CC0); одежда и волосы — Elvaerwyn, Mindfront, janexx, punkduck (CC-BY 4.0), MakeHuman community (CC0). Анимации и сортир: Quaternius, System G6 (CC0). Текстуры: Poly Haven (CC0).';
     меню.appendChild(т); }
   кн.addEventListener('click', e => { e.stopPropagation(); меню.classList.toggle('открыто'); });
   addEventListener('pointerdown', e => { if (!меню.contains(e.target) && e.target !== кн) меню.classList.remove('открыто'); });
