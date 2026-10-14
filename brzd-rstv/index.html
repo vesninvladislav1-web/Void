@@ -1594,7 +1594,7 @@ window.ДЕТАЛИ.push(['дом игрока', function (API) {
   // крышей, прислонённый щит из досок, катушка шланга, синяя дверь. Между сараями — курятник с сеткой.
   // Двор — тёмный щебень с мокрыми пятнами, за домом — газон: тут гуляют куры, а Яша на них охотится.
   const ДВОР_И = { сарай: [13.4, 23.4, -5.8, 9.1], конёк: 20.45, старый: [27, 32.5, 6, 16], щебень: [10.6, 27, 9.1, 25], проход: [11.2, 13.4, -2, 9.1],
-    газон: [-3.6, 10.6, 8.2, 22], курятник: { L: [25.2, 5], α: Math.PI / 2 }, гуляют: [0.5, 26, 10.4, 21], бах: [37, 3] };
+    заСараем: [27, 35, 16, 25], газон: [-3.6, 10.6, 8.2, 22], курятник: { L: [25.2, 5], α: Math.PI / 2 }, гуляют: [0.5, 26, 10.4, 21], бах: [37, 3] };
   {
     const кирпКрМ = мат(API.текс('kirpich'), '#FFFFFF', { normalMap: API.текс('kirpich_n'), roughness: 0.9 });
     // старые доски: фасады во двор смотрят на север и всё время в тени — доски светлее, как на фото
@@ -1642,7 +1642,7 @@ window.ДЕТАЛИ.push(['дом игрока', function (API) {
     }
     const пол = о => Object.assign({ roughness: 0.97, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }, о);
     const щебеньМ = мат(API.текс('asfalt'), '#D6C9B6', пол({ normalMap: API.текс('gruntovka_n') }));     // асфальтовая крошка
-    покрытие(ДВОР_И.щебень, щебеньМ, 4.5); покрытие(ДВОР_И.проход, щебеньМ, 4.5);
+    for (const п of [ДВОР_И.щебень, ДВОР_И.проход, ДВОР_И.заСараем]) покрытие(п, щебеньМ, 4.5);   // и за старым сараем — асфальт, не трава
     покрытие(ДВОР_И.газон, мат(API.текс('trava'), '#C2CC9A', пол()), 2.2);
     // газон как на фото: пятна выгоревшей травы и голой земли, у щебня — вытоптанная бурая кромка
     { const т = холст(512, 512, (с, w, h) => { с.clearRect(0, 0, w, h);
@@ -1651,12 +1651,16 @@ window.ДЕТАЛИ.push(['дом игрока', function (API) {
         for (let k = 0; k < 40; k++) пятно(w - Math.random() * 60, Math.random() * h, 25 + Math.random() * 45, '92,74,50', 0.35 + Math.random() * 0.3);   // правый край — к щебню
         for (let k = 0; k < 2500; k++) { с.fillStyle = `rgba(${Math.random() < 0.5 ? '40,70,25' : '160,150,90'},0.35)`; с.fillRect(Math.random() * w, Math.random() * h, 2, 3); } });
       покрытие(ДВОР_И.газон, мат(т, '#FFFFFF', пол({ transparent: true, depthWrite: false, polygonOffsetFactor: -3, polygonOffsetUnits: -3 })), 1, 1.2, 0.045, true); }
-    // мокрые тёмные пятна на щебне и бурая кромка у газона
-    { const т = холст(512, 512, (с, w, h) => { с.clearRect(0, 0, w, h);
-        for (let k = 0; k < 70; k++) { const x = Math.random() * w, y = Math.random() * h, r = 6 + Math.random() * 26; с.fillStyle = `rgba(16,14,12,${0.18 + Math.random() * 0.3})`;
+    // мокрые тёмные пятна на щебне: холст по размеру куска (~31 точка на метр) — пятна везде одной величины
+    function мокрыеПятна(п) {
+      const w = Math.min(512, Math.round((п[1] - п[0]) * 31)), h = Math.min(512, Math.round((п[3] - п[2]) * 31)), доля = w * h / (512 * 512);
+      const т = холст(w, h, (с, w, h) => { с.clearRect(0, 0, w, h);
+        for (let k = 0; k < 70 * доля; k++) { const x = Math.random() * w, y = Math.random() * h, r = 6 + Math.random() * 26; с.fillStyle = `rgba(16,14,12,${0.18 + Math.random() * 0.3})`;
           с.beginPath(); for (let a = 0; a < 6.3; a += 0.5) { const rr = r * (0.6 + Math.random() * 0.6); a ? с.lineTo(x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.6) : с.moveTo(x + rr, y); } с.fill(); }
-        for (let k = 0; k < 900; k++) { с.fillStyle = `rgba(${Math.random() < 0.5 ? '230,226,214' : '40,36,30'},0.25)`; с.fillRect(Math.random() * w, Math.random() * h, 2, 2); } });
-      покрытие(ДВОР_И.щебень, мат(т, '#FFFFFF', пол({ transparent: true, depthWrite: false, polygonOffsetFactor: -3, polygonOffsetUnits: -3 })), 1, 1.2, 0.045, true); }     // та же сетка, что у щебня: пятна ровно над ним
+        for (let k = 0; k < 900 * доля; k++) { с.fillStyle = `rgba(${Math.random() < 0.5 ? '230,226,214' : '40,36,30'},0.25)`; с.fillRect(Math.random() * w, Math.random() * h, 2, 2); } });
+      покрытие(п, мат(т, '#FFFFFF', пол({ transparent: true, depthWrite: false, polygonOffsetFactor: -3, polygonOffsetUnits: -3 })), 1, 1.2, 0.045, true);   // та же сетка, что у щебня: пятна ровно над ним
+    }
+    мокрыеПятна(ДВОР_И.щебень); мокрыеПятна(ДВОР_И.заСараем);
 
     // ---------- длинный сарай: красный кирпич, синие ворота, белый гараж, фронтон из старых досок ----------
     const [BX0, BX1, BZ0, BZ1] = ДВОР_И.сарай, BR = ДВОР_И.конёк;
@@ -1794,9 +1798,8 @@ window.ДЕТАЛИ.push(['дом игрока', function (API) {
       const гл = new THREE.BufferGeometry(); гл.setAttribute('position', new THREE.Float32BufferAttribute(вп, 3)); гр.add(new THREE.LineSegments(гл, new THREE.LineBasicMaterial({ color: 0xD8D8D0 }))); }
 
     // деревья и чужие дворовые вещи сюда не ставим
-    const весь = [W(-4, 1), W(33.5, 1), W(33.5, 26), W(-4, 26)];
-    API.безДеревьев && API.безДеревьев.push(весь);
-    API.свободныеДворы && API.свободныеДворы.push(весь);
+    const весь = [W(-4, 1), W(33.5, 1), W(33.5, 26), W(-4, 26)], заСар = [W(27, 15.5), W(35.6, 15.5), W(35.6, 26), W(27, 26)];   // и асфальт за старым сараем — до соседского дома
+    for (const п of [весь, заСар]) { API.безДеревьев && API.безДеревьев.push(п); API.свободныеДворы && API.свободныеДворы.push(п); }
   }
 
   if (сб.p.length) { const м = сб.меш(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0 })); м.castShadow = true; м.receiveShadow = true; гр.add(м); }
