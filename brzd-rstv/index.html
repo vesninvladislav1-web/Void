@@ -75,7 +75,7 @@
   #старт p { margin: 0; color: var(--текст); max-width: 34ch; font-size: 14px; line-height: 1.6; text-wrap: balance; }
   #старт .мелко { color: var(--тусклый); font-size: 12px; }
   #старт .кн { height: 52px; padding: 0 30px; font-size: 15px; letter-spacing: 3px; border-color: var(--акцент); color: var(--акцент); }
-  #графика { display: flex; align-items: center; gap: 8px; color: var(--тусклый); font-size: 11px; letter-spacing: 2px; }
+  #графика { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px; color: var(--тусклый); font-size: 11px; letter-spacing: 2px; }
   #графика .кн { height: 36px; padding: 0 12px; font-size: 11px; }
   #графика .кн[aria-pressed="true"], #свет .кн[aria-pressed="true"] { border-color: var(--акцент); color: var(--акцент); opacity: 1; }
   #загрузка { color: var(--тусклый); font-size: 12px; letter-spacing: 1px; max-width: 92vw; overflow-wrap: anywhere; }
@@ -105,6 +105,8 @@
     <span>ГРАФИКА</span>
     <button class="кн шрифт" data-к="ультра">УЛЬТРА</button>
     <button class="кн шрифт" data-к="высокая">ВЫСОКАЯ</button>
+    <button class="кн шрифт" data-к="средняя">СРЕДНЯЯ</button>
+    <button class="кн шрифт" data-к="низкая">НИЗКАЯ</button>
   </div>
   <button class="кн шрифт" id="гулять" hidden>ГУЛЯТЬ</button>
   <div id="безПанелей" hidden></div>
@@ -3986,7 +3988,7 @@ window.ДЕТАЛИ.push(['улицы: фонари, знаки, лужи, бу�
     }
   }
   низины.sort((a, b) => b.ценность - a.ценность);
-  const ПРЕДЕЛ_ЛУЖ = API.УЛЬТРА ? 46 : 32;
+  const ПРЕДЕЛ_ЛУЖ = API.УЛЬТРА ? 46 : [14, 22, 32][API.УР];
   for (const н of низины) {
     if (лужи.length >= ПРЕДЕЛ_ЛУЖ) break;
     const { о, д } = н, ш = ШИРИНА[д.т] / 2;
@@ -4091,7 +4093,7 @@ window.ДЕТАЛИ.push(['улицы: фонари, знаки, лужи, бу�
     }
   }
   // бюджет: не больше ПРЕДЕЛА карточек — лишнее прореживаем равномерно
-  const ПРЕДЕЛ_РАСТ = API.УЛЬТРА ? 5200 : API.телефон ? 3000 : 4200;
+  const ПРЕДЕЛ_РАСТ = API.УЛЬТРА ? 5200 : API.УР === 1 ? 2000 : API.УР === 0 ? 1100 : API.телефон ? 3000 : 4200;
   let растенияИтог = растения;
   if (растения.length > ПРЕДЕЛ_РАСТ) { const k = ПРЕДЕЛ_РАСТ / растения.length; растенияИтог = растения.filter(р => сл(р[0] * 1.1 + р[2] * 2.3, 80) < k).slice(0, ПРЕДЕЛ_РАСТ); }
   счёт.растенийВсего = растения.length;
@@ -7800,7 +7802,7 @@ window.ДЕТАЛИ.push(['Яша', function (API) {
   // ===================== МОДЕЛЬ =====================
   // слоёв шерсти и шаг «лепки»: на телефоне скромнее (и на «ультра» тоже), на компьютере с «ультра» — гуще
   const кот = СделатьКота(THREE, { цвет: API.цвет, текстура: API.цветнаяТекстура,
-    слоёв: API.телефон ? (API.УЛЬТРА ? 12 : 8) : API.УЛЬТРА ? 24 : 16, воксель: API.телефон ? 0.007 : API.УЛЬТРА ? 0.005 : 0.006 });
+    слоёв: API.УР < 2 ? 6 : API.телефон ? (API.УЛЬТРА ? 12 : 8) : API.УЛЬТРА ? 24 : 16, воксель: API.телефон ? 0.007 : API.УЛЬТРА ? 0.005 : 0.006 });
   const ЛОД = API.телефон ? [4, 10] : [7, 18];
   const яша = кот.яша;
   яша.scale.setScalar(1.15);
@@ -9158,7 +9160,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
       ok(г);
     }, нет);
   }));
-  const ПУЛ = API.УЛЬТРА ? 16 : 10;                     // сколько сельчан-моделей одновременно
+  const ПУЛ = API.УЛЬТРА ? 16 : [6, 8, 10][API.УР];                     // сколько сельчан-моделей одновременно
   const ц = API.цвет;
 
   // ===================== ЗАГРУЗКА ПО ТРЕБОВАНИЮ =====================
@@ -12049,6 +12051,7 @@ window.ДЕТАЛИ.push(['настройки', function () {
     #меню .кн { height: 34px; min-width: 0; padding: 0 12px; font-size: 11px; }
     #меню #графика, #меню #мат { display: flex; gap: 6px; align-items: center; }
     #меню #графика > span, #меню #мат > span { display: none; }
+    #меню #графика { flex-wrap: wrap; justify-content: flex-end; max-width: 190px; }
     body.кино #шестерня { opacity: 0; }
   `;
   document.head.appendChild(стиль);
@@ -17058,24 +17061,27 @@ class Сборка {
 // линейном пространстве, поэтому переводим; на выходе — кино-тонирование ACES.
 const цвет = h => new THREE.Color(h).convertSRGBToLinear();
 const лин = к => Math.pow(к, 2.2);
-// Графика: «ультра» (по умолчанию) или «высокая». Выбор — на стартовом экране.
-const КАЧЕСТВО = (() => { try { return localStorage.getItem('бороздиновский.графика') || 'ультра'; } catch (e) { return 'ультра'; } })();
-const УЛЬТРА = КАЧЕСТВО === 'ультра';
+// Графика: «ультра» (по умолчанию), «высокая», «средняя», «низкая». Выбор — на стартовом экране и в ⚙.
+// УР — номер ступени: 0 низкая … 3 ультра. «Средняя» и «низкая» — для слабых телефонов:
+// меньше травы, деревьев вдали, луж и сельчан, тени проще (на «низкой» их нет вовсе), картинка мельче.
+const КАЧЕСТВА = ['низкая', 'средняя', 'высокая', 'ультра'];
+const КАЧЕСТВО = (() => { try { const к = localStorage.getItem('бороздиновский.графика'); return КАЧЕСТВА.includes(к) ? к : 'ультра'; } catch (e) { return 'ультра'; } })();
+const УЛЬТРА = КАЧЕСТВО === 'ультра', УР = КАЧЕСТВА.indexOf(КАЧЕСТВО);
 function цветнаяТекстура(к) { const т = new THREE.CanvasTexture(к); т.encoding = THREE.sRGBEncoding; return т; }
 
 // ===================== СЦЕНА =====================
 const холст = эл('холст');
 const телефон = matchMedia('(pointer: coarse)').matches;
-const рендер = new THREE.WebGLRenderer({ canvas: холст, antialias: !телефон || devicePixelRatio < 2.5 });
-рендер.setPixelRatio(Math.min(devicePixelRatio || 1, УЛЬТРА ? 2 : телефон ? 1.6 : 2));
+const рендер = new THREE.WebGLRenderer({ canvas: холст, antialias: УР > 0 && (!телефон || devicePixelRatio < 2.5) });
+рендер.setPixelRatio(Math.min(devicePixelRatio || 1, УЛЬТРА ? 2 : УР === 2 ? (телефон ? 1.6 : 2) : УР === 1 ? 1.25 : 1));
 рендер.outputEncoding = THREE.sRGBEncoding;
 рендер.toneMapping = THREE.ACESFilmicToneMapping;
 рендер.toneMappingExposure = 0.8;
 // Цвета заданы как видит глаз, и выводятся как есть. Сначала здесь стояла
 // гамма-коррекция поверх — и всё осветлялось дважды, посёлок выглядел
 // выгоревшим.
-рендер.shadowMap.enabled = true;
-рендер.shadowMap.type = THREE.PCFSoftShadowMap;
+рендер.shadowMap.enabled = УР > 0;                        // «низкая» — без теней
+рендер.shadowMap.type = УР > 1 ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
 const сцена = new THREE.Scene();
 const ГОРИЗОНТ = цвет('#E9A36B');
 сцена.fog = new THREE.Fog(ГОРИЗОНТ, 120, 820);
@@ -17249,8 +17255,8 @@ const небоСвет = new THREE.HemisphereLight(цвет('#B9C3CF'), цвет
 const солнце = new THREE.DirectionalLight(цвет('#FFC58F'), 1.8);
 солнце.castShadow = true;
 // ультра: карта теней 4096 на 220 м вокруг — чёткие тени и вдали
-const ТЕНЬ = УЛЬТРА ? 110 : 70;
-солнце.shadow.mapSize.set(УЛЬТРА ? 4096 : телефон ? 1024 : 2048, УЛЬТРА ? 4096 : телефон ? 1024 : 2048);
+const ТЕНЬ = УЛЬТРА ? 110 : УР === 2 ? 70 : 50;
+{ const р = УЛЬТРА ? 4096 : УР === 2 ? (телефон ? 1024 : 2048) : 1024; солнце.shadow.mapSize.set(р, р); }
 Object.assign(солнце.shadow.camera, { left: -ТЕНЬ, right: ТЕНЬ, top: ТЕНЬ, bottom: -ТЕНЬ, near: 1, far: 700 });
 солнце.shadow.bias = -0.0004; солнце.shadow.normalBias = УЛЬТРА ? 0.25 : 0.4;
 сцена.add(солнце, солнце.target);
@@ -17284,7 +17290,7 @@ window.__свет = { поставить: имя => применитьСвет(�
 // Цвет вершины здесь — «оттенок»: 1.0 значит «как на фото».
 const загрузчик = new THREE.LoadingManager();
 const грузТекстур = new THREE.TextureLoader(загрузчик);
-const АНИЗ = Math.min(УЛЬТРА ? 16 : телефон ? 4 : 8, рендер.capabilities.getMaxAnisotropy());
+const АНИЗ = Math.min(УЛЬТРА ? 16 : УР < 2 ? 2 : телефон ? 4 : 8, рендер.capabilities.getMaxAnisotropy());
 const текстуры = {};
 function текс(имя, вариант = '') {
   const к = имя + вариант;
@@ -18433,7 +18439,7 @@ function кДругойДороге(x, z, своя) {
 // Модуль — функция, получает API и сам добавляет в сцену что нужно.
 const безТравы = [], безДеревьев = [];   // и где не ставить деревья (модули задают участки по фото)              // многоугольники, где не расти кустикам травы
 const API = {
-  THREE, сцена, КАРТА, ШИР, ГЛУБ, УЛЬТРА, телефон, АНИЗ,
+  THREE, сцена, КАРТА, ШИР, ГЛУБ, УЛЬТРА, УР, телефон, АНИЗ,
   землиВысота, высотаСетки, внутри, площадь, прямоугольник, случай, цвет, оттенок, лин, текс, цветнаяТекстура, мягкийСвет,
   Сборка, коробка, плашка, дома, дороги, ШИРИНА, угодья, воды, вДоме, вВоде, вДворе, ближайшаяДорога, кДругойДороге, отрезкиДороги,
   сплат: { сп, СX, СZ, СМ, путь: сплатПуть, пятно: сплатПятно, обновить: () => { текСплат.needsUpdate = true; } },
@@ -18608,15 +18614,15 @@ await этап('Строю посёлок: деревья…');
   // ---- Три уровня детальности ----
   // рядом (до 80 м) — пышная крона из десятков пучков листьев;
   // дальше (до 260 м) — пучков меньше; у горизонта — просто объёмный силуэт.
-  const БЛИЖЕ = 80, СРЕДНЕ = 260, ДАЛЬШЕ = 1100;
+  const БЛИЖЕ = УР > 1 ? 80 : УР ? 60 : 40, СРЕДНЕ = УР > 1 ? 260 : УР ? 180 : 120, ДАЛЬШЕ = УР > 1 ? 1100 : УР ? 700 : 450;
   const nКругл = все.filter(д => !д.тополь).length || 1, nТоп = все.filter(д => д.тополь).length || 1;
   const сделать = (г, мат, n, тени) => { const о = new THREE.InstancedMesh(г, мат, n); о.count = 0; о.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3); о.castShadow = тени; о.receiveShadow = true; о.frustumCulled = false; if (мат === матКарт) о.customDepthMaterial = теньКарт; сцена.add(о); return о; };
   const матДаль = new THREE.MeshStandardMaterial({ map: текс('listva'), roughness: 1, color: цвет('#9AAA88') });
   const уровни = {
-    кругБлиз: [сделать(кронаГеом(УЛЬТРА ? 44 : телефон ? 26 : 34, 0.42, 1), матКарт, nКругл, true), сделать(сердцевина(1), матСерд, nКругл, true)],
+    кругБлиз: [сделать(кронаГеом(УЛЬТРА ? 44 : УР < 2 ? 18 : телефон ? 26 : 34, 0.42, 1), матКарт, nКругл, true), сделать(сердцевина(1), матСерд, nКругл, true)],
     кругСред: [сделать(кронаГеом(УЛЬТРА ? 18 : 12, 0.55, 2), матКарт, nКругл, true), сделать(сердцевина(0), матСерд, nКругл, true)],
     кругДаль: [сделать(сердцевина(0, 1, 0.95), матДаль, nКругл, false)],
-    топБлиз: [сделать(кронаГеом(УЛЬТРА ? 60 : 40, 0.07, 3, 5.5, 0.1), матКарт, nТоп, true), сделать(сердцевина(1, 5.5, 0.085), матСерд, nТоп, true)],
+    топБлиз: [сделать(кронаГеом(УЛЬТРА ? 60 : УР < 2 ? 28 : 40, 0.07, 3, 5.5, 0.1), матКарт, nТоп, true), сделать(сердцевина(1, 5.5, 0.085), матСерд, nТоп, true)],
     топДаль: [сделать(сердцевина(0, 5.5, 0.11), матДаль, nТоп, false)],
   };
   const стволы = сделать(new THREE.CylinderGeometry(0.1, 0.17, 1, 7, 1, true), new THREE.MeshStandardMaterial({ map: кора, normalMap: кораН, color: цвет('#B8A898'), roughness: 1 }), N || 1, true);
@@ -18725,7 +18731,7 @@ const трава = (() => {
   g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  const МАКС = УЛЬТРА ? 22000 : телефон ? 3500 : 7000, R = УЛЬТРА ? 55 : телефон ? 28 : 36, ШАГ = УЛЬТРА ? 0.46 : телефон ? 0.62 : 0.5;
+  const [МАКС, R, ШАГ] = УЛЬТРА ? [22000, 55, 0.46] : УР === 1 ? [2000, 22, 0.7] : УР === 0 ? [900, 15, 0.85] : телефон ? [3500, 28, 0.62] : [7000, 36, 0.5];
   const меш = new THREE.InstancedMesh(g, мягкийСвет(new THREE.MeshStandardMaterial({ map: т, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1 }), 0.12), МАКС);
   меш.receiveShadow = true; меш.frustumCulled = false; сцена.add(меш);
   const м = new THREE.Matrix4(), q = new THREE.Quaternion(), ось = new THREE.Vector3(0, 1, 0), ц = new THREE.Color();
@@ -19224,6 +19230,9 @@ function качество(dt) {
     if (замер.ступень === 1) { рендер.setPixelRatio(Math.min(рендер.getPixelRatio(), 1.2)); if (ПОСТ) ПОСТ.вкл = false; }
     if (замер.ступень === 2) { рендер.setPixelRatio(1); трава.урезать(); }
     if (замер.ступень === 3) рендер.setPixelRatio(0.8);
+    // всё равно тормозит — подскажем ступень пониже (один раз за прогулку)
+    if (замер.ступень === 2 && УР > 0 && window.__подсказки)
+      window.__подсказки.совет('Телефон не тянет? ⚙ → ГРАФИКА → ' + (УР > 1 ? 'СРЕДНЯЯ' : 'НИЗКАЯ') + ' — пойдёт плавнее.', 6);
     размер();
   }
 }
