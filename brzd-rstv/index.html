@@ -14062,6 +14062,8 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     ['ополченец', 'Ополченец', 'Выбить пятерых за одну войну за времянку.'],
     ['пво', 'Своя ПВО', 'Сбить броском вражеский дрон.'],
     ['оператор', 'Оператор', 'Выбить врага своим дроном.'],
+    ['лётчик', 'Лётчик', 'Поразить мишень на полигоне с вертолёта или самолёта.'],
+    ['стрелок', 'Отличник боевой', 'Поразить 20 мишеней на полигоне.'],
   ];
   const КЛЮЧ_А = 'бороздиновский.ачивки';
   let есть = {}; try { есть = JSON.parse(хран.взять(КЛЮЧ_А, '{}')) || {}; } catch (e) { есть = {}; }
@@ -14118,6 +14120,7 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
   подписка('война-кончилась', д => { if (!д || !д.участвовал) return; if (д.победа === 'шторм') дать('времянка'); if (д.выбил >= 5) дать('ополченец'); });
   подписка('война-сбил', () => дать('пво'));
   подписка('война-дрон-выбил', () => дать('оператор'));
+  подписка('полигон-мишень', д => { if (!д) return; if (д.сверху) дать('лётчик'); if (д.всего >= 20) дать('стрелок'); });
 
   // ===================== ГАЗЕТА =====================
   const стат = { старт: Date.now(), прилетело: {}, всего: 0, вехи: new Set(), фениксС: 0, фениксЗа: 0, авария: 0, никитаКем: '' };
@@ -17608,8 +17611,603 @@ window.ДЕТАЛИ.push(['война за времянку', function (API) {
       с.append(п, б); меню.insertBefore(с, меню.lastElementChild);
     } }
 
-  window.__война = { начать, закончить, убрать, сеть, кинуть, телепорт, мойДрон, воздух, ТХ, техника: () => тех, глб, готовыГлб, идёт: () => !!война, состояние: () => война, бойцы, снаряды, ИГ, стат, кот, ВР, ЦX, ЦZ, БАЗЫ, ДЛИТ,
+  window.__война = { начать, закончить, убрать, сеть, кинуть, телепорт, мойДрон, воздух, ТХ, техника: () => тех, глб, готовыГлб,
+    модели: { ПРОТО, модельФПВ, модельПусковой, модельПВО, вКонтейнер, винт, крутитьВинт, глб },     // для полигона идёт: () => !!война, состояние: () => война, бойцы, снаряды, ИГ, стат, кот, ВР, ЦX, ЦZ, БАЗЫ, ДЛИТ,
     яВыбыл: () => !!(война && ИГ.выбыл > 0), ведущийИд, яВедущий, вКольце };
+}]);
+
+</script>
+<script>
+// Полигон — пашня к востоку от посёлка, метрах в 150 от своего двора. На въезде КПП и табличка,
+// дальше огневой рубеж с пусковой, по полю — мишени: танки, фанерные фигуры, щиты, бочки.
+// Пешком: «ЗАЛП» с пусковой и свой «ДРОН». На площадке — вертолёт, на полосе — невидимка:
+// садишься и летаешь сам (как на Яшолёте: игрок стоит на месте — window.__летитЯша, мир — за машиной),
+// бьёшь по мишеням НУРСами, пушкой, бомбами и ракетами. Очки и рекорд — свои, только у себя.
+window.ДЕТАЛИ.push(['полигон', function (API) {
+  const { THREE, сцена } = API, В = API.землиВысота, ц = API.цвет, сл = Math.random;
+  const Вт = window.__война && window.__война.модели; if (!Вт) return;
+  const Я = () => window.__бахЯдро, совет = (т, с = 3) => window.__подсказки && window.__подсказки.совет(т, с);
+  const событие = (и, д) => window.__событие && window.__событие(и, д);
+  const угл = d => Math.atan2(Math.sin(d), Math.cos(d)), зажать = (v, a, b) => Math.max(a, Math.min(b, v));
+  const мат = (цв, доп = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: ц(цв), roughness: 0.8, metalness: 0 }, доп));
+  const ящ = (w, h, d, м, x = 0, y = 0, z = 0) => { const о = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), м); о.position.set(x, y, z); о.castShadow = true; о.receiveShadow = true; return о; };
+  const цил = (r1, r2, h, м, x = 0, y = 0, z = 0, n = 12) => { const о = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, n), м); о.position.set(x, y, z); о.castShadow = true; return о; };
+  function холст(w, h, рис) { const к = document.createElement('canvas'); к.width = w; к.height = h; рис(к.getContext('2d'), w, h); const т = API.цветнаяТекстура(к); т.anisotropy = API.АНИЗ; return т; }
+
+  // ===================== ГДЕ =====================
+  // поле: x 340…530, z 340…520 (восток от улицы); въезд — с запада, от посёлка
+  const ЦП = [440, 425];
+  const КПП = [338, 420], РУБЕЖ = 362, ПЛОЩАДКА = [372, 372], ПОЛОСА = { z: 492, x0: 352, x1: 505 };
+  const вПолигоне = (x, z) => x > 328 && x < 545 && z > 330 && z < 530;
+  window.__полигон = { x: ЦП[0], z: ЦП[1] };
+  const Г = (x, z) => В(x, z);
+
+  // ===================== СЛОВА НАД ВЗРЫВАМИ =====================
+  const словаТ = {}, слова = [];
+  function текстураСлова(с2, цвет) {
+    const к0 = с2 + цвет; if (словаТ[к0]) return словаТ[к0];
+    const к = document.createElement('canvas'); к.width = 256; к.height = 96; const с = к.getContext('2d');
+    с.font = '900 50px Impact, system-ui, sans-serif'; с.textAlign = 'center'; с.textBaseline = 'middle';
+    с.lineWidth = 9; с.strokeStyle = '#1A0E06'; с.strokeText(с2, 128, 50); с.fillStyle = цвет; с.fillText(с2, 128, 50);
+    return (словаТ[к0] = new THREE.CanvasTexture(к));
+  }
+  function слово(с2, x, y, z, цвет = '#FFE070') {
+    let о = слова.find(о => !о.живо);
+    if (!о) { о = { сп: new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false, depthTest: false, sizeAttenuation: false })) }; о.сп.renderOrder = 12; сцена.add(о.сп); слова.push(о); }
+    о.сп.material.map = текстураСлова(с2, цвет); о.сп.material.needsUpdate = true; о.живо = true; о.t = 0; о.x = x; о.y = y; о.z = z; о.сп.visible = true;
+  }
+  function шагСлов(dt) {
+    for (const о of слова) { if (!о.живо) continue; о.t += dt; const k = о.t / 1.1;
+      if (k >= 1) { о.живо = false; о.сп.visible = false; continue; }
+      о.сп.position.set(о.x, о.y + о.t * 1.5, о.z); о.сп.material.opacity = 1 - k * k; const м = 0.14; о.сп.scale.set(м, м * 0.375, 1); }
+  }
+
+  // ===================== МЕСТО: КПП, РУБЕЖ, ПЛОЩАДКА, ПОЛОСА =====================
+  let построен = false;
+  const П = { мишени: [], пуск: null, верт: null, сам: null, очки: 0, рекорд: 0, уничтожено: 0, залп: 0, дрон: 0 };
+  try { П.рекорд = +localStorage.getItem('бороздиновский.полигон.рекорд') || 0; } catch (e) {}
+  const табличка = (т1, т2, w = 512, h = 192) => холст(w, h, (с) => {
+    с.fillStyle = '#2E4A2A'; с.fillRect(0, 0, w, h); с.strokeStyle = '#E8E2C8'; с.lineWidth = 10; с.strokeRect(8, 8, w - 16, h - 16);
+    с.fillStyle = '#F4C430'; с.font = '900 64px Impact, system-ui, sans-serif'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillText(т1, w / 2, h * 0.38);
+    с.fillStyle = '#E8E2C8'; с.font = '700 28px system-ui, sans-serif'; с.fillText(т2, w / 2, h * 0.74);
+  });
+  function построить() {
+    if (построен) return; построен = true;
+    const мБет = мат('#A8A49A'), мАсф = мат('#4A4846', { roughness: 0.95 }), мДоск = мат('#C8B48A'), мХаки = мат('#5A6A3A'), мПол = мат('#D23A2A'), мБел = мат('#EDEDE6');
+    // КПП: будка, шлагбаум, табличка лицом к посёлку
+    { const [x, z] = КПП, g = Г(x, z), гр = new THREE.Group(); гр.position.set(x, g, z); сцена.add(гр);
+      гр.add(ящ(2.4, 2.6, 2.4, мХаки, 0, 1.3, -6), ящ(2.7, 0.15, 2.7, мат('#3A4428'), 0, 2.67, -6), ящ(0.05, 0.9, 1.4, мат('#8EB4C8', { roughness: 0.2 }), -1.22, 1.6, -6));
+      гр.add(цил(0.1, 0.1, 1.1, мБел, 0, 0.55, -4));
+      const шл = new THREE.Group(); шл.position.set(0, 1.05, -4); гр.add(шл);
+      for (let i = 0; i < 8; i++) шл.add(ящ(0.12, 0.12, 1, i % 2 ? мПол : мБел, 0, 0, 0.5 + i));
+      шл.rotation.x = -1.2;                                      // поднят: проходи
+      const т = new THREE.Mesh(new THREE.PlaneGeometry(4.2, 1.6), new THREE.MeshStandardMaterial({ map: табличка('ПОЛИГОН', 'БОРОЗДИНОВСКИЙ · ВХОД СВОБОДНЫЙ'), roughness: 0.7 }));
+      т.position.set(-0.5, 2.6, 5); т.rotation.y = -Math.PI / 2; гр.add(т);
+      for (const dz of [3.2, 6.8]) гр.add(цил(0.07, 0.07, 3.4, мат('#6A6A66', { metalness: 0.5 }), -0.45, 1.7, dz));
+      // флаг-полосатик
+      гр.add(цил(0.05, 0.05, 6, мат('#8A8A86', { metalness: 0.5 }), 1.5, 3, -8));
+      const ф = new THREE.Mesh(new THREE.ConeGeometry(0.35, 1.6, 10, 1, true), new THREE.MeshStandardMaterial({ color: ц('#F07020'), side: THREE.DoubleSide })); ф.rotation.z = -Math.PI / 2; ф.position.set(2.3, 5.7, -8); гр.add(ф); }
+    // огневой рубеж: мешки с песком и пусковая на грузовике (кабиной к посёлку — бьёт через кузов)
+    { const г = new THREE.Group(); сцена.add(г);
+      // мешки — одним InstancedMesh (их больше сотни)
+      const мешки = []; for (let z = 398; z <= 446; z += 1.1) for (let ряд = 0; ряд < 3; ряд++) мешки.push([РУБЕЖ + (ряд % 2) * 0.1, z + (ряд % 2) * 0.5, ряд]);
+      const им = new THREE.InstancedMesh(new THREE.BoxGeometry(0.55, 0.36, 1.0), мат('#FFFFFF'), мешки.length), мм = new THREE.Matrix4(), цц = new THREE.Color();
+      мешки.forEach(([x, z, ряд], i) => { мм.makeTranslation(x, Г(x, z) + 0.18 + ряд * 0.34, z); им.setMatrixAt(i, мм); им.setColorAt(i, цц.copy(ц(ряд % 2 ? '#B8A880' : '#A89A74')).multiplyScalar(0.9 + сл() * 0.2)); });
+      им.castShadow = true; им.receiveShadow = true; г.add(им);
+      const п = Вт.модельПусковой(0); const [px, pz] = [РУБЕЖ - 9, 438]; п.position.set(px, Г(px, pz), pz); п.rotation.y = -Math.PI / 2; сцена.add(п); П.пуск = п;
+      const в = Вт.модельПВО(0); в.position.set(РУБЕЖ - 10, Г(РУБЕЖ - 10, 405), 405); в.rotation.y = -Math.PI / 2; сцена.add(в); П.пво = в; }
+    // вертолётная площадка: бетонный круг с «H»
+    { const [x, z] = ПЛОЩАДКА, т = холст(256, 256, с => { с.fillStyle = '#9C988E'; с.fillRect(0, 0, 256, 256); с.strokeStyle = '#F2F0E6'; с.lineWidth = 12; с.beginPath(); с.arc(128, 128, 110, 0, 6.3); с.stroke();
+        с.fillStyle = '#F2F0E6'; с.font = '900 150px Impact, sans-serif'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillText('H', 128, 136); });
+      const к = new THREE.Mesh(new THREE.CircleGeometry(8, 40), new THREE.MeshStandardMaterial({ map: т, roughness: 0.95, polygonOffset: true, polygonOffsetFactor: -2 }));
+      к.rotation.x = -Math.PI / 2; к.position.set(x, Math.max(Г(x, z), API.высотаСетки ? API.высотаСетки(x, z) : -1e9) + 0.06, z); к.receiveShadow = true; сцена.add(к);
+      П.верт = машина('вертолёт', x, z, Math.PI / 2); }
+    // полоса: асфальт с разметкой, вдоль x
+    { const { z, x0, x1 } = ПОЛОСА, дл = x1 - x0, т = холст(1024, 96, с => { с.fillStyle = '#4C4A48'; с.fillRect(0, 0, 1024, 96); с.fillStyle = '#EDEDE4';
+        for (let x = 60; x < 990; x += 70) с.fillRect(x, 44, 36, 8); с.fillRect(0, 6, 1024, 4); с.fillRect(0, 86, 1024, 4); for (let i = 0; i < 6; i++) { с.fillRect(10, 16 + i * 11, 34, 6); с.fillRect(980, 16 + i * 11, 34, 6); } });
+      // полоса — лентой по рельефу (поле не плоское)
+      const N = 40, p = [], uv = [], idx = [];
+      for (let i = 0; i <= N; i++) { const x = x0 + дл * i / N; for (const s of [-1, 1]) { const zz = z + s * 7; p.push(x, Math.max(Г(x, zz), API.высотаСетки ? API.высотаСетки(x, zz) : -1e9) + 0.07, zz); uv.push(i / N, s > 0 ? 1 : 0); } }
+      for (let i = 0; i < N; i++) { const a = i * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+      const гео = new THREE.BufferGeometry(); гео.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); гео.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); гео.setIndex(idx); гео.computeVertexNormals();
+      const м = new THREE.Mesh(гео, new THREE.MeshStandardMaterial({ map: т, roughness: 0.95, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 })); м.receiveShadow = true; сцена.add(м);
+      П.сам = машина('самолёт', x0 + 10, z, Math.PI / 2); }
+    // мишени
+    const МИШЕНИ = [
+      ['танк', 420, 398], ['танк', 456, 378], ['танк', 492, 408], ['танк', 512, 444], ['танк', 470, 452], ['танк', 442, 430],
+      ['фигура', 398, 372], ['фигура', 402, 382], ['фигура', 396, 452], ['фигура', 405, 462], ['фигура', 392, 418], ['фигура', 486, 368], ['фигура', 520, 418],
+      ['щит', 384, 398], ['щит', 384, 440], ['щит', 430, 470],
+      ['бочка', 430, 362], ['бочка', 432, 365], ['бочка', 505, 376], ['бочка', 460, 414], ['бочка', 462, 416], ['бочка', 495, 470],
+    ];
+    for (const [вид, x, z] of МИШЕНИ) П.мишени.push(мишень(вид, x, z));
+  }
+  // ---- мишени ----
+  const мТанк = мат('#4E5A34', { roughness: 0.85 }), мТанкТ = мат('#3E4828'), мГус = мат('#22221E', { roughness: 0.95 }), мГарь = мат('#2A2622', { roughness: 1 });
+  const фигураТ = () => холст(128, 256, с => { с.fillStyle = '#C9A877'; с.fillRect(0, 0, 128, 256); с.fillStyle = '#1C1C1C';
+    с.beginPath(); с.arc(64, 40, 24, 0, 6.3); с.fill(); с.beginPath(); с.moveTo(20, 250); с.lineTo(26, 110); с.quadraticCurveTo(64, 70, 102, 110); с.lineTo(108, 250); с.fill();
+    с.strokeStyle = '#E8E0D0'; с.lineWidth = 3; for (const r of [12, 26, 40]) { с.beginPath(); с.arc(64, 150, r, 0, 6.3); с.stroke(); } });
+  const щитТ = () => холст(256, 256, с => { const цв = ['#F2F0E8', '#1C1C1C', '#2A6AD0', '#D23A2A', '#F4C430']; for (let i = 0; i < 5; i++) { с.fillStyle = цв[i]; с.beginPath(); с.arc(128, 128, 124 - i * 24, 0, 6.3); с.fill(); } });
+  let тФиг = null, тЩит = null;
+  function мишень(вид, x, z) {
+    const g = Г(x, z), гр = new THREE.Group(); гр.position.set(x, g, z); гр.rotation.y = -Math.PI / 2 + (сл() - 0.5) * 0.6; сцена.add(гр);
+    const м = { вид, x, z, гр, hp: 0, hpMax: вид === 'танк' ? 3 : 1, R: вид === 'танк' ? 3.2 : вид === 'бочка' ? 1.1 : 1.4, очки: { танк: 100, фигура: 40, щит: 30, бочка: 25 }[вид], ждать: 0, части: [], дымТ: 0, у: 0 };
+    if (вид === 'танк') {
+      const корпус = new THREE.Group(); гр.add(корпус);
+      корпус.add(ящ(3.4, 1.0, 6.4, мТанк, 0, 1.0, 0), ящ(3.0, 0.5, 2.0, мТанк, 0, 1.25, 2.8));
+      for (const s of [-1, 1]) корпус.add(ящ(0.7, 0.9, 6.6, мГус, s * 1.65, 0.48, 0));
+      const баш = new THREE.Group(); баш.position.set(0, 1.5, -0.3); корпус.add(баш);
+      баш.add(ящ(2.4, 0.8, 2.8, мТанкТ, 0, 0.4, 0)); const ст = цил(0.12, 0.14, 4.2, мТанкТ, 0, 0.45, 3.4, 8); ст.rotation.x = Math.PI / 2; баш.add(ст);
+      м.баш = баш; м.корпус = корпус; м.части = [корпус];
+    } else if (вид === 'фигура') {
+      const щ = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 1.8), new THREE.MeshStandardMaterial({ map: тФиг || (тФиг = фигураТ()), side: THREE.DoubleSide, roughness: 0.9 }));
+      щ.position.set(0, 1.25, 0); щ.castShadow = true; const стойка = new THREE.Group(); стойка.add(щ, ящ(0.08, 0.5, 0.08, мДерево(), 0, 0.25, 0)); гр.add(стойка); м.стойка = стойка;
+      стойка.rotation.y = Math.PI / 2;                       // лицом к рубежу (на запад)
+    } else if (вид === 'щит') {
+      const щ = new THREE.Mesh(new THREE.CircleGeometry(1.1, 32), new THREE.MeshStandardMaterial({ map: тЩит || (тЩит = щитТ()), side: THREE.DoubleSide, roughness: 0.8 }));
+      щ.position.set(0, 1.5, 0); const стойка = new THREE.Group(); стойка.add(щ); for (const s of [-1, 1]) { const н = ящ(0.08, 1.6, 0.08, мДерево(), s * 0.6, 0.6, -0.2); н.rotation.x = 0.2; стойка.add(н); }
+      стойка.rotation.y = Math.PI / 2; гр.add(стойка); м.стойка = стойка;
+    } else {
+      const б = цил(0.42, 0.42, 1.1, мат('#C8321E', { roughness: 0.5, metalness: 0.3 }), 0, 0.55, 0, 14); гр.add(б); м.бочка = б;
+    }
+    м.hp = м.hpMax; return м;
+  }
+  let _мД = null; function мДерево() { return _мД || (_мД = мат('#6A5034')); }
+
+  // ---- вертолёт и самолёт на стоянке (модели скачанные, из войны) ----
+  function машина(вид, x, z, курс) {
+    const гр = new THREE.Group(); гр.rotation.order = 'YXZ'; сцена.add(гр);
+    const м = { вид, гр, x, z, курс, ст: { x, z, курс }, u: {} };
+    Вт.вКонтейнер(гр, вид === 'вертолёт' ? 'vertolyot_zel' : 'samolyot_f117', к => {
+      if (вид === 'вертолёт') { м.u.несущий = Вт.винт(к.getObjectByName('Propellers')); м.u.хвост = ['Back_Propeller', 'Back_Propeller001'].map(н => Вт.винт(к.getObjectByName(н))).filter(Boolean); }
+    });
+    поставитьНаМесто(м);
+    return м;
+  }
+  function поставитьНаМесто(м) { м.x = м.ст.x; м.z = м.ст.z; м.курс = м.ст.курс; м.гр.position.set(м.x, Г(м.x, м.z) + 0.05, м.z); м.гр.rotation.set(0, м.курс, 0); }
+
+  // ===================== ПОПАДАНИЯ =====================
+  function живая(м) { return м.hp > 0; }
+  function ранитьМишень(м, урон, сверху) {
+    if (!живая(м)) return;
+    м.hp -= урон;
+    if (м.hp > 0) { слово('ПОПАЛ!', м.x, Г(м.x, м.z) + 3, м.z, '#FFE070'); return; }
+    м.ждать = м.вид === 'танк' ? 14 : 8; м.дымТ = м.вид === 'танк' ? 9 : 0;
+    const g = Г(м.x, м.z), Б = Я();
+    if (м.вид === 'танк') { м.корпус.traverse(о => { if (о.isMesh) { о.userData.мат = о.userData.мат || о.material; о.material = мГарь; } }); м.баш.rotation.set(0.25, 0.6 + сл(), 0.15); м.баш.position.y = 1.7; }
+    else if (м.вид === 'бочка') { м.бочка.visible = false; if (Б) for (let k = 0; k < 26; k++) Б.огонь.пуск({ p: [м.x, g + 0.8, м.z], v: [(сл() - 0.5) * 5, 2 + сл() * 6, (сл() - 0.5) * 5], жизнь: 0.4 + сл() * 0.4, р0: 1.2, р1: 2.4, ц0: [1, 0.8, 0.4, 1], ц1: [0.8, 0.2, 0.05, 0], тормоз: 2 }); }
+    else м.стойка.rotation.z = -Math.PI / 2 * 0.95;          // фанера падает навзничь
+    П.очки += м.очки; П.уничтожено++;
+    слово('+' + м.очки, м.x, g + 3.4, м.z, '#9CFF6A');
+    if (П.очки > П.рекорд) { П.рекорд = П.очки; try { localStorage.setItem('бороздиновский.полигон.рекорд', String(П.рекорд)); } catch (e) {} }
+    событие('полигон-мишень', { вид: м.вид, сверху: !!сверху, всего: П.уничтожено });
+    обновитьВерх();
+  }
+  function шагМишеней(dt) {
+    const Б = Я();
+    for (const м of П.мишени) {
+      if (живая(м)) continue;
+      if (м.дымТ > 0) { м.дымТ -= dt; м.у -= dt; if (Б && м.у <= 0) { м.у = 0.15; const g = Г(м.x, м.z);
+        Б.дым.пуск({ p: [м.x + (сл() - 0.5), g + 2, м.z + (сл() - 0.5)], v: [(сл() - 0.5) * 0.5, 1.6 + сл(), (сл() - 0.5) * 0.5], жизнь: 3, р0: 0.8, р1: 3.2, ц0: [0.18, 0.17, 0.16, 0.6], ц1: [0.42, 0.41, 0.4, 0] });
+        if (м.дымТ > 5) Б.огонь.пуск({ p: [м.x, g + 1.8, м.z], v: [0, 1.2, 0], жизнь: 0.3, р0: 0.9, р1: 0.3, ц0: [1, 0.7, 0.3, 1], ц1: [1, 0.3, 0.05, 0] }); } }
+      м.ждать -= dt;
+      if (м.ждать <= 0) {                                    // новая мишень встаёт
+        м.hp = м.hpMax;
+        if (м.вид === 'танк') { м.корпус.traverse(о => { if (о.isMesh && о.userData.мат) о.material = о.userData.мат; }); м.баш.rotation.set(0, 0, 0); м.баш.position.y = 1.5; }
+        else if (м.вид === 'бочка') м.бочка.visible = true;
+        else м.стойка.rotation.z = 0;
+      }
+    }
+  }
+
+  // ===================== СНАРЯДЫ =====================
+  // { вид, p, v, о (модель), цель (мишень — самонаведение), т, урон, R, грав, след }
+  const снаряды = [], пул = {};
+  const трассерМ = new THREE.MeshBasicMaterial({ color: 0xFFE070 });
+  const МОДЕЛЬ = {
+    ракета: () => Вт.ПРОТО.ракетаБ(), нурс: () => Вт.ПРОТО.ракетаБ(), бомба: () => Вт.ПРОТО.бомба(), ракетаС: () => Вт.ПРОТО.ракетаБ(),
+    пуля: () => { const г = new THREE.Group(); г.add(new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 1.4), трассерМ)); return г; },
+    дрон: () => Вт.модельФПВ(0),
+  };
+  function взять(вид) { const п = (пул[вид] = пул[вид] || []); for (const о of п) if (!о.занят) { о.занят = true; о.гр.visible = true; return о; } const о = { гр: МОДЕЛЬ[вид](), занят: true }; сцена.add(о.гр); п.push(о); return о; }
+  const ПАР = {
+    ракета: { урон: 2, R: 3.0, бах: 1, грав: true, след: 'ракета' },
+    нурс: { урон: 2, R: 2.6, бах: 0.8, грав: true, след: 'ракета', g: 3 },
+    ракетаС: { урон: 3, R: 3.0, бах: 1, грав: false, след: 'ракета', навод: 60 },
+    бомба: { урон: 3, R: 4.0, бах: 1.2, грав: true },
+    пуля: { урон: 1, R: 1.4, бах: 0, грав: false, пыль: true },
+    дрон: { урон: 2, R: 2.4, бах: 0.7, грав: false, навод: 14, дрон: true },
+  };
+  function пустить(вид, p, v, опц = {}) {
+    if (снаряды.length > 80) return null;
+    const с = { вид, p: p.clone(), v: v.clone(), о: взять(вид), цель: опц.цель || null, т: 0, сверху: !!опц.сверху, следТ: 0, макс: опц.макс || 8 };
+    с.о.гр.position.copy(с.p); снаряды.push(с); return с;
+  }
+  const v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
+  function шагСнарядов(dt) {
+    const Б = Я();
+    for (let i = снаряды.length - 1; i >= 0; i--) {
+      const с = снаряды[i], P = ПАР[с.вид]; с.т += dt;
+      if (P.навод && с.цель) {
+        const м = с.цель, цy = Г(м.x, м.z) + (м.вид === 'танк' ? 1.4 : 1);
+        if (P.дрон) { const dh = Math.hypot(м.x - с.p.x, м.z - с.p.z), высота = dh > 8 ? Г(с.p.x, с.p.z) + 6 : цy; v1.set(м.x - с.p.x, высота - с.p.y, м.z - с.p.z).normalize().multiplyScalar(P.навод); }
+        else v1.set(м.x - с.p.x, цy - с.p.y, м.z - с.p.z).normalize().multiplyScalar(P.навод);
+        с.v.lerp(v1, Math.min(1, dt * (P.дрон ? 3 : 4)));
+      }
+      if (P.грав) с.v.y -= (P.g || 9.8) * dt;
+      с.p.addScaledVector(с.v, dt);
+      const гр = с.о.гр; гр.position.copy(с.p);
+      if (P.дрон) { гр.rotation.set(0.35, Math.atan2(с.v.x, с.v.z), 0, 'YXZ'); }
+      else гр.lookAt(v2.copy(с.p).add(с.v));
+      if (P.след && Б) { с.следТ -= dt; if (с.следТ <= 0) { с.следТ = 0.025;
+        Б.огонь.пуск({ p: [с.p.x, с.p.y, с.p.z], v: [0, 0, 0], жизнь: 0.08, р0: 0.3, р1: 0.06, ц0: [1, 0.85, 0.45, 1], ц1: [1, 0.35, 0.05, 0] });
+        Б.дым.пуск({ p: [с.p.x, с.p.y, с.p.z], v: [(сл() - 0.5) * 0.3, 0.15, (сл() - 0.5) * 0.3], жизнь: 1.5, р0: 0.22, р1: 1.1, ц0: [0.88, 0.86, 0.82, 0.45], ц1: [0.82, 0.8, 0.78, 0] }); } }
+      // попал: земля или рядом с мишенью
+      const g = Г(с.p.x, с.p.z);
+      let цель = null;
+      for (const м of П.мишени) { if (!живая(м)) continue; const вы = Г(м.x, м.z) + (м.вид === 'танк' ? 1.4 : 1); if (Math.hypot(м.x - с.p.x, м.z - с.p.z) < (м.вид === 'танк' ? 2.6 : 1.0) && Math.abs(с.p.y - вы) < (м.вид === 'танк' ? 1.8 : 1.4)) { цель = м; break; } }
+      if (цель || с.p.y <= g + 0.15 || с.т > с.макс) { снаряды.splice(i, 1); с.о.занят = false; с.о.гр.visible = false; взрыв(с, Math.max(с.p.y, g + 0.2)); }
+    }
+  }
+  function взрыв(с, y) {
+    const P = ПАР[с.вид], { x, z } = с.p, Б = Я();
+    if (Б) {
+      if (P.бах) {
+        for (let k = 0; k < 14 * P.бах + 4; k++) Б.огонь.пуск({ p: [x, y, z], v: [(сл() - 0.5) * 7, 1 + сл() * 5, (сл() - 0.5) * 7], жизнь: 0.2 + сл() * 0.25, р0: 0.6 + P.бах, р1: 1.2 + P.бах * 1.6, ц0: [1, 0.85, 0.5, 1], ц1: [0.8, 0.2, 0.05, 0], тормоз: 2.5 });
+        for (let k = 0; k < 3 + P.бах * 4; k++) Б.дым.пуск({ p: [x, y, z], v: [(сл() - 0.5) * 2.5, 0.8 + сл() * 1.5, (сл() - 0.5) * 2.5], жизнь: 1.4 + сл() * 0.6, р0: 0.7, р1: 2 + P.бах * 1.5, ц0: [0.5, 0.47, 0.42, 0.5], ц1: [0.72, 0.7, 0.66, 0] });
+        Б.удар && Б.удар(Math.min(1, P.бах), Б.громкость ? Б.громкость(x, y, z) : 0.5, 0);
+        const кт = камера.position, d = Math.hypot(кт.x - x, кт.z - z); if (d < 30 && Б.тряхнуть) Б.тряхнуть(0.25 * P.бах * (1 - d / 30));
+      } else for (let k = 0; k < 3; k++) Б.дым.пуск({ p: [x, y, z], v: [(сл() - 0.5) * 1.5, 0.5 + сл(), (сл() - 0.5) * 1.5], жизнь: 0.6, р0: 0.2, р1: 0.8, ц0: [0.62, 0.55, 0.45, 0.5], ц1: [0.6, 0.55, 0.48, 0] });
+    }
+    let попал = false;
+    for (const м of П.мишени) { if (!живая(м)) continue; const d = Math.hypot(м.x - x, м.z - z); if (d < P.R + м.R * 0.5) { ранитьМишень(м, d < м.R ? P.урон : Math.max(1, P.урон - 1), с.сверху); попал = true; } }
+    if (!попал && P.бах && Math.hypot(x - камера.position.x, z - камера.position.z) < 80) слово(с.вид === 'пуля' ? '' : 'МИМО', x, y + 1, z, '#D8D0C0');
+  }
+
+  // ===================== ПЕШКОМ: ЗАЛП И ДРОН =====================
+  const камера = API.камера;
+  // цель — живая мишень ближе всего к направлению взгляда (от игрока)
+  function цельВпереди(x, z, курс, конус = 0.6, даль = 220) {
+    let лучш = null, бс = 1e9;
+    for (const м of П.мишени) { if (!живая(м)) continue; const dx = м.x - x, dz = м.z - z, d = Math.hypot(dx, dz); if (d > даль || d < 4) continue;
+      const а = Math.abs(угл(Math.atan2(dx, dz) - курс)); if (а > конус) continue; const с = а * 60 + d * 0.15; if (с < бс) { бс = с; лучш = м; } }
+    return лучш;
+  }
+  const взглядКурс = () => { const к = window.__мир.кам; return к ? к.рыск + Math.PI : window.__мир.поз.угол; };
+  function залп() {
+    if (П.залп > 0 || !П.пуск) return;
+    const поз = window.__мир.поз, м = цельВпереди(поз.x, поз.z, взглядКурс(), 1.2) || цельВпереди(поз.x, поз.z, взглядКурс(), 3.2);
+    if (!м) { совет('Все мишени уже лежат — подожди, встанут новые.', 2); return; }
+    П.залп = 6; const г = П.пуск, u = г.userData; u.пов.rotation.y = угл(Math.atan2(м.x - г.position.x, м.z - г.position.z) - г.rotation.y); u.подъём.rotation.x = -0.7; г.updateMatrixWorld(true);
+    for (let k = 0; k < 4; k++) setTimeout(() => {
+      if (!u.пакет) return; u.пакет.localToWorld(v1.set(-0.36 + (k % 4) * 0.24, -0.24 + (k % 3) * 0.24, 1.45));
+      const tx = м.x + (сл() - 0.5) * 4, tz = м.z + (сл() - 0.5) * 4, T = 2.4 + сл() * 0.3, ty = Г(tx, tz) + 0.5;
+      v2.set((tx - v1.x) / T, (ty - v1.y + 0.5 * 9.8 * T * T) / T, (tz - v1.z) / T);
+      пустить('ракета', v1, v2, { макс: 6 });
+      const Б = Я(); if (Б) for (let n = 0; n < 6; n++) Б.дым.пуск({ p: [v1.x, v1.y, v1.z], v: [(сл() - 0.5) * 3, сл() * 1.5, (сл() - 0.5) * 3], жизнь: 1.2, р0: 0.5, р1: 2, ц0: [0.9, 0.88, 0.84, 0.6], ц1: [0.82, 0.8, 0.78, 0] });
+    }, k * 330);
+    слово('ПУСК!', г.position.x, Г(г.position.x, г.position.z) + 4.5, г.position.z, '#F4C430');
+  }
+  function дрон() {
+    if (П.дрон > 0) return;
+    const поз = window.__мир.поз, м = цельВпереди(поз.x, поз.z, взглядКурс(), 1.2) || цельВпереди(поз.x, поз.z, взглядКурс(), 3.2);
+    if (!м) { совет('Все мишени уже лежат — подожди, встанут новые.', 2); return; }
+    П.дрон = 7; const y = Г(поз.x, поз.z) + 1.7;
+    пустить('дрон', v1.set(поз.x, y, поз.z), v2.set(0, 3, 0), { цель: м, макс: 25 });
+    совет('🛸 Дрон пошёл на ' + { танк: 'танк', фигура: 'фанерного', щит: 'мишень', бочка: 'бочку' }[м.вид] + '!', 1.8);
+  }
+
+  // ===================== ПОЛЁТ =====================
+  const Л = { вид: null, эт: 'нет', P: new THREE.Vector3(), курс: 0, v: 0, vy: 0, крен: 0, тангаж: 0, t: 0, перезар: 0, пушка: false, пушкаТ: 0, захват: null, гран: false };
+  const фокус = { x: 0, z: 0 };
+  const было = { fov: 50, безТравы: false, кам: null };
+  const палец = { ид: null, x0: 0, y0: 0, dx: 0, dy: 0 };
+  function почемуНельзя() {
+    if (Л.эт !== 'нет') return 'Уже летишь.';
+    if (window.__перемотка) return 'Подожди, сюжет ещё перематывается.';
+    if (document.body.classList.contains('кино') || document.body.classList.contains('кабина') || window.__управлениеСтоп) return 'Сейчас не время — досмотри сцену.';
+    if (window.__летитЯша || window.__поездка || window.__заРулём) return 'Сначала слезь с того, на чём едешь.';
+    if (window.__война && window.__война.идёт && window.__война.идёт()) return 'Идёт война за времянку — не до полигона!';
+    return '';
+  }
+  function сесть(вид) {
+    const нельзя = почемуНельзя(); if (нельзя) { совет(нельзя, 3); return; }
+    const м = вид === 'вертолёт' ? П.верт : П.сам; if (!м) return;
+    if (!м.гр.children.length) { совет('Машина ещё грузится — секунду.', 2); return; }
+    Л.эт = 'шторка'; window.__летитЯша = true;
+    шторка(() => {
+      Object.assign(Л, { вид, эт: вид === 'самолёт' ? 'разбег' : 'взлёт', курс: м.курс, v: 0, vy: 0, крен: 0, тангаж: 0, t: 0, перезар: 0, пушка: false, захват: null, гран: false, разбит: 0 });
+      Л.P.set(м.x, Г(м.x, м.z) + 0.05, м.z);
+      было.fov = камера.fov; было.безТравы = !!window.__безТравы; const к = window.__мир.кам; было.кам = к ? { рыск: к.рыск, тангаж: к.тангаж } : null;
+      window.__безТравы = true; камера.fov = 62; камера.updateProjectionMatrix();
+      document.body.classList.add('полигонЛёт'); худ.dataset.вид = вид;
+      Л.камСразу = true; моторВкл();
+      сообщение(вид === 'вертолёт' ? 'Взлетаем!' : 'Разбег!', 1.4);
+      подсказка(вид === 'вертолёт'
+        ? 'Левый палец: вперёд-назад и поворот. Правая половина экрана: вверх-вниз — высота. Ромб — захват цели. НУРС и ПУШКА — справа. (Компьютер: WASD, R/F — высота, пробел — НУРС, G — пушка.)'
+        : 'Палец: в стороны — поворот, вверх-вниз — нос вниз и вверх. Не врежься в землю! БОМБА — сбрасывает, РАКЕТА — сама летит в цель с ромбом. (Компьютер: WASD, пробел — бомба, G — ракета.)', 7);
+    });
+  }
+  function выйти() {
+    if (Л.эт === 'нет' || Л.эт === 'шторка') return;
+    Л.эт = 'шторка'; шторка(сброс);
+  }
+  function сброс() {
+    const м = Л.вид === 'вертолёт' ? П.верт : П.сам;
+    Л.эт = 'нет'; Л.вид = null; window.__летитЯша = false; window.__фокус = null;
+    document.body.classList.remove('полигонЛёт');
+    window.__безТравы = было.безТравы; камера.fov = было.fov; камера.updateProjectionMatrix();
+    const к = window.__мир.кам; if (к && было.кам) { к.рыск = было.кам.рыск; к.тангаж = было.кам.тангаж; }
+    палец.ид = null; палец.dx = палец.dy = 0; моторВыкл(); захватСп.visible = false;
+    if (м) поставитьНаМесто(м);
+    for (const е of [сообщЭл, подсказкаЭл]) е.style.opacity = 0;
+  }
+  function управление() {
+    const М = window.__мир, д = М.джойстик || { dx: 0, dy: 0 }, кл = М.клавиши || new Set();
+    let x = зажать(д.dx || 0, -1, 1), y = зажать(д.dy || 0, -1, 1), h = -палец.dy;
+    if (Л.вид === 'самолёт') { x = зажать(x + палец.dx, -1, 1); y = зажать(y + палец.dy, -1, 1); h = 0; }
+    if (кл.has('KeyA') || кл.has('ArrowLeft')) x = -1; if (кл.has('KeyD') || кл.has('ArrowRight')) x = 1;
+    if (кл.has('KeyW') || кл.has('ArrowUp')) y = -1; if (кл.has('KeyS') || кл.has('ArrowDown')) y = 1;
+    if (кл.has('KeyR')) h = 1; if (кл.has('KeyF')) h = -1;
+    if (Math.abs(x) < 0.08) x = 0; if (Math.abs(y) < 0.08) y = 0; if (Math.abs(h) < 0.08) h = 0;
+    return { x, y, h };
+  }
+  const вперёд = (out, курс = Л.курс) => out.set(Math.sin(курс), 0, Math.cos(курс));
+  function границы(dt) {
+    const dx = Л.P.x - ЦП[0], dz = Л.P.z - ЦП[1];
+    if (Math.hypot(dx, dz) > 650) { Л.курс += угл(Math.atan2(-dx, -dz) - Л.курс) * Math.min(1, dt * 1.2); if (!Л.гран) { Л.гран = true; сообщение('Дальше — посёлок и чужие огороды. Разворот!', 1.8); } }
+    else Л.гран = false;
+  }
+  function полётВертолёта(dt) {
+    const у = управление(), g = Г(Л.P.x, Л.P.z);
+    if (Л.эт === 'взлёт') { Л.t += dt; Л.P.y += (g + 9 - Л.P.y) * Math.min(1, dt * 1.2); if (Л.t > 2.2) { Л.эт = 'летим'; } }
+    else {
+      Л.курс -= у.x * 1.5 * dt;
+      Л.v += (-у.y * 24 - Л.v) * Math.min(1, dt * 1.4);
+      Л.vy += (у.h * 9 - Л.vy) * Math.min(1, dt * 3);
+      вперёд(v1); Л.P.addScaledVector(v1, Л.v * dt); Л.P.y += Л.vy * dt;
+      границы(dt);
+      // земля и крыши: садимся, не разбиваемся
+      let низ = g + 0.05; const д = API.вДоме(Л.P.x, Л.P.z, 2); if (д) низ = Math.max(низ, (д.конёк || д.верх || g + 6) + 0.6);
+      if (Л.P.y < низ) { Л.P.y = низ; Л.vy = Math.max(0, Л.vy); }
+      Л.P.y = Math.min(Л.P.y, g + 90);
+    }
+    Л.тангаж += (Л.v / 24 * 0.28 - Л.тангаж) * Math.min(1, dt * 3);
+    Л.крен += (у.x * 0.3 - Л.крен) * Math.min(1, dt * 3);
+    // пушка — пока держишь
+    if (Л.пушка) { Л.пушкаТ -= dt; if (Л.пушкаТ <= 0) { Л.пушкаТ = 0.09; выстрел('пуля'); } }
+  }
+  function полётСамолёта(dt) {
+    const у = управление(), g = Г(Л.P.x, Л.P.z);
+    if (Л.эт === 'разбег') {
+      Л.t += dt; Л.v = Math.min(46, Л.v + dt * 17); вперёд(v1); Л.P.addScaledVector(v1, Л.v * dt);
+      Л.P.y = Г(Л.P.x, Л.P.z) + 0.05 + Math.max(0, Л.t - 2.3) * 7; Л.тангаж = Math.min(0.22, Math.max(0, Л.t - 2.1) * 0.25);
+      if (Л.t > 3.6) { Л.эт = 'летим'; Л.vy = 7; }
+      return;
+    }
+    if (Л.эт === 'разбит') { Л.разбит += dt; if (Л.разбит > 2.2) { Л.эт = 'шторка'; шторка(() => { const м = П.сам; Л.эт = 'разбег'; Л.t = 0; Л.v = 0; Л.курс = м.ст.курс; Л.P.set(м.ст.x, Г(м.ст.x, м.ст.z) + 0.05, м.ст.z); Л.камСразу = true; сообщение('Новый самолёт на полосе. Разбег!', 1.6); }); } return; }
+    Л.курс -= у.x * 0.9 * dt;
+    Л.v += (46 - Л.v) * Math.min(1, dt);
+    Л.vy += (-у.y * 22 - Л.vy) * Math.min(1, dt * 2.5);
+    вперёд(v1); Л.P.addScaledVector(v1, Л.v * dt); Л.P.y += Л.vy * dt;
+    границы(dt);
+    Л.P.y = Math.min(Л.P.y, g + 160);
+    Л.крен += (у.x * 0.85 - Л.крен) * Math.min(1, dt * 4);
+    Л.тангаж += (Math.atan2(Л.vy, Л.v) - Л.тангаж) * Math.min(1, dt * 5);
+    // земля и дома — разбился (без крови: огонь, дым, новый самолёт на полосе)
+    const д = API.вДоме(Л.P.x, Л.P.z, 0);
+    if (Л.P.y < g + 1.2 || (д && Л.P.y < (д.конёк || д.верх || g + 6))) {
+      Л.эт = 'разбит'; Л.разбит = 0; Л.v = 0; Л.vy = 0; Л.P.y = Math.max(Л.P.y, g + 0.5);
+      взрыв({ вид: 'бомба', p: Л.P.clone(), сверху: false }, Л.P.y); сообщение('САМОЛЁТ РАЗБИТ', 2); моторВыкл();
+    }
+  }
+  // ---- оружие в полёте ----
+  function обновитьЗахват() {
+    const конус = Л.вид === 'самолёт' ? 0.45 : 0.4;
+    Л.захват = цельВпереди(Л.P.x, Л.P.z, Л.курс, конус, Л.вид === 'самолёт' ? 320 : 200);
+    захватСп.visible = !!Л.захват;
+    if (Л.захват) { const м = Л.захват; захватСп.position.set(м.x, Г(м.x, м.z) + (м.вид === 'танк' ? 4.2 : 3), м.z); захватСп.material.rotation += 0.05; }
+  }
+  function выстрел(вид) {
+    if (Л.эт !== 'летим') return;
+    const P = Л.P, м = Л.захват; вперёд(v3);
+    const нос = v1.copy(P).addScaledVector(v3, Л.вид === 'самолёт' ? 3 : 4.2); нос.y += Л.вид === 'самолёт' ? 0.6 : 1.0;
+    if (вид === 'нурс' || вид === 'пуля') {
+      const скор = вид === 'нурс' ? 75 : 160;
+      if (м) { const цy = Г(м.x, м.z) + (м.вид === 'танк' ? 1.3 : 1), d = Math.hypot(м.x - нос.x, м.z - нос.z), T = d / скор; v2.set(м.x - нос.x, цy - нос.y + 0.5 * (вид === 'нурс' ? 3 : 0) * T * T, м.z - нос.z).normalize().multiplyScalar(скор); }
+      else { v2.copy(v3).multiplyScalar(скор); v2.y = -скор * 0.22; }
+      if (вид === 'пуля') { v2.x += (сл() - 0.5) * 6; v2.y += (сл() - 0.5) * 4; v2.z += (сл() - 0.5) * 6; }
+      for (const s of вид === 'нурс' ? [-1, 1] : [0]) { v1.copy(нос).addScaledVector(v3.set(Math.cos(Л.курс), 0, -Math.sin(Л.курс)), s * 1.3); пустить(вид, v1, v2, { сверху: true, макс: 4 }); }
+      if (вид === 'пуля') тук(); else вжух(нос.x, нос.y, нос.z);
+    } else if (вид === 'бомба') {
+      v2.copy(v3).multiplyScalar(Л.v); v2.y = Л.vy; v1.copy(P); v1.y -= 1;
+      пустить('бомба', v1, v2, { сверху: true, макс: 12 });
+    } else if (вид === 'ракетаС') {
+      v2.copy(v3).multiplyScalar(Л.v + 15); v2.y = Л.vy - 4; v1.copy(P); v1.y -= 0.8;
+      пустить('ракетаС', v1, v2, { цель: м, сверху: true, макс: 8 }); вжух(P.x, P.y, P.z);
+    }
+  }
+  function огонь(кн) {
+    if (Л.эт !== 'летим' || Л.перезар > 0) return;
+    if (Л.вид === 'вертолёт') { if (кн === 1) { выстрел('нурс'); Л.перезар = 0.55; } }
+    else { if (кн === 1) { выстрел('бомба'); Л.перезар = 0.7; } else if (кн === 2) { if (!Л.захват) { сообщение('Нет цели в ромбе', 0.9); return; } выстрел('ракетаС'); Л.перезар = 1.6; } }
+  }
+  // ---- звук ----
+  let мот = null;
+  function моторВкл() {
+    const Б = Я(), к = Б && Б.звук && Б.звук(); if (!к || к.state !== 'running' || мот) return;
+    const ист = к.createBufferSource(); ист.buffer = Б.шум(2); ист.loop = true; const ф = к.createBiquadFilter(); ф.type = 'lowpass'; ф.frequency.value = Л.вид === 'вертолёт' ? 240 : 1100;
+    const g = к.createGain(); g.gain.value = 0; ист.connect(ф); ф.connect(g); g.connect(Б.выход()); ист.start();
+    let лфо = null; if (Л.вид === 'вертолёт') { лфо = к.createOscillator(); лфо.type = 'square'; лфо.frequency.value = 11; const лг = к.createGain(); лг.gain.value = 160; лфо.connect(лг); лг.connect(ф.frequency); лфо.start(); }
+    g.gain.setTargetAtTime(0.1, к.currentTime, 0.4); мот = { ист, g, к, лфо };
+  }
+  function моторВыкл() { if (!мот) return; try { const t = мот.к.currentTime; мот.g.gain.setTargetAtTime(0, t, 0.1); мот.ист.stop(t + 0.5); if (мот.лфо) мот.лфо.stop(t + 0.5); } catch (e) {} мот = null; }
+  function вжух(x, y, z) {
+    const Б = Я(), к = Б && Б.звук && Б.звук(); if (!к || к.state !== 'running') return; const t = к.currentTime;
+    const ист = к.createBufferSource(); ист.buffer = Б.шум(0.6); const ф = к.createBiquadFilter(); ф.type = 'bandpass'; ф.frequency.setValueAtTime(500, t); ф.frequency.exponentialRampToValueAtTime(1800, t + 0.6);
+    const g = к.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+    ист.connect(ф); ф.connect(g); g.connect(Б.выход()); ист.start(t);
+  }
+  function тук() {
+    const Б = Я(), к = Б && Б.звук && Б.звук(); if (!к || к.state !== 'running') return; const t = к.currentTime;
+    const ист = к.createBufferSource(); ист.buffer = Б.шум(0.05); const ф = к.createBiquadFilter(); ф.type = 'lowpass'; ф.frequency.value = 1500;
+    const g = к.createGain(); g.gain.setValueAtTime(0.12, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.05); ист.connect(ф); ф.connect(g); g.connect(Б.выход()); ист.start(t);
+  }
+  // ---- камера и модель ----
+  const камС = new THREE.Vector3(), камЦ = new THREE.Vector3(), qКрен = new THREE.Quaternion();
+  const верх = new THREE.Vector3(0, 1, 0), бок = new THREE.Vector3(), нос = new THREE.Vector3();
+  function шагПолёта(dt) {
+    if (Л.эт === 'нет' || Л.эт === 'шторка') return;
+    if (сообщТ > 0 && (сообщТ -= dt) <= 0) сообщЭл.style.opacity = 0;
+    if (подсказкаТ > 0 && (подсказкаТ -= dt) <= 0) подсказкаЭл.style.opacity = 0;
+    Л.перезар = Math.max(0, Л.перезар - dt);
+    if (Л.вид === 'вертолёт') полётВертолёта(dt); else полётСамолёта(dt);
+    const м = Л.вид === 'вертолёт' ? П.верт : П.сам, гр = м.гр;
+    гр.position.copy(Л.P); гр.rotation.set(Л.тангаж * (Л.вид === 'самолёт' ? -1 : 1), Л.курс, Л.крен * (Л.вид === 'самолёт' ? 1 : 0.6));
+    гр.visible = Л.эт !== 'разбит';
+    if (Л.вид === 'вертолёт' && м.u.несущий) { const об = Л.эт === 'взлёт' ? Math.min(1, Л.t) : 1; Вт.крутитьВинт(м.u.несущий, верх, dt * 30 * об); бок.set(1, 0, 0).applyQuaternion(гр.quaternion); for (const х of м.u.хвост) Вт.крутитьВинт(х, бок, dt * 40 * об); }
+    if (Л.эт === 'летим') обновитьЗахват(); else захватСп.visible = false;
+    // выхлоп у самолёта
+    if (Л.вид === 'самолёт' && Л.эт !== 'разбит') { const Б = Я(); if (Б && сл() < 0.6) { вперёд(нос); Б.дым.пуск({ p: [Л.P.x - нос.x * 5, Л.P.y + 0.6, Л.P.z - нос.z * 5], v: [-нос.x * 4, 0, -нос.z * 4], жизнь: 0.7, р0: 0.3, р1: 1.2, ц0: [0.9, 0.9, 0.88, 0.25], ц1: [0.88, 0.88, 0.86, 0] }); } }
+    // мир — за машиной
+    фокус.x = Л.P.x; фокус.z = Л.P.z; window.__фокус = фокус;
+    const С = API.СОЛНЦЕ; API.солнце.position.set(Л.P.x + С.x * 250, Л.P.y + С.y * 250, Л.P.z + С.z * 250); API.солнце.target.position.set(Л.P.x, Л.P.y, Л.P.z);
+    // камера сзади-сверху
+    вперёд(нос); const сзади = Л.вид === 'самолёт' ? 19 : 15, выше = Л.вид === 'самолёт' ? 5.5 : 6;
+    v1.copy(Л.P).addScaledVector(нос, -сзади); v1.y += выше; v1.y = Math.max(v1.y, Г(v1.x, v1.z) + 1.5);
+    v2.copy(Л.P).addScaledVector(нос, 14); v2.y += Л.вид === 'самолёт' ? 1 : -1.5;
+    if (Л.камСразу) { камС.copy(v1); камЦ.copy(v2); Л.камСразу = false; } else { камС.lerp(v1, Math.min(1, dt * 4)); камЦ.lerp(v2, Math.min(1, dt * 7)); }
+    камера.position.copy(камС);
+    const тр = Я() && Я().тряска ? Я().тряска() : 0; if (тр > 0.001) { камера.position.x += (сл() - 0.5) * тр; камера.position.y += (сл() - 0.5) * тр * 0.7; }
+    камера.lookAt(камЦ);
+  }
+
+  // ===================== ЭКРАН =====================
+  {
+    const с = document.createElement('style');
+    с.textContent = `
+      body.полигонЛёт > *:not(#мир):not(#джойстик):not(#поверни):not(#полигонЛёт):not(#полигонШторка):not(.полигонКн):not(#итогиТост):not(script):not(style) { visibility: hidden !important; }
+      #полигонЛёт { position: fixed; inset: 0; z-index: 9; pointer-events: none; display: none; color: #F2E6CC; font-family: system-ui, sans-serif; }
+      body.полигонЛёт #полигонЛёт { display: block; }
+      #полигонЛёт .верх, #полигонВерх { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); left: 50%; transform: translateX(-50%); padding: 6px 16px; border-radius: 14px;
+        background: rgba(18,12,8,0.62); border: 1px solid rgba(242,230,204,0.25); font: 800 14px system-ui, sans-serif; letter-spacing: 1px; white-space: nowrap; color: #F2E6CC; }
+      #полигонВерх { position: fixed; z-index: 8; display: none; pointer-events: none; }
+      body.на-полигоне:not(.полигонЛёт):not(.кино):not(.война) #полигонВерх { display: block; }
+      body.на-полигоне #улица { opacity: 0 !important; }
+      #полигонЛёт .выход { position: absolute; top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(12px + env(safe-area-inset-right, 0px)); width: 44px; height: 44px; border-radius: 50%;
+        border: 1px solid rgba(242,230,204,0.35); background: rgba(18,12,8,0.62); color: #F2E6CC; font: 700 18px system-ui, sans-serif; pointer-events: auto; }
+      #полигонЛёт .сообщ { position: absolute; top: 28%; left: 50%; transform: translate(-50%, -50%); font: 900 clamp(20px, 6vh, 36px) system-ui, sans-serif; letter-spacing: 2px;
+        color: #FFE7A8; text-shadow: 0 3px 10px rgba(0,0,0,0.8); opacity: 0; transition: opacity .25s; white-space: nowrap; }
+      #полигонЛёт .подсказка { position: absolute; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); font-size: 12.5px; line-height: 1.45; background: rgba(18,12,8,0.7);
+        padding: 8px 14px; border-radius: 12px; max-width: 70vw; text-align: center; opacity: 0; transition: opacity .4s; }
+      .полигонКн { position: fixed; z-index: 9; border-radius: 50%; border: 2px solid #F4C430; background: radial-gradient(circle at 50% 40%, rgba(80,58,14,0.92), rgba(30,22,6,0.92));
+        color: #F4E0A0; font: 800 10px/1.1 system-ui, sans-serif; letter-spacing: 1px; touch-action: manipulation; display: none; width: 72px; height: 72px; padding: 0; }
+      .полигонКн b { display: block; font-size: 24px; line-height: 28px; }
+      .полигонКн.ждёт { opacity: 0.5; }
+      .полигонКн:active { transform: scale(0.94); }
+      #полигонКн1 { right: calc(16px + env(safe-area-inset-right, 0px)); bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
+      #полигонКн2 { right: calc(98px + env(safe-area-inset-right, 0px)); bottom: calc(60px + env(safe-area-inset-bottom, 0px)); width: 62px; height: 62px; }
+      body.на-полигоне:not(.полигонЛёт):not(.кино):not(.война) .полигонКн.пешком { display: block; }
+      body.полигонЛёт .полигонКн.лёт { display: block; visibility: visible !important; }
+      #полигонСесть { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
+        height: 48px; padding: 0 22px; border: 0; border-radius: 14px; background: #F2E6C8; color: #1A1A1A; font: 800 14px system-ui, sans-serif; letter-spacing: 1px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+      body.кино #полигонСесть, body.полигонЛёт #полигонСесть { display: none !important; }
+      #полигонШторка { position: fixed; inset: 0; z-index: 30; background: #000; opacity: 0; pointer-events: none; transition: opacity .3s; }
+    `;
+    document.head.appendChild(с);
+  }
+  const эл = (тег, кл, т) => { const е = document.createElement(тег); if (кл) е.className = кл; if (т) е.textContent = т; return е; };
+  const худ = эл('div'); худ.id = 'полигонЛёт';
+  const верхЛ = эл('div', 'верх'), кнВыход = эл('button', 'выход', '✕'), сообщЭл = эл('div', 'сообщ'), подсказкаЭл = эл('div', 'подсказка');
+  кнВыход.setAttribute('aria-label', 'Выйти из машины');
+  худ.append(верхЛ, кнВыход, сообщЭл, подсказкаЭл);
+  const верхП = эл('div'); верхП.id = 'полигонВерх';
+  const кн1 = эл('button', 'полигонКн'); кн1.id = 'полигонКн1'; const кн2 = эл('button', 'полигонКн'); кн2.id = 'полигонКн2';
+  const кнСесть = эл('button'); кнСесть.id = 'полигонСесть';
+  const шторкаЭл = эл('div'); шторкаЭл.id = 'полигонШторка';
+  document.body.append(худ, верхП, кн1, кн2, кнСесть, шторкаЭл);
+  let сообщТ = 0, подсказкаТ = 0;
+  function сообщение(т, сек = 1.4) { сообщЭл.textContent = т; сообщЭл.style.opacity = 1; сообщТ = сек; }
+  function подсказка(т, сек = 6) { подсказкаЭл.textContent = т; подсказкаЭл.style.opacity = 1; подсказкаТ = сек; }
+  let переход = null;
+  function шторка(ф) { clearTimeout(переход); шторкаЭл.style.opacity = 1; переход = setTimeout(() => { переход = null; ф(); шторкаЭл.style.opacity = 0; }, 320); }
+  const захватСп = new THREE.Sprite(new THREE.SpriteMaterial({ map: холст(64, 64, с => { с.strokeStyle = '#FF3A20'; с.lineWidth = 6; с.beginPath(); с.moveTo(32, 4); с.lineTo(60, 32); с.lineTo(32, 60); с.lineTo(4, 32); с.closePath(); с.stroke(); }), depthTest: false, transparent: true, sizeAttenuation: false }));
+  захватСп.scale.set(0.06, 0.06, 1); захватСп.renderOrder = 13; захватСп.visible = false; сцена.add(захватСп);
+  function обновитьВерх() {
+    const т = '🎯 ПОЛИГОН · очки ' + П.очки + ' · сбито ' + П.уничтожено + (П.рекорд ? ' · рекорд ' + П.рекорд : '');
+    верхП.textContent = т; верхЛ.textContent = (Л.вид === 'вертолёт' ? '🚁 ' : Л.вид === 'самолёт' ? '✈ ' : '') + 'очки ' + П.очки + ' · сбито ' + П.уничтожено;
+  }
+  // кнопки: пешком — ЗАЛП и ДРОН; в вертолёте — НУРС и ПУШКА (держать); в самолёте — БОМБА и РАКЕТА
+  let кнБыло = '';
+  function кнопки() {
+    const лёт = Л.эт !== 'нет' && Л.эт !== 'шторка';
+    const вид = лёт ? Л.вид : 'пешком';
+    const т1 = вид === 'вертолёт' ? ['🚀', 'НУРС', Л.перезар > 0] : вид === 'самолёт' ? ['💣', 'БОМБА', Л.перезар > 0] : ['🚀', П.залп > 0 ? Math.ceil(П.залп) + ' с' : 'ЗАЛП', П.залп > 0];
+    const т2 = вид === 'вертолёт' ? ['🔥', 'ПУШКА', false] : вид === 'самолёт' ? ['🎯', 'РАКЕТА', Л.перезар > 0] : ['🛸', П.дрон > 0 ? Math.ceil(П.дрон) + ' с' : 'ДРОН', П.дрон > 0];
+    const сл2 = [вид, ...т1, ...т2].join('|'); if (сл2 === кнБыло) return; кнБыло = сл2;
+    for (const [к, т] of [[кн1, т1], [кн2, т2]]) { к.innerHTML = `<b>${т[0]}</b>${т[1]}`; к.classList.toggle('ждёт', !!т[2]); к.classList.toggle('лёт', лёт); к.classList.toggle('пешком', !лёт); }
+  }
+  кн1.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (Л.эт !== 'нет') огонь(1); else залп(); });
+  кн2.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); if (Л.эт !== 'нет') { if (Л.вид === 'вертолёт') { Л.пушка = true; Л.пушкаТ = 0; } else огонь(2); } else дрон(); });
+  for (const т of ['pointerup', 'pointercancel', 'pointerleave']) кн2.addEventListener(т, () => { Л.пушка = false; });
+  кнВыход.addEventListener('click', выйти);
+  кнСесть.addEventListener('click', () => сесть(кнСесть.dataset.вид));
+  addEventListener('keydown', e => {
+    if (/INPUT|TEXTAREA|SELECT/.test((e.target && e.target.tagName) || '')) return;
+    if (Л.эт !== 'нет' && Л.эт !== 'шторка') {
+      if (e.code === 'Escape') выйти();
+      if (e.code === 'Space') { огонь(1); e.preventDefault(); }
+      if (e.code === 'KeyG' && !e.repeat) { if (Л.вид === 'вертолёт') { Л.пушка = true; Л.пушкаТ = 0; } else огонь(2); }
+    }
+  });
+  addEventListener('keyup', e => { if (e.code === 'KeyG') Л.пушка = false; });
+  // правая половина экрана: высота (вертолёт) / рули (самолёт) — палец тянешь от места касания
+  {
+    const хол = document.getElementById('холст');
+    if (хол) {
+      хол.addEventListener('pointerdown', e => { if (Л.эт === 'нет' || e.clientX < innerWidth / 2 || палец.ид !== null) return; палец.ид = e.pointerId; палец.x0 = e.clientX; палец.y0 = e.clientY; палец.dx = палец.dy = 0; });
+      хол.addEventListener('pointermove', e => { if (e.pointerId !== палец.ид) return; let dx = e.clientX - палец.x0, dy = e.clientY - палец.y0; const д = Math.hypot(dx, dy), м = 58; if (д > м) { dx *= м / д; dy *= м / д; } палец.dx = dx / м; палец.dy = dy / м; });
+      const отп = e => { if (e.pointerId === палец.ид) { палец.ид = null; палец.dx = палец.dy = 0; } };
+      хол.addEventListener('pointerup', отп); хол.addEventListener('pointercancel', отп); хол.addEventListener('lostpointercapture', отп);
+    }
+  }
+
+  // ===================== КАЖДЫЙ КАДР =====================
+  let проверкаТ = 0, кнСестьБыло = '';
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt || window.__перемотка) return;
+    проверкаТ -= dt;
+    if (проверкаТ <= 0) { проверкаТ = 1; if (!построен && Math.hypot(поз.x - ЦП[0], поз.z - ЦП[1]) < 320 && document.getElementById('старт').hidden) построить(); }
+    if (!построен) return;
+    const тут = Л.эт !== 'нет' || вПолигоне(поз.x, поз.z);
+    document.body.classList.toggle('на-полигоне', тут);
+    if (!тут && !снаряды.length) return;
+    П.залп = Math.max(0, П.залп - dt); П.дрон = Math.max(0, П.дрон - dt);
+    шагСнарядов(dt); шагМишеней(dt); шагСлов(dt);
+    шагПолёта(dt);
+    // пусковая после залпа опускает пакет; ПВО крутит радар
+    if (П.пуск && П.пуск.userData.подъём) П.пуск.userData.подъём.rotation.x += (-0.25 - П.пуск.userData.подъём.rotation.x) * Math.min(1, dt * 0.6);
+    if (П.пво && П.пво.userData.радар) П.пво.userData.радар.rotation.y += dt * 2.4;
+    // «СЕСТЬ» — рядом с вертолётом или самолётом
+    let сестьВид = '';
+    if (Л.эт === 'нет' && !почемуНельзя()) {
+      if (П.верт && Math.hypot(поз.x - П.верт.x, поз.z - П.верт.z) < 9) сестьВид = 'вертолёт';
+      else if (П.сам && Math.hypot(поз.x - П.сам.x, поз.z - П.сам.z) < 10) сестьВид = 'самолёт';
+    }
+    if (сестьВид !== кнСестьБыло) { кнСестьБыло = сестьВид; кнСесть.style.display = сестьВид ? 'block' : 'none'; кнСесть.dataset.вид = сестьВид; кнСесть.textContent = сестьВид === 'вертолёт' ? '🚁 СЕСТЬ В ВЕРТОЛЁТ' : '✈ СЕСТЬ В САМОЛЁТ'; }
+    кнопки(); обновитьВерх();
+  });
+  // первый раз на полигоне — подсказка
+  let былПодсказ = false;
+  API.каждыйКадр.push((dt, ms, поз) => { if (былПодсказ || !построен || !вПолигоне(поз.x, поз.z)) return; былПодсказ = true;
+    совет('🎯 Полигон! ЗАЛП — пусковая бьёт туда, куда смотришь. ДРОН — сам летит в мишень. У вертолёта и самолёта — «СЕСТЬ».', 6); });
+  // меню ⚙: «на полигон» — шторка и ты у КПП
+  { const меню = document.getElementById('меню');
+    if (меню) { const с = document.createElement('div'); с.className = 'строка'; const п = document.createElement('span'); п.textContent = 'ПОЛИГОН';
+      const б = document.createElement('button'); б.className = 'кн'; б.textContent = 'ТУДА';
+      б.addEventListener('click', () => { const нельзя = почемуНельзя(); if (нельзя) { совет(нельзя, 3); return; } меню.classList.remove('открыто');
+        шторка(() => { const поз = window.__мир.поз; поз.x = КПП[0] + 6; поз.z = КПП[1] - 2; поз.угол = Math.PI / 2; const к = window.__мир.кам; if (к) к.рыск = поз.угол + Math.PI; построить(); }); });
+      с.append(п, б); меню.insertBefore(с, меню.lastElementChild); } }
+  window.__полигонИгра = { П, Л, построить, сесть, выйти, залп, дрон, огонь, выстрел, снаряды, цельВпереди, ЦП, КПП };
 }]);
 
 </script>
@@ -19551,6 +20149,7 @@ const ПОДПИСИ_КАРТЫ = [];
     if (у.т === 'pitch') ПОДПИСИ_КАРТЫ.push({ текст: 'Стадион', x, z, вид: 'место' });
   });
   if (window.__школа) ПОДПИСИ_КАРТЫ.push({ текст: 'Школа', x: window.__школа.x, z: window.__школа.z, вид: 'место' });
+  if (window.__полигон) ПОДПИСИ_КАРТЫ.push({ текст: 'Полигон', x: window.__полигон.x, z: window.__полигон.z, вид: 'место' });
   if (ДВОР) { const [ox, oz] = ДВОР.о, [nx, nz] = ДВОР.n; ПОДПИСИ_КАРТЫ.push({ текст: ДВОР.имя, x: ox + nx * 30, z: oz + nz * 30, вид: 'место' }); }
   угодья.forEach(у => {
   });
