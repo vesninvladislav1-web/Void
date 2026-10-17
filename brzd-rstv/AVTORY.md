@@ -44,3 +44,16 @@
 - toigo_halter_dress_midi — MargaretToigo, http://www.makehumancommunity.org/node/1854
 - toigo_light_skin_female_ginger — MargaretToigo, http://www.makehumancommunity.org/node/1130
 - young_caucasian_male — makehuman_system, http://www.makehumancommunity.org
+
+# Военная техника (война за времянку, папка tehnika/)
+
+Модели переведены в glb (масштаб, ориентация, текстуры 512 px); сами модели не менялись.
+
+## CC-BY (обязательно указать автора)
+- Ударный вертолёт (vertolyot_zel, vertolyot_cher) — «Attack Chopper», Geibu3D / Cheese Animal Productions, CC-BY 4.0, https://opengameart.org/content/attack-chopper
+
+## CC0 (автор просил упомянуть — упоминаем)
+- Самолёт-невидимка F-117 (samolyot_f117) — «Stealth Bomber», Eric Buisson (MNDV.ecb), CC0, https://opengameart.org/content/stealth-bomber
+- Самолёт Ан-2 (samolyot_an) — «An-2 airplane lowpoly», Mehozavr, CC0, https://opengameart.org/content/an-2-airplane-lowpoly
+- Грузовик (gruzovik) — «Free Low Poly Vehicles Pack», Raphael Gonçalves (rgsdev), CC0, https://opengameart.org/content/free-low-poly-vehicles-pack
+- УАЗ (uaz) — «Soviet military off-road vehicle», artie31, CC0, https://opengameart.org/content/soviet-military-off-road-vehicle
