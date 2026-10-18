@@ -14099,6 +14099,7 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     ['оператор', 'Оператор', 'Выбить врага своим дроном.'],
     ['лётчик', 'Лётчик', 'Поразить мишень на полигоне с вертолёта или самолёта.'],
     ['стрелок', 'Отличник боевой', 'Поразить 20 мишеней на полигоне.'],
+    ['clawd', 'Кто это тут сидит?', 'Найти Clawd во всех четырёх тайниках посёлка.', true],     // секретная: до получения — «???»
   ];
   const КЛЮЧ_А = 'бороздиновский.ачивки';
   let есть = {}; try { есть = JSON.parse(хран.взять(КЛЮЧ_А, '{}')) || {}; } catch (e) { есть = {}; }
@@ -14119,7 +14120,8 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     слой.innerHTML = '';
     const лист = document.createElement('div'); лист.className = 'лист';
     const h = document.createElement('h2'); h.textContent = `🏆 АЧИВКИ · ${АЧИВКИ.filter(а => есть[а[0]]).length} из ${АЧИВКИ.length}`; лист.append(h);
-    for (const [id, имя, что] of АЧИВКИ) {
+    for (const [id, имя0, что0, секрет] of АЧИВКИ) {
+      const имя = секрет && !есть[id] ? '???' : имя0, что = секрет && !есть[id] ? 'Секретная. В посёлке кто-то прячется…' : что0;
       const р = document.createElement('div'); р.className = 'ачивка' + (есть[id] ? '' : ' нет');
       const з = document.createElement('div'); з.textContent = есть[id] ? '🏆' : '🔒'; з.style.fontSize = '20px';
       const т = document.createElement('div'); const b = document.createElement('b'); b.textContent = имя; const s = document.createElement('span');
@@ -18583,6 +18585,164 @@ window.ДЕТАЛИ.push(['главы', function (API) {
   addEventListener('keydown', e => { if (e.code === 'Escape' && document.body.classList.contains('кино') && window.__кино && window.__кино.пропустить) window.__кино.пропустить(); });
 
   window.__главы = { показать, глава, итог, ГЛАВЫ, ст, всего: () => ст.всего };
+}]);
+
+</script>
+<script>
+// Пасхалка: Clawd — оранжевый пиксельный зверёк (маскот Claude Code, который помогал писать эту
+// игру; у Шторма такой стоит на полке). Прячется по посёлку: подойдёшь — пискнет «!», исчезнет
+// и оставит загадку, где искать дальше. Четыре тайника: крыша своего дома → времянка → скамейка
+// Дениса в сквере → будка КПП на полигоне. Нашёл во всех — секретная ачивка, и Clawd ходит за
+// тобой (выключается в ⚙). Прогресс — в localStorage, только у себя.
+window.ДЕТАЛИ.push(['clawd', function (API) {
+  const { THREE, сцена } = API, В = API.землиВысота, ц = API.цвет, сл = Math.random;
+  const Д = window.__домИгрока; if (!Д) return;
+  const КЛЮЧ = 'бороздиновский.clawd';
+  const хр = (() => { try { return JSON.parse(localStorage.getItem(КЛЮЧ)) || {}; } catch (e) { return {}; } })();
+  const сохранить = () => { try { localStorage.setItem(КЛЮЧ, JSON.stringify(хр)); } catch (e) {} };
+  хр.этап = хр.этап || 0; if (хр.питомец === undefined) хр.питомец = true;
+
+  // ===================== МОДЕЛЬ =====================
+  // по фигурке: прямоугольное тело, глаза-щёлочки, ручки-выступы по бокам, четыре ножки парами
+  const ОРАНЖ = мат('#E8823A', 0.25), ЧЁРН = new THREE.MeshBasicMaterial({ color: 0x141414 });
+  function мат(цв, свет = 0) { return new THREE.MeshStandardMaterial({ color: ц(цв), roughness: 0.55, emissive: ц(цв), emissiveIntensity: свет }); }
+  function сделать(м = 1) {
+    const г = new THREE.Group(), тело = new THREE.Group(); г.add(тело);
+    const ящ = (w, h, d, мт, x, y, z) => { const о = new THREE.Mesh(new THREE.BoxGeometry(w * м, h * м, d * м), мт); о.position.set(x * м, y * м, z * м); о.castShadow = true; тело.add(о); return о; };
+    ящ(1.0, 0.62, 0.42, ОРАНЖ, 0, 0.5, 0);                           // тело
+    ящ(0.16, 0.16, 0.4, ОРАНЖ, -0.58, 0.44, 0); ящ(0.16, 0.16, 0.4, ОРАНЖ, 0.58, 0.44, 0);    // ручки
+    for (const x of [-0.36, -0.2, 0.2, 0.36]) ящ(0.09, 0.22, 0.3, ОРАНЖ, x, 0.1, 0);          // ножки
+    const глаза = [-0.28, 0.28].map(x => ящ(0.1, 0.16, 0.02, ЧЁРН, x, 0.58, 0.215));
+    return { г, тело, глаза };
+  }
+
+  // ===================== ТАЙНИКИ =====================
+  // [где, загадка к следующему]
+  function мойДом() {      // дом игрока: ищем рядом с точкой фасада
+    let лучш = null, бд = 1e9;
+    for (let dx = -14; dx <= 14; dx += 2) for (let dz = -14; dz <= 14; dz += 2) { const [x, z] = Д.W(dx, dz), д = API.вДоме(x, z, 0); if (д && д.cx !== undefined) { const d = Math.hypot(д.cx - Д.о[0], д.cz - Д.о[1]); if (d < бд) { бд = d; лучш = д; } } }
+    return лучш;
+  }
+  // верх крыши под точкой: луч сверху вниз по всей сцене (сам Clawd, спрайты и трава не в счёт)
+  const луч = new THREE.Raycaster();
+  function верх(x, z, запас) {
+    луч.set(new THREE.Vector3(x, В(x, z) + 60, z), new THREE.Vector3(0, -1, 0)); луч.far = 70;
+    const цели = []; сцена.traverse(о => { if (о.isMesh && !о.isInstancedMesh && о.visible && !о.userData.clawd && о.geometry) цели.push(о); });
+    const п = луч.intersectObjects(цели, false).find(h => h.point.y > В(x, z) + 1);
+    return п ? п.point.y + 0.01 : запас;
+  }
+  const ТАЙНИКИ = [
+    { имя: 'крыша твоего дома', где: () => { const д = мойДом(); return д ? [д.cx, верх(д.cx, д.cz, (д.конёк || В(д.cx, д.cz) + 6)), д.cz] : null; },
+      дальше: 'Тайник 2 — там, за что дерутся Шторм и Никита.' },
+    { имя: 'времянка', где: () => { const в = Д.двор && Д.двор.времянка; if (!в) return null; const [x, z] = Д.W(...в.ц); return [x, верх(x, z, В(x, z) + 2.62), z]; },
+      дальше: 'Тайник 3 — где курят и решают геометрию.' },
+    { имя: 'скамейка Дениса', где: () => { const дн = window.__денис; if (!дн) return null; дн.д.updateMatrixWorld(true); const v = дн.д.localToWorld(new THREE.Vector3(-0.72, 0.5, 0.02)); return [v.x, v.y, v.z]; },
+      дальше: 'Тайник 4 — где всё взрывается понарошку. Загляни на будку у шлагбаума.' },
+    { имя: 'КПП полигона', где: () => { const п = window.__полигон; if (!п) return null; const x = 338, z = 414; return [x, В(x, 420) + 2.75, z]; },
+      дальше: '' },
+  ];
+
+  const к = сделать(0.55); к.г.visible = false; сцена.add(к.г);
+  const пит = сделать(0.32); пит.г.visible = false; сцена.add(пит.г);
+  for (const м of [к, пит]) м.г.traverse(о => { о.userData.clawd = true; });
+  // «печатает»: мигающий курсор над головой
+  const курсор = new THREE.Sprite(new THREE.SpriteMaterial({ map: (() => { const с = document.createElement('canvas'); с.width = с.height = 64; const x = с.getContext('2d'); x.fillStyle = '#E8823A'; x.fillRect(8, 8, 48, 48); x.fillStyle = '#141414'; x.font = '700 40px monospace'; x.textAlign = 'center'; x.fillText('▌', 32, 46); return new THREE.CanvasTexture(с); })(), transparent: true, depthWrite: false }));
+  курсор.scale.set(0.22, 0.22, 1); курсор.visible = false; сцена.add(курсор);
+  const воскл = new THREE.Sprite(new THREE.SpriteMaterial({ map: (() => { const с = document.createElement('canvas'); с.width = с.height = 64; const x = с.getContext('2d'); x.fillStyle = '#FFE070'; x.font = '900 56px monospace'; x.textAlign = 'center'; x.fillText('!', 32, 52); return new THREE.CanvasTexture(с); })(), transparent: true, depthWrite: false, depthTest: false }));
+  воскл.scale.set(0.5, 0.5, 1); воскл.visible = false; воскл.renderOrder = 12; сцена.add(воскл);
+
+  // ===================== ЭКРАН: реплики Clawd =====================
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #clawdРеплика { position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 9; pointer-events: none;
+      background: #1A1410; border: 2px solid #E8823A; border-radius: 6px; padding: 8px 14px; color: #F4C9A8; font: 600 13px/1.4 ui-monospace, Menlo, Consolas, monospace;
+      max-width: min(86vw, 460px); opacity: 0; transition: opacity .3s; box-shadow: 0 4px 18px rgba(0,0,0,.5); }
+    #clawdРеплика b { color: #E8823A; }
+    #clawdРеплика.видно { opacity: 1; }
+  `;
+  document.head.appendChild(стиль);
+  const реплика = document.createElement('div'); реплика.id = 'clawdРеплика'; реплика.setAttribute('role', 'status'); document.body.appendChild(реплика);
+  let репТ = null;
+  function сказать(т, сек = 5) { реплика.innerHTML = '<b>CLAWD</b> &gt; ' + т; реплика.classList.add('видно'); clearTimeout(репТ); репТ = setTimeout(() => реплика.classList.remove('видно'), сек * 1000); }
+  function писк(вверх = true) {
+    const Б = window.__бахЯдро, кк = Б && Б.звук && Б.звук(); if (!кк || кк.state !== 'running') return;
+    const t = кк.currentTime, о = кк.createOscillator(), g = кк.createGain(); о.type = 'square';
+    о.frequency.setValueAtTime(вверх ? 660 : 990, t); о.frequency.setValueAtTime(вверх ? 990 : 660, t + 0.08); о.frequency.setValueAtTime(вверх ? 1320 : 440, t + 0.16);
+    g.gain.setValueAtTime(0.05, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.3); о.connect(g); g.connect(Б.выход()); о.start(t); о.stop(t + 0.32);
+  }
+  function пых(x, y, z) { const Б = window.__бахЯдро; if (Б) for (let i = 0; i < 14; i++) Б.огонь.пуск({ p: [x, y + 0.3, z], v: [(сл() - 0.5) * 3, сл() * 2.5, (сл() - 0.5) * 3], жизнь: 0.35, р0: 0.18, р1: 0.05, ц0: [1, 0.55, 0.2, 1], ц1: [1, 0.8, 0.4, 0] }); }
+
+  // ===================== ОХОТА =====================
+  let где = null, тайникТ = 0, исчез = 0, игра = 0, подсказал = !!хр.подсказал;
+  function поставить() {
+    где = null; к.г.visible = false;
+    if (хр.этап >= ТАЙНИКИ.length) return;
+    const p = ТАЙНИКИ[хр.этап].где(); if (!p) return;
+    где = p; к.г.position.set(p[0], p[1], p[2]); к.г.visible = true;
+  }
+  function пойман() {
+    if (!где || хр.этап >= ТАЙНИКИ.length) return;
+    const т = ТАЙНИКИ[хр.этап]; писк(); пых(где[0], где[1], где[2]);
+    воскл.position.set(где[0], где[1] + 0.9, где[2]); воскл.visible = true; исчез = 0.9;
+    где = null; к.г.visible = false;                    // исчез сразу — второй раз за кадр не ловится
+    хр.этап++; сохранить();
+    if (хр.этап >= ТАЙНИКИ.length) {
+      сказать('Нашёл меня во всех тайниках! Я — Clawd, помогал писать эту игру вместе со Штормом. Теперь хожу за тобой. Выключить — в ⚙.', 8);
+      window.__итоги && window.__итоги.дать && window.__итоги.дать('clawd');
+      window.__событие && window.__событие('clawd-найден', {});
+    } else сказать('Ой! Нашёл. ' + т.дальше + ' (' + хр.этап + '/' + ТАЙНИКИ.length + ')', 7);
+    setTimeout(поставить, 900);
+  }
+  // ===================== ПИТОМЕЦ =====================
+  const пт = { x: 0, z: 0, y: 0, угол: 0, прыг: 0, стоит: 0, есть: false };
+  function шагПитомца(dt, поз) {
+    const можно = хр.этап >= ТАЙНИКИ.length && хр.питомец && !window.__летитЯша && !window.__поездка && !window.__заРулём && !document.body.classList.contains('кабина');
+    if (!можно) { пит.г.visible = false; курсор.visible = false; пт.есть = false; return; }
+    if (!пт.есть) { пт.есть = true; пт.x = поз.x - 1.5; пт.z = поз.z - 1.5; }
+    // держится сзади-слева, в 1.6 м
+    const а = поз.угол + Math.PI + 0.7, tx = поз.x + Math.sin(а) * 1.6, tz = поз.z + Math.cos(а) * 1.6, dx = tx - пт.x, dz = tz - пт.z, d = Math.hypot(dx, dz);
+    if (d > 25) { пт.x = tx; пт.z = tz; }
+    const идёт = d > 0.35;
+    if (идёт) { const v = Math.min(d * 3, 7); пт.x += dx / d * v * dt; пт.z += dz / d * v * dt; пт.угол += Math.atan2(Math.sin(Math.atan2(dx, dz) - пт.угол), Math.cos(Math.atan2(dx, dz) - пт.угол)) * Math.min(1, dt * 8); пт.прыг += dt * 14; пт.стоит = 0; }
+    else { пт.стоит += dt; пт.угол += Math.atan2(Math.sin(Math.atan2(поз.x - пт.x, поз.z - пт.z) - пт.угол), Math.cos(Math.atan2(поз.x - пт.x, поз.z - пт.z) - пт.угол)) * Math.min(1, dt * 3); }
+    const y = В(пт.x, пт.z) + (идёт ? Math.abs(Math.sin(пт.прыг)) * 0.12 : 0);
+    пит.г.visible = true; пит.г.position.set(пт.x, y, пт.z); пит.г.rotation.y = пт.угол;
+    // постоял — «печатает»
+    курсор.visible = пт.стоит > 6 && Math.floor(игра * 2) % 2 === 0; курсор.position.set(пт.x, y + 0.45, пт.z);
+  }
+
+  // ===================== КАЖДЫЙ КАДР =====================
+  let кадр0 = false;
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt || window.__перемотка || !document.getElementById('старт').hidden) return;
+    игра += dt;
+    if (!кадр0) { кадр0 = true; поставить(); }
+    // моргает, покачивается, смотрит на тебя, если рядом
+    const мор = Math.floor(игра * 1.1) % 5 === 0 && (игра % 0.9) < 0.12;
+    for (const м of [к, пит]) for (const г of м.глаза) г.scale.y = мор ? 0.15 : 1;
+    if (где && к.г.visible) {
+      к.тело.position.y = Math.abs(Math.sin(игра * 2.2)) * 0.04;
+      const d = Math.hypot(поз.x - где[0], поз.z - где[2]);
+      if (d < 14) к.г.rotation.y += Math.atan2(Math.sin(Math.atan2(поз.x - где[0], поз.z - где[2]) - к.г.rotation.y), Math.cos(Math.atan2(поз.x - где[0], поз.z - где[2]) - к.г.rotation.y)) * Math.min(1, dt * 3);
+      else к.г.rotation.y += dt * 0.4;
+      if (d < 3.2 && !window.__летитЯша && !document.body.classList.contains('кино')) пойман();
+    }
+    if (исчез > 0) { исчез -= dt; воскл.position.y += dt * 0.8; if (исчез <= 0) воскл.visible = false; }
+    // первая подсказка — через 4 минуты прогулки
+    if (!подсказал && хр.этап === 0 && игра > 240 && !document.body.classList.contains('кино')) {
+      подсказал = true; хр.подсказал = true; сохранить();
+      сказать('…на крыше твоего дома кто-то сидит. Оранжевый. Подойди поближе.', 6);
+    }
+    шагПитомца(dt, поз);
+  });
+  // ⚙: питомец вкл/выкл (строка появляется, когда Clawd найден)
+  { const меню = document.getElementById('меню');
+    if (меню) { const с = document.createElement('div'); с.className = 'строка'; const п = document.createElement('span'); п.textContent = 'CLAWD'; const б = document.createElement('button'); б.className = 'кн';
+      const обн = () => { с.style.display = хр.этап >= ТАЙНИКИ.length ? '' : 'none'; б.textContent = хр.питомец ? 'ВКЛ' : 'ВЫКЛ'; б.setAttribute('aria-pressed', String(!!хр.питомец)); };
+      б.addEventListener('click', () => { хр.питомец = !хр.питомец; сохранить(); обн(); });
+      с.append(п, б); меню.insertBefore(с, меню.lastElementChild); обн();
+      window.__подписка && window.__подписка('clawd-найден', обн); } }
+  window.__clawd = { хр, ТАЙНИКИ, поставить, пойман, к, пит, сказать };
 }]);
 
 </script>
