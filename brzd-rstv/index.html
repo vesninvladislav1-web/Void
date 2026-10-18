@@ -8137,6 +8137,35 @@ window.ДЕТАЛИ.push(['Денис', function (API) {
   }
   const огонёкМ = new THREE.MeshBasicMaterial({ color: 0xFF6A20 });
   const огонёк = new THREE.Mesh(new THREE.SphereGeometry(0.0065, 6, 4), огонёкМ); огонёк.position.x = 0.057; сиг.add(огонёк);
+  // пачка «Короны» на скамейке рядом (по фото): снизу — золото, «Корона», «21», красная полоса,
+  // сверху — тёмная полоса предупреждения. Отобрал сигарету — пачку забираешь с собой; с «понедельника» — новая.
+  const пачка = (() => {
+    const к = document.createElement('canvas'); к.width = 256; к.height = 400; const с = к.getContext('2d');
+    // верх — предупреждение
+    const гв = с.createLinearGradient(0, 0, 0, 180); гв.addColorStop(0, '#3A4250'); гв.addColorStop(1, '#262B34'); с.fillStyle = гв; с.fillRect(0, 0, 256, 180);
+    с.fillStyle = '#F2F2F2'; с.font = '700 30px system-ui, sans-serif'; с.textAlign = 'center'; с.fillText('ІМПАТЭНЦЫЯ', 128, 92);
+    с.font = '500 13px system-ui, sans-serif'; с.fillStyle = 'rgba(242,242,242,0.75)'; с.fillText('Курэнне шкодзіць здароўю', 128, 122);
+    // низ — золото
+    const гз = с.createLinearGradient(0, 180, 256, 400); гз.addColorStop(0, '#FBF1D2'); гз.addColorStop(0.5, '#F1DDA4'); гз.addColorStop(1, '#E8CB82'); с.fillStyle = гз; с.fillRect(0, 180, 256, 220);
+    // герб-корона в красном овале
+    с.fillStyle = '#B8141E'; с.beginPath(); с.ellipse(70, 214, 16, 14, 0, 0, 6.3); с.fill(); с.strokeStyle = '#E8C060'; с.lineWidth = 2; с.stroke();
+    с.fillStyle = '#F4D06A'; с.font = '700 13px Georgia, serif'; с.fillText('ТН', 70, 219);
+    // «21»
+    с.font = '900 64px Georgia, serif'; const г21 = с.createLinearGradient(150, 200, 230, 260); г21.addColorStop(0, '#C89A40'); г21.addColorStop(1, '#8A6420'); с.fillStyle = г21; с.fillText('21', 200, 262);
+    // «Корона» — готикой
+    с.font = '700 italic 62px "Old English Text MT", "UnifrakturMaguntia", Georgia, serif'; с.fillStyle = '#6A4418'; с.strokeStyle = '#3A2408'; с.lineWidth = 1.5;
+    с.fillText('Корона', 128, 330); с.strokeText('Корона', 128, 330);
+    с.fillStyle = '#B8141E'; с.beginPath(); с.moveTo(98, 278); с.lineTo(104, 266); с.lineTo(110, 274); с.lineTo(116, 264); с.lineTo(122, 278); с.closePath(); с.fill();   // корона над «К»
+    // красная полоса
+    с.fillStyle = '#C81E2A'; с.fillRect(18, 352, 220, 26); с.fillStyle = '#FFFFFF'; с.font = '700 15px system-ui, sans-serif'; с.fillText('СИГАРЕТЫ С ФИЛЬТРОМ', 128, 370);
+    const т = API.цветнаяТекстура(к); т.anisotropy = API.АНИЗ;
+    const бок = new THREE.MeshStandardMaterial({ color: ц('#EFD9A0'), roughness: 0.45 }), лицо = new THREE.MeshStandardMaterial({ map: т, roughness: 0.4 });
+    const м = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.032, 0.13), [бок, бок, лицо, бок, бок, бок]);   // +y — лицевая сторона вверх
+    // не в группе Дениса: её детей (блочную фигуру) прячут, когда загрузится 3D-модель
+    const рядом = new THREE.Group(); рядом.position.copy(д.position); рядом.rotation.copy(д.rotation); сцена.add(рядом);
+    м.castShadow = true; м.position.set(0.62, 0.51, 0.02); м.rotation.y = 0.35; рядом.add(м);
+    return м;
+  })();
   (window.__герои3д = window.__герои3д || []).push({ ...window.__денисВид, имя: 'Денис', группа: д, причёска: 'hair_short02', волосы: '#9A7A50', кожа: '#E8C0A2',
     аним: () => 'Sitting_Idle_Loop', голова: () => голова.y, y: 0.02, z: 0.28, вРуке: сиг });
 
@@ -8179,11 +8208,12 @@ window.ДЕТАЛИ.push(['Денис', function (API) {
   document.body.appendChild(кнОтобрать);
   кнОтобрать.addEventListener('click', () => {
     if (!кур.курит) return;
-    кур.курит = false; кур.бросил = 180;
-    совет('— Эй! Ладно-ладно. Бросаю. С понедельника.');
+    кур.курит = false; кур.бросил = 180; пачка.visible = false;
+    совет('— Эй! Ладно-ладно. Бросаю. С понедельника. Пачку тоже забирай.');
     window.__событие && window.__событие('денис-бросил', {});
   });
   function закурить(dd) {
+    пачка.visible = true;
     кур.курит = true; кур.затяжек = 0; кур.тЗатяжки = 2.5;
     if (dd < 8) совет(кур.бросил < 0 ? '— Понедельник наступил. Где-то.' : '— Последняя. Честно.');
     кур.бросил = 0;
@@ -8220,7 +8250,7 @@ window.ДЕТАЛИ.push(['Денис', function (API) {
     кнОтобрать.style.display = можно ? 'block' : 'none';
   }
   API.добавитьПрепятствие([[x - 0.5, z - 0.5], [x + 0.5, z - 0.5], [x + 0.5, z + 0.5], [x - 0.5, z + 0.5]], 'Денис');
-  window.__денис = { д, кур, затяжка, сиг };
+  window.__денис = { д, кур, затяжка, сиг, пачка };
 }]);
 
 // Школа, ул. Спортивная, 7 — по фото: длинное двухэтажное здание (серо-голубая штукатурка, тёмные
