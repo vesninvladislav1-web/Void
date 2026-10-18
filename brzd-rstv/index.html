@@ -19117,11 +19117,13 @@ class Сборка {
 // линейном пространстве, поэтому переводим; на выходе — кино-тонирование ACES.
 const цвет = h => new THREE.Color(h).convertSRGBToLinear();
 const лин = к => Math.pow(к, 2.2);
-// Графика: «ультра» (по умолчанию), «высокая», «средняя», «низкая». Выбор — на стартовом экране и в ⚙.
+// Графика: «ультра», «высокая», «средняя», «низкая». Выбор — на стартовом экране и в ⚙.
 // УР — номер ступени: 0 низкая … 3 ультра. «Средняя» и «низкая» — для слабых телефонов:
 // меньше травы, деревьев вдали, луж и сельчан, тени проще (на «низкой» их нет вовсе), картинка мельче.
 const КАЧЕСТВА = ['низкая', 'средняя', 'высокая', 'ультра'];
-const КАЧЕСТВО = (() => { try { const к = localStorage.getItem('бороздиновский.графика'); return КАЧЕСТВА.includes(к) ? к : 'ультра'; } catch (e) { return 'ультра'; } })();
+// по умолчанию: на компе — «ультра», на телефоне — «высокая» (на «ультра» видеопамять телефона может кончиться)
+const КАЧЕСТВО_САМО = matchMedia('(pointer: coarse)').matches ? 'высокая' : 'ультра';
+const КАЧЕСТВО = (() => { try { const к = localStorage.getItem('бороздиновский.графика'); return КАЧЕСТВА.includes(к) ? к : КАЧЕСТВО_САМО; } catch (e) { return КАЧЕСТВО_САМО; } })();
 const УЛЬТРА = КАЧЕСТВО === 'ультра', УР = КАЧЕСТВА.indexOf(КАЧЕСТВО);
 function цветнаяТекстура(к) { const т = new THREE.CanvasTexture(к); т.encoding = THREE.sRGBEncoding; return т; }
 
@@ -19131,6 +19133,20 @@ const телефон = matchMedia('(pointer: coarse)').matches;
 const рендер = new THREE.WebGLRenderer({ canvas: холст, antialias: УР > 0 && (!телефон || devicePixelRatio < 2.5) });
 рендер.setPixelRatio(Math.min(devicePixelRatio || 1, УЛЬТРА ? 2 : УР === 2 ? (телефон ? 1.6 : 2) : УР === 1 ? 1.25 : 1));
 рендер.outputEncoding = THREE.sRGBEncoding;
+// видеокарта телефона «упала» (кончилась видеопамять) — вместо белого экрана: перезапуск на графике ступенью ниже
+холст.addEventListener('webglcontextlost', e => {
+  e.preventDefault();
+  const ниже = КАЧЕСТВА[Math.max(0, УР - 1)], можноНиже = УР > 0;
+  if (можноНиже) try { localStorage.setItem('бороздиновский.графика', ниже); } catch (e2) {}
+  const д = document.createElement('div');
+  д.style.cssText = 'position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#120C08;color:#F2E6CC;font:15px/1.5 system-ui,sans-serif;text-align:center;padding:24px';
+  const з = document.createElement('div'); з.style.cssText = 'color:#E8C84A;letter-spacing:3px;font-weight:700'; з.textContent = 'ТЕЛЕФОН НЕ ВЫТЯНУЛ ГРАФИКУ';
+  const т = document.createElement('div'); т.textContent = можноНиже ? 'Перезапускаю игру на графике «' + ниже + '»… Сохранение — с начала главы.' : 'Закрой лишние приложения и вкладки и перезапусти игру.';
+  const б = document.createElement('button'); б.textContent = 'ПЕРЕЗАПУСТИТЬ'; б.style.cssText = 'height:44px;padding:0 24px;border-radius:22px;border:1px solid #E8C84A;background:none;color:#E8C84A;font:700 13px system-ui,sans-serif;letter-spacing:2px';
+  б.addEventListener('click', () => location.reload());
+  д.append(з, т, б); document.body.appendChild(д);
+  if (можноНиже) setTimeout(() => location.reload(), 3000);
+}, false);
 рендер.toneMapping = THREE.ACESFilmicToneMapping;
 рендер.toneMappingExposure = 0.8;
 // Цвета заданы как видит глаз, и выводятся как есть. Сначала здесь стояла
