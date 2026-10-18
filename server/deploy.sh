@@ -36,5 +36,22 @@ if [ -d /etc/nginx/conf.d ] && [ ! -f "$GZIP_CONF" ] && command -v nginx >/dev/n
   else rm -f "$GZIP_CONF"; echo "  ! nginx не принял настройку — оставил как было (игра всё равно обновлена)"; fi
 fi
 
+# APK: файл-подтверждение, что приложение и сайт — одного хозяина (без него в APK сверху адресная строка)
+if [ -f "$TMP"/*/.well-known/assetlinks.json ]; then
+  mkdir -p "$SITE/.well-known"
+  cp "$TMP"/*/.well-known/assetlinks.json "$SITE/.well-known/assetlinks.json"
+fi
+# один раз: nginx прячет всё, что с точки (.git, .env…) — для этого одного файла делаем исключение
+if command -v nginx >/dev/null && [ -f "$SITE/.well-known/assetlinks.json" ]; then
+  CONF="$(grep -lE 'server_name[^;]*voidm\.site' /etc/nginx/sites-enabled/* /etc/nginx/conf.d/*.conf 2>/dev/null | head -1 || true)"
+  if [ -n "$CONF" ] && ! grep -q 'assetlinks' "$CONF"; then
+    echo "→ Открываю assetlinks.json для APK в nginx…"
+    REAL="$(readlink -f "$CONF")"; cp "$REAL" "$TMP/nginx.bak"
+    sed -i -E '/server_name[^;]*voidm\.site/a\    location = /.well-known/assetlinks.json { allow all; default_type application/json; try_files $uri =404; }' "$REAL"
+    if nginx -t 2>/dev/null; then systemctl reload nginx && echo "  ✓ готово"
+    else cp "$TMP/nginx.bak" "$REAL"; echo "  ! nginx не принял настройку — вернул как было (игра всё равно обновлена)"; fi
+  fi
+fi
+
 SHA="$(curl -fsSL "https://api.github.com/repos/$REPO/commits/$BRANCH" 2>/dev/null | grep -m1 '"sha"' | cut -d'"' -f4 | cut -c1-7 || true)"
 echo "✓ Готово: на сайте ${BRANCH}${SHA:+ @ $SHA}"
