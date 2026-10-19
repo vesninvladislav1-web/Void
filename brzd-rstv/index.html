@@ -3,6 +3,10 @@
 <title>Бороздиновский</title>
 <!-- с экрана «Домой» игра открывается без панелей браузера (на iPhone по-другому их не убрать) -->
 <link rel="manifest" href="manifest.json">
+<script>
+  // игра запоминается в телефоне (sw.js): после первого запуска открывается и без интернета, обновляется сама
+  if ('serviceWorker' in navigator && location.protocol === 'https:') addEventListener('load', () => navigator.serviceWorker.register('sw.js', { scope: './' }).catch(() => {}));
+</script>
 <meta name="theme-color" content="#120C08">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
