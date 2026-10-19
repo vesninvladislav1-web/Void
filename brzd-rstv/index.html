@@ -14638,6 +14638,138 @@ window.ДЕТАЛИ.push(['сохранение', function (API) {
   обновитьКнопки();
   window.__сохранение = { читать, перемотать, ГЛАВЫ, сбросить: () => { try { localStorage.removeItem(КЛЮЧ); } catch (e) {} } };
 }]);
+
+// ===================== АВТОСОХРАНЕНИЕ МЕСТА =====================
+// Каждые 30 с и когда игру сворачивают — запоминаем, где стоишь и где оставил мопед.
+// «Продолжить» сперва перематывает сюжет до главы, потом возвращает на это место (если оно из той же главы).
+window.ДЕТАЛИ.push(['место', function (API) {
+  const КЛЮЧ = 'бороздиновский.место';
+  const читать = () => { try { return JSON.parse(localStorage.getItem(КЛЮЧ)) || null; } catch (e) { return null; } };
+  const главаСейчас = () => { const с = window.__сохранение && window.__сохранение.читать(); return с && с.глава || 0; };
+  let игра = false, ждём = 0;
+  const можноПисать = () => игра && !window.__вМеню && !window.__перемотка && !window.__онлайнРоль && !window.__поездка && !window.__летитЯша && !window.__заРулём
+    && !(window.__кино && window.__кино.идёт()) && !document.body.classList.contains('гм');
+  function запомнить() {
+    if (!можноПисать()) return;
+    const п = window.__мир && window.__мир.поз; if (!п || !isFinite(п.x) || !isFinite(п.z)) return;
+    const М = window.__мопед, м = М && М.ст;
+    const з = { x: +п.x.toFixed(2), z: +п.z.toFixed(2), угол: +(п.угол || 0).toFixed(3), глава: главаСейчас(), когда: Date.now() };
+    if (м && (м.едет || м.стоит)) з.мопед = м.едет ? [з.x + 1.5 * Math.cos(з.угол), з.z - 1.5 * Math.sin(з.угол), м.курс] : [м.х, м.z, м.курс];
+    try { localStorage.setItem(КЛЮЧ, JSON.stringify(з)); } catch (e) {}
+  }
+  function вернуть() {
+    const з = читать(), п = window.__мир && window.__мир.поз;
+    if (!з || !п || з.глава !== главаСейчас() || !з.глава) return false;
+    if (API.вДоме(з.x, з.z, 0.3) || (API.вВоде && API.вВоде(з.x, з.z))) return false;
+    п.x = з.x; п.z = з.z; п.угол = з.угол;
+    const кам = window.__мир.кам; if (кам) кам.рыск = з.угол + Math.PI;
+    const М = window.__мопед;
+    if (з.мопед && М && М.поставить && !API.вДоме(з.мопед[0], з.мопед[1], 0.4)) М.поставить(з.мопед[0], з.мопед[1], з.мопед[2]);
+    window.__подсказки && window.__подсказки.совет('📍 Ты там же, где был', 3);
+    return true;
+  }
+  const гулять = document.getElementById('гулять');
+  if (гулять) гулять.addEventListener('click', () => { игра = true; });
+  // «Продолжить» → ждём конца перемотки, потом ставим на место
+  document.addEventListener('click', e => { if (e.target && e.target.closest && e.target.closest('#продолжить')) ждём = 1; }, true);
+  document.addEventListener('click', e => { if (e.target && e.target.closest && e.target.closest('#заново')) try { localStorage.removeItem(КЛЮЧ); } catch (e2) {} }, true);
+  let т = 0;
+  API.каждыйКадр.push(dt => {
+    if (ждём) {
+      if (window.__перемотка) ждём = 2;
+      else if (ждём === 2 || (ждём++ > 120)) { ждём = 0; вернуть(); }
+      return;
+    }
+    т += dt; if (т >= 30) { т = 0; запомнить(); }
+  });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) запомнить(); });
+  window.addEventListener('pagehide', запомнить);
+  window.__место = { читать, запомнить, вернуть };
+}]);
+
+// ===================== ⚙ → УПРАВЛЕНИЕ И ЗВУК =====================
+// Ползунки: размер и прозрачность джойстика, чувствительность камеры, режим для левши
+// (джойстик справа, крутить камеру — слева, кнопки — к левому краю). Ниже — громкость (модуль «звуки посёлка»).
+window.ДЕТАЛИ.push(['управление', function (API) {
+  const упр = window.__упр = { размер: 1, прозр: 1, чувств: 1, левша: false };
+  try { const з = JSON.parse(localStorage.getItem('бороздиновский.управление')) || {};
+    for (const к of ['размер', 'прозр', 'чувств']) if (typeof з[к] === 'number' && isFinite(з[к])) упр[к] = Math.max(0.15, Math.min(2.5, з[к]));
+    упр.левша = !!з.левша; } catch (e) {}
+  const сохранить = () => { try { localStorage.setItem('бороздиновский.управление', JSON.stringify(упр)); } catch (e) {} };
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    body.левша :is(#кнопки, #фениксРуль, #рыбалкаПульт, #мопедПульт, #войнаКинуть, #войнаЖизни, #полётВВ, #полётВН, #яшолётКуры, #полигонКн1, #пропустить) {
+      right: auto !important; left: calc(14px + env(safe-area-inset-left, 0px)) !important; }
+    body.левша #штормИнстр { left: auto !important; right: calc(10px + env(safe-area-inset-right, 0px)) !important; }
+    #тонко { position: fixed; inset: 0; z-index: 17; display: none; background: rgba(8,5,3,0.86); padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom)); overflow-y: auto; }
+    #тонко.видно { display: flex; }
+    #тонко .лист { margin: auto; width: min(560px, 100%); background: #1A140E; border: 1px solid rgba(242,230,204,0.22); border-radius: 16px; padding: 14px; color: #F2E6CC; font: 13px system-ui, sans-serif; box-sizing: border-box; }
+    #тонко h2 { margin: 0 0 8px; font: 800 16px system-ui, sans-serif; letter-spacing: 2px; }
+    #тонко h3 { margin: 12px 0 6px; font: 700 11px system-ui, sans-serif; letter-spacing: 2px; color: #B8AC94; }
+    #тонко .полз { display: grid; grid-template-columns: 150px 1fr 44px; align-items: center; gap: 10px; margin: 6px 0; }
+    #тонко .полз b { font-weight: 600; } #тонко .полз span { text-align: right; color: #F4C430; font-variant-numeric: tabular-nums; }
+    #тонко input[type=range] { width: 100%; accent-color: #F4C430; height: 28px; }
+    #тонко .вр { display: flex; gap: 12px; align-items: center; }
+    #тонко .образец { flex: none; width: 116px; height: 116px; border-radius: 50%; border: 2px solid rgba(242,230,204,0.35); background: rgba(18,12,8,0.25); position: relative; transform-origin: center; }
+    #тонко .образец i { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(242,230,204,0.55); }
+    #тонко .кнопки2 { display: flex; gap: 8px; flex-wrap: wrap; }
+    #тонко .кнопки2 button, #тонко .низ button { height: 36px; padding: 0 14px; border-radius: 18px; border: 1px solid rgba(242,230,204,0.3); background: #2A2018; color: #F2E6CC; font: 700 12px system-ui, sans-serif; letter-spacing: 1px; cursor: pointer; }
+    #тонко button[aria-pressed=true] { border-color: #F4C430; color: #F4C430; }
+    #тонко .низ { display: flex; justify-content: space-between; gap: 8px; margin-top: 14px; }
+    #тонко .низ .да { border-color: #F4C430; color: #F4C430; background: none; }
+    @media (max-height: 460px) { #тонко .полз { grid-template-columns: 120px 1fr 40px; margin: 2px 0; } #тонко .образец { width: 80px; height: 80px; } }
+  `;
+  document.head.appendChild(стиль);
+  const эл = (т, к, текст) => { const е = document.createElement(т); if (к) е.className = к; if (текст !== undefined) е.textContent = текст; return е; };
+  const окно = эл('div'); окно.id = 'тонко';
+  const лист = эл('div', 'лист'); окно.appendChild(лист); document.body.appendChild(окно);
+  окно.addEventListener('pointerdown', e => { if (e.target === окно) закрыть(); });
+  const секции = {};
+  function ползунок(куда, подпись, мин, макс, шаг, взять, дать, вид) {
+    const р = эл('div', 'полз'), в = эл('input'), зн = эл('span');
+    в.type = 'range'; в.min = мин; в.max = макс; в.step = шаг; в.value = взять();
+    const обн = () => { зн.textContent = вид(+в.value); };
+    в.addEventListener('input', () => { дать(+в.value); обн(); });
+    обн(); р.append(эл('b', '', подпись), в, зн); куда.appendChild(р); return { в, обн };
+  }
+  const проц = v => Math.round(v * 100) + '%';
+  // --- управление ---
+  const упрЭл = эл('div'); секции.управление = упрЭл;
+  const вр = эл('div', 'вр'), образец = эл('div', 'образец'), колонка = эл('div'); колонка.style.flex = '1'; образец.appendChild(эл('i'));
+  const показатьОбразец = () => { образец.style.transform = 'scale(' + Math.min(1, упр.размер) + ')'; образец.style.opacity = упр.прозр; };
+  const пР = ползунок(колонка, 'Размер джойстика', 0.7, 1.6, 0.05, () => упр.размер, v => { упр.размер = v; показатьОбразец(); сохранить(); }, проц);
+  const пП = ползунок(колонка, 'Прозрачность', 0.15, 1, 0.05, () => упр.прозр, v => { упр.прозр = v; показатьОбразец(); сохранить(); }, проц);
+  const пЧ = ползунок(колонка, 'Камера: чувствительность', 0.4, 2.5, 0.05, () => упр.чувств, v => { упр.чувств = v; сохранить(); }, проц);
+  вр.append(колонка, образец); упрЭл.appendChild(вр);
+  const рукиР = эл('div', 'кнопки2');
+  const кПрав = эл('button', '', '✋ ПРАВША'), кЛев = эл('button', '', '🤚 ЛЕВША');
+  const рукиОбн = () => { кПрав.setAttribute('aria-pressed', String(!упр.левша)); кЛев.setAttribute('aria-pressed', String(!!упр.левша)); document.body.classList.toggle('левша', !!упр.левша); };
+  кПрав.addEventListener('click', () => { упр.левша = false; сохранить(); рукиОбн(); });
+  кЛев.addEventListener('click', () => { упр.левша = true; сохранить(); рукиОбн(); window.__подсказки && window.__подсказки.совет('Левша: ходить — правой половиной экрана, крутить камеру — левой.', 4); });
+  рукиР.append(кПрав, кЛев);
+  const рукиП = эл('div', 'полз'); рукиП.append(эл('b', '', 'Рука'), рукиР); упрЭл.appendChild(рукиП);
+  function собрать() {
+    лист.innerHTML = '';
+    лист.append(эл('h2', '', '⚙ УПРАВЛЕНИЕ И ЗВУК'), эл('h3', '', 'УПРАВЛЕНИЕ'), упрЭл);
+    if (секции.звук) лист.append(эл('h3', '', 'ГРОМКОСТЬ'), секции.звук);
+    const низ = эл('div', 'низ'), сброс = эл('button', '', 'КАК БЫЛО'), гот = эл('button', 'да', 'ГОТОВО');
+    сброс.addEventListener('click', () => { Object.assign(упр, { размер: 1, прозр: 1, чувств: 1, левша: false }); сохранить(); [пР, пП, пЧ].forEach((п, i) => { п.в.value = [1, 1, 1][i]; п.обн(); }); показатьОбразец(); рукиОбн(); секции.сбросЗвука && секции.сбросЗвука(); });
+    гот.addEventListener('click', закрыть);
+    низ.append(сброс, гот); лист.appendChild(низ);
+  }
+  function открыть() { собрать(); показатьОбразец(); рукиОбн(); окно.classList.add('видно'); }
+  function закрыть() { окно.classList.remove('видно'); }
+  рукиОбн();
+  const меню = document.getElementById('меню');
+  if (меню) {
+    const с = эл('div', 'строка'), б = эл('button', 'кн шрифт', 'НАСТРОИТЬ');
+    б.addEventListener('click', открыть);
+    с.append(эл('span', '', 'УПРАВЛЕНИЕ И ЗВУК'), б);
+    const звук = [...меню.querySelectorAll('.строка')].find(р => /^ЗВУК/.test(р.textContent));
+    if (звук) звук.after(с); else меню.insertBefore(с, меню.lastElementChild);
+  }
+  window.__тонко = { открыть, закрыть, секции };
+}]);
 // Мини-игра «Летучий Яша» (по мотивам «My Flying Pig»): Яша летит на самолёте из бочки над
 // посёлком, а по улицам бродят гигантские Никиты — тянут руки, хватают и кидаются сортирами.
 // Рыбки — очки, валерьянка — турбо, три жизни. Самолёт стоит на стадионе (подойди — «ЛЕТЕТЬ»),
@@ -21997,15 +22129,18 @@ window.__деревья.обновить(поз.x, поз.z, true);
 // ===================== УПРАВЛЕНИЕ =====================
 // Слева — джойстик там, где коснулся. Справа — поворот камеры.
 // Касания считаются по отдельности: можно идти и крутить одновременно.
+// настройки управления (⚙ → УПРАВЛЕНИЕ): размер и прозрачность джойстика, чувствительность камеры, левша
+const упр = window.__упр || (window.__упр = { размер: 1, прозр: 1, чувств: 1, левша: false });   // читает из памяти модуль «управление»
 const джойстик = { ид: null, x0: 0, y0: 0, dx: 0, dy: 0 };
 const взгляд = { ид: null, x: 0, y: 0 };
 const клавиши = new Set();
 холст.addEventListener('pointerdown', e => {
   e.preventDefault();
   if (киноИдёт()) { if (взгляд.ид === null) { взгляд.ид = e.pointerId; взгляд.x = e.clientX; взгляд.y = e.clientY; } return; }   // в кино и в кабине джойстик не показываем
-  if (e.clientX < innerWidth / 2 && джойстик.ид === null) {
+  if ((упр.левша ? e.clientX > innerWidth / 2 : e.clientX < innerWidth / 2) && джойстик.ид === null) {
     джойстик.ид = e.pointerId; джойстик.x0 = e.clientX; джойстик.y0 = e.clientY; джойстик.dx = джойстик.dy = 0;
     const д = эл('джойстик'); д.style.left = e.clientX + 'px'; д.style.top = e.clientY + 'px'; д.hidden = false;
+    д.style.transform = упр.размер !== 1 ? 'scale(' + упр.размер + ')' : ''; д.style.opacity = упр.прозр;
     эл('ручка').style.transform = '';
   } else if (взгляд.ид === null) { взгляд.ид = e.pointerId; взгляд.x = e.clientX; взгляд.y = e.clientY; }
   try { холст.setPointerCapture(e.pointerId); } catch (err) {}
@@ -22014,15 +22149,15 @@ const киноИдёт = () => document.body.classList.contains('кино') || !
 холст.addEventListener('pointermove', e => {
   if (киноИдёт()) { if (e.pointerId === взгляд.ид) { взгляд.x = e.clientX; взгляд.y = e.clientY; } return; }
   if (e.pointerId === джойстик.ид) {
-    let dx = e.clientX - джойстик.x0, dy = e.clientY - джойстик.y0; const д = Math.hypot(dx, dy), м = 58;
+    let dx = e.clientX - джойстик.x0, dy = e.clientY - джойстик.y0; const д = Math.hypot(dx, dy), м = 58 * упр.размер;
     if (д > м) { dx *= м / д; dy *= м / д; }
     джойстик.dx = dx / м; джойстик.dy = dy / м;
-    эл('ручка').style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+    эл('ручка').style.transform = 'translate(' + dx / упр.размер + 'px,' + dy / упр.размер + 'px)';   // ручка внутри увеличенного круга
   } else if (e.pointerId === взгляд.ид) {
-    кам.рыск -= (e.clientX - взгляд.x) * 0.006;
+    кам.рыск -= (e.clientX - взгляд.x) * 0.006 * упр.чувств;
     взгляд.когда = performance.now();
     // Ниже не опускаем: иначе у самой дороги камера смотрит в профлист
-    кам.тангаж = Math.min(1.1, Math.max(-0.3, кам.тангаж + (e.clientY - взгляд.y) * 0.004));   // ниже 0.12 — смотрим вверх
+    кам.тангаж = Math.min(1.1, Math.max(-0.3, кам.тангаж + (e.clientY - взгляд.y) * 0.004 * упр.чувств));   // ниже 0.12 — смотрим вверх
     взгляд.x = e.clientX; взгляд.y = e.clientY;
   }
 });
@@ -22121,6 +22256,7 @@ function рисоватьМини() {
   с.imageSmoothingQuality = 'high';
   с.drawImage(подложка, sx, sz, к, к, 0, 0, w, w);
   const вX = x => (X(x) - sx) / к * w, вZ = z => (Z(z) - sz) / к * w;
+  мини.вид = { sx, sz, к, w, м, X0: X(0), Z0: Z(0) };      // для обратного пересчёта тапа в метры (метка)
   if (большая) {
     с.textAlign = 'center'; с.textBaseline = 'middle';
     const занято = [];
@@ -22163,6 +22299,7 @@ function рисоватьМини() {
     }
     с.restore();
   }
+  if (window.__метки) window.__метки.рисовать(с, вX, вZ, w, пр, большая);
   // своя стрелка — поверх всех
   const кx = вX(поз.x), кz = вZ(поз.z);
   с.save(); с.translate(кx, кz); с.rotate(-поз.угол + Math.PI);
@@ -22172,7 +22309,12 @@ function рисоватьМини() {
     с.font = '700 ' + Math.round(10 * пр) + 'px system-ui, sans-serif'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillStyle = '#E0503A'; с.fillText('С', w / 2, 9 * пр);
   }
 }
-мини.addEventListener('click', () => { мини.classList.toggle('большая'); рисоватьМини(); });
+// маленькая → большая; на большой тап ставит метку (модуль «метка»), крестик в углу — закрыть
+мини.addEventListener('click', e => {
+  if (мини.classList.contains('большая') && window.__метки && window.__метки.тап(e)) return;
+  мини.classList.toggle('большая'); рисоватьМини();
+});
+window.__рисоватьМини = рисоватьМини;
 
 // ===================== ОРИЕНТИРЫ =====================
 // 1) Настоящие уличные таблички — синие, «ул. Центральная», на столбиках
