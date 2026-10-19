@@ -13091,9 +13091,9 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     #онлКн.в-сети { border-color: #6AD06A; color: #BFF5BF; }
     #онлКн:focus-visible, .онл button:focus-visible { outline: 2px solid #F4C430; outline-offset: 2px; }
     .онл { font: 13px/1.35 system-ui, -apple-system, Roboto, sans-serif; color: #F2E6CC; }
-    #онлОкно { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; background: rgba(8,6,4,0.72); padding: 12px; }
+    #онлОкно { position: fixed; inset: 0; z-index: 30; display: none; background: rgba(8,6,4,0.72); padding: max(8px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); overflow-y: auto; overscroll-behavior: contain; }
     #онлОкно.открыто { display: flex; }
-    #онлОкно .лист { width: min(760px, 100%); max-height: 100%; overflow: auto; background: #1A140E; border: 1px solid rgba(242,230,204,0.25); border-radius: 16px; padding: 14px; }
+    #онлОкно .лист { width: min(760px, 100%); margin: auto; box-sizing: border-box; background: #1A140E; border: 1px solid rgba(242,230,204,0.25); border-radius: 16px; padding: 14px; }
     #онлОкно h2 { margin: 0 0 4px; font-size: 16px; letter-spacing: 2px; }
     #онлОкно .мел { color: #B8AC94; font-size: 12px; margin: 0 0 10px; }
     #онлОкно .роли { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 8px; }
@@ -13105,6 +13105,13 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     #онлОкно .низ { display: flex; gap: 8px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
     #онлОкно input { flex: 1; min-width: 140px; height: 34px; border-radius: 10px; border: 1px solid rgba(242,230,204,0.3); background: #120E0A; color: #F2E6CC; padding: 0 10px; font: inherit; }
     #онлОкно .кн2, #онлПанель .кн2 { height: 34px; padding: 0 14px; border-radius: 10px; border: 1px solid rgba(242,230,204,0.3); background: #2A2018; color: #F2E6CC; font: 700 12px system-ui, sans-serif; cursor: pointer; }
+    @media (max-height: 460px) {
+      #онлОкно .лист { padding: 10px 12px; }
+      #онлОкно h2 { font-size: 14px; } #онлОкно .мел { margin-bottom: 6px; }
+      #онлОкно .роли { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 6px; }
+      #онлОкно .роль { min-height: 0; padding: 6px 8px; } #онлОкно .роль b { font-size: 13px; margin-bottom: 1px; } #онлОкно .роль small { font-size: 10.5px; line-height: 1.3; }
+      #онлОкно .низ { margin-top: 6px; } #онлОкно input, #онлОкно .кн2 { height: 32px; }
+    }
     #онлОкно code { display: block; word-break: break-all; background: #0E0B08; padding: 8px; border-radius: 8px; font-size: 11px; margin: 8px 0; user-select: all; }
     #онлПанель { position: fixed; left: calc(10px + env(safe-area-inset-left, 0px)); top: calc(88px + env(safe-area-inset-top, 0px)); z-index: 8; width: 172px; display: none; font-size: 11.5px;
                  background: rgba(18,12,8,0.6); border: 1px solid rgba(242,230,204,0.2); border-radius: 12px; padding: 6px 9px; pointer-events: auto; }
@@ -13372,7 +13379,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       эл('button', { class: 'кн2', onclick: () => { const к = кодКомнаты(код.value); if (к) сменитьКомнату(к); } }, 'Войти'),
       эл('button', { class: 'кн2', onclick: () => сменитьКомнату(новыйКод()) }, 'Новая'));
     if (комната !== ОБЩАЯ) строкаК.append(ссылка, эл('button', { class: 'кн2', onclick: () => сменитьКомнату(ОБЩАЯ) }, 'В общую'));
-    лист.append(строкаК);
+    строкаК.style.margin = '0 0 8px'; сетка.before(строкаК);
     const ник = эл('input', { placeholder: 'Ник для «Жителя» (необязательно)', maxlength: '14', 'aria-label': 'Ник' }); ник.value = я.ник;
     ник.addEventListener('change', () => { я.ник = чистыйНик(ник.value); ник.value = я.ник; хран.положить('brzd-nik', я.ник); });
     const низ = эл('div', { class: 'низ' }, ник);
@@ -13396,6 +13403,12 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       #онлКарта li { display: flex; gap: 10px; align-items: flex-start; }
       #онлКарта li b { flex: 0 0 26px; text-align: center; font-size: 17px; }
       #онлКарта .низ { margin-top: 12px; display: flex; justify-content: space-between; align-items: center; gap: 10px; color: #B8AC94; font-size: 11.5px; }
+      @media (max-height: 420px) {
+        #онлКарта .к { padding: 10px 14px; font-size: 12.5px; line-height: 1.35; }
+        #онлКарта h2 { font-size: 18px; margin-bottom: 2px; } #онлКарта .зад { margin-bottom: 6px; }
+        #онлКарта ol { gap: 4px; } #онлКарта li b { font-size: 14px; flex-basis: 20px; } #онлКарта .низ { margin-top: 8px; }
+        #онлКарта button { height: 32px !important; }
+      }
       #онлКарта button { height: 38px; padding: 0 20px; border-radius: 19px; border: 1px solid #F4C430; background: none; color: #F4C430; font: 800 12px system-ui, sans-serif; letter-spacing: 2px; cursor: pointer; }
     `;
     document.head.appendChild(ст);
@@ -18874,21 +18887,21 @@ window.ДЕТАЛИ.push(['главное меню', function (API) {
       padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(26px, calc(env(safe-area-inset-left) + 12px)) !important;
       background: linear-gradient(90deg, rgba(10,6,4,0.93) 0%, rgba(10,6,4,0.78) 30%, rgba(10,6,4,0.18) 60%, rgba(10,6,4,0) 100%) !important; }
     #старт.гм > h1, #старт.гм > p, #старт.гм > #гулять, #старт.гм > #продолжить, #старт.гм > #заново { display: none !important; }
-    .гмЛево { display: flex; flex-direction: column; width: min(400px, 48vw); gap: 0.6vh; }
-    .гмЛого { margin: 0; color: var(--акцент); font-weight: 400; font-size: clamp(22px, 7.6vh, 48px); letter-spacing: 0.16em; line-height: 1; white-space: nowrap; text-shadow: 0 3px 18px rgba(0,0,0,0.6); }
+    .гмЛево { display: flex; flex-direction: column; width: min(620px, 50vw); gap: 0.6vh; }
+    #старт .гмЛого { margin: 0; color: var(--акцент); font-weight: 400; font-size: clamp(22px, min(7.6vh, 4.6vw), 76px); letter-spacing: 0.16em; line-height: 1; white-space: nowrap; text-wrap: nowrap; text-shadow: 0 3px 18px rgba(0,0,0,0.6); }
     .гмЛого span { display: inline-block; animation: гмБуква .7s cubic-bezier(.2,.7,.2,1) both; }
-    .гмЧасть { display: flex; align-items: center; gap: 10px; color: var(--текст); font-size: clamp(10px, 2.9vh, 13px); letter-spacing: 0.32em; margin: 0.6vh 0 2.2vh; opacity: 0.85; animation: гмВход .6s .55s both; }
+    .гмЧасть { display: flex; align-items: center; gap: 10px; color: var(--текст); font-size: clamp(10px, 2.9vh, 20px); letter-spacing: 0.32em; margin: 0.6vh 0 2.2vh; opacity: 0.85; animation: гмВход .6s .55s both; }
     .гмЧасть::after { content: ''; flex: 0 0 60px; height: 1px; background: linear-gradient(90deg, var(--акцент), transparent); }
     .гмПункты { display: flex; flex-direction: column; align-items: flex-start; }
     .гмП { position: relative; display: flex; align-items: baseline; gap: 12px; min-height: max(34px, 7.4vh); padding: 0 14px 0 18px; margin-left: -18px; border: 0; background: none;
-           color: var(--текст); font-size: clamp(14px, 4.4vh, 21px); letter-spacing: 0.18em; text-align: left; cursor: pointer; touch-action: manipulation;
+           color: var(--текст); font-size: clamp(14px, 4.4vh, 32px); letter-spacing: 0.18em; text-align: left; cursor: pointer; touch-action: manipulation;
            transition: color .15s, transform .15s; animation: гмВход .5s both; animation-delay: calc(var(--i) * 70ms + 450ms); -webkit-tap-highlight-color: transparent; }
     .гмП::before { content: ''; position: absolute; left: 4px; top: 22%; bottom: 22%; width: 3px; border-radius: 2px; background: var(--акцент); transform: scaleY(0); transition: transform .15s; }
     .гмП:hover:not(:disabled), .гмП:focus-visible, .гмП.главный { color: var(--акцент); }
     .гмП:hover:not(:disabled), .гмП:focus-visible { transform: translateX(5px); outline: none; }
     .гмП:hover:not(:disabled)::before, .гмП:focus-visible::before, .гмП.главный::before { transform: scaleY(1); }
     .гмП:active:not(:disabled) { transform: translateX(5px) scale(0.98); }
-    .гмП small { font: 500 clamp(10px, 2.7vh, 12px) system-ui, sans-serif; letter-spacing: 0.04em; color: var(--тусклый); white-space: nowrap; }
+    .гмП small { font: 500 clamp(10px, 2.2vh, 18px) system-ui, sans-serif; letter-spacing: 0.04em; color: var(--тусклый); white-space: nowrap; }
     .гмП:disabled { opacity: 0.4; cursor: default; }
     .гмП:disabled small { opacity: 0; }
     .гмЖдём { margin-top: 1vh; display: flex; flex-direction: column; gap: 6px; max-width: 300px; }
@@ -18896,8 +18909,8 @@ window.ДЕТАЛИ.push(['главное меню', function (API) {
     .гмПолоса { height: 3px; border-radius: 2px; background: rgba(242,230,204,0.14); overflow: hidden; }
     .гмПолоса i { display: block; height: 100%; width: 8%; background: var(--акцент); transition: width .4s; }
     #старт.гм #загрузка { text-align: left; font-size: 11px; }
-    .гмСовет { position: absolute; left: max(26px, calc(env(safe-area-inset-left) + 12px)); bottom: max(26px, calc(env(safe-area-inset-bottom) + 22px)); max-width: min(400px, 46vw);
-               font: italic 500 12px/1.4 system-ui, sans-serif; color: var(--тусклый); transition: opacity .6s; }
+    .гмСовет { position: absolute; left: max(26px, calc(env(safe-area-inset-left) + 12px)); bottom: max(26px, calc(env(safe-area-inset-bottom) + 22px)); max-width: min(560px, 46vw);
+               font: italic 500 clamp(12px, 1.9vh, 18px)/1.4 system-ui, sans-serif; color: var(--тусклый); transition: opacity .6s; }
     #старт.гм #подпись { position: absolute; left: max(26px, calc(env(safe-area-inset-left) + 12px)); bottom: max(8px, env(safe-area-inset-bottom)); font-size: 9px; opacity: 0.6; text-align: left; }
     #старт.гм #безПанелей { margin-top: 1vh; text-align: left; }
     .гмПраво { position: absolute; right: max(16px, calc(env(safe-area-inset-right) + 10px)); bottom: max(16px, calc(env(safe-area-inset-bottom) + 10px)); width: 236px; box-sizing: border-box;
@@ -19101,6 +19114,28 @@ window.ДЕТАЛИ.push(['главное меню', function (API) {
   }
   обновить(); загрузкаШаг();
   window.__главноеМеню = { обновить, авторы, пункты: { пДальше, пНовая, пОнлайн, пАчивки, пНастр, пАвторы }, открыто: () => открыто };
+}]);
+
+</script>
+<script>
+// Размер интерфейса под экран: игра рисовалась под телефон (~850×400). На планшете и компе
+// кнопки, панели и окна увеличиваем (CSS zoom, до ×1.6), чтобы не были мелкими. Холст, джойстик,
+// радар Шторма и руль Феникса не трогаем: там важны точные координаты пальца.
+window.ДЕТАЛИ.push(['размер интерфейса', function () {
+  const ЧТО = ['#кнопки', '#шестерня', '#онлКн', '#компас', '#миникарта:not(.большая)', '#улица', '#цель', '#совет', '#меню',
+    '#онлПанель', '#онлСилы', '#онлФразы', '#онлСтрелка', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
+    '#войнаПанель', '#войнаНаВойну', '#войнаКинуть', '#войнаДрон', '#войнаЖизни', '#войнаТревога',
+    '#полигонВерх', '#полигонКн1', '#полигонКн2', '#полигонСесть', '#полигонЛёт', '#полигонСвин', '#полётВВ', '#полётВН',
+    '#яшолёт', '#яшолётСесть', '#яшолётКуры', '#фениксСесть', '#выход-каб', '#кн-сюжет', '#кн-халупа', '#кн-шторм', '#озон-окно',
+    '#онлОкно .лист', '#итогиСлой > *', '#онлКарта .к', '#гмАвторы .лист'];
+  const ст = document.createElement('style');
+  ст.textContent = `:root { --ui: 1; } ${ЧТО.join(', ')} { zoom: var(--ui); }`;
+  document.head.appendChild(ст);
+  function обновить() {
+    const к = Math.max(1, Math.min(1.6, innerWidth / 1000, innerHeight / 560));
+    document.documentElement.style.setProperty('--ui', к.toFixed(2));
+  }
+  addEventListener('resize', обновить); обновить();
 }]);
 
 </script>
