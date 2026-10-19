@@ -21831,7 +21831,7 @@ await этап('Строю посёлок: деревья…');
   // ---- Три уровня детальности ----
   // рядом (до 80 м) — пышная крона из десятков пучков листьев;
   // дальше (до 260 м) — пучков меньше; у горизонта — просто объёмный силуэт.
-  const БЛИЖЕ = УР > 1 ? 80 : УР ? 60 : 40, СРЕДНЕ = УР > 1 ? 260 : УР ? 180 : 120, ДАЛЬШЕ = УР > 1 ? 1100 : УР ? 700 : 450;
+  let БЛИЖЕ = УР > 1 ? 80 : УР ? 60 : 40, СРЕДНЕ = УР > 1 ? 260 : УР ? 180 : 120, ДАЛЬШЕ = УР > 1 ? 1100 : УР ? 700 : 450;
   const nКругл = все.filter(д => !д.тополь).length || 1, nТоп = все.filter(д => д.тополь).length || 1;
   const сделать = (г, мат, n, тени) => { const о = new THREE.InstancedMesh(г, мат, n); о.count = 0; о.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3); о.castShadow = тени; о.receiveShadow = true; о.frustumCulled = false; if (мат === матКарт) о.customDepthMaterial = теньКарт; сцена.add(о); return о; };
   const матДаль = new THREE.MeshStandardMaterial({ map: текс('listva'), roughness: 1, color: цвет('#9AAA88') });
@@ -21865,7 +21865,8 @@ await этап('Строю посёлок: деревья…');
     for (const у of Object.values(уровни)) for (const о of у) { о.instanceMatrix.needsUpdate = true; if (о.instanceColor) о.instanceColor.needsUpdate = true; }
     стволы.instanceMatrix.needsUpdate = true;
   }
-  window.__деревья = { обновить: обновитьДеревья, все, мат: { карт: матКарт, серд: матСерд, даль: матДаль, кора: стволы.material } };
+  const дальность = (б, с, д) => { БЛИЖЕ = б; СРЕДНЕ = с; ДАЛЬШЕ = д; обновитьДеревья(tx0, tz0, true); };
+  window.__деревья = { обновить: обновитьДеревья, все, дальность, мат: { карт: матКарт, серд: матСерд, даль: матДаль, кора: стволы.material } };
   Object.assign(window.__счёт, { деревьев: все.filter(д => !д.тополь).length, тополей: все.filter(д => д.тополь).length, поСнимку: !!ДЕРЕВЬЯ });
 }
 
@@ -21948,7 +21949,8 @@ const трава = (() => {
   g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3));
   g.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  const [МАКС, R, ШАГ] = УЛЬТРА ? [22000, 55, 0.46] : УР === 1 ? [2000, 22, 0.7] : УР === 0 ? [900, 15, 0.85] : телефон ? [3500, 28, 0.62] : [7000, 36, 0.5];
+  const [МАКС, R0, ШАГ0] = УЛЬТРА ? [22000, 55, 0.46] : УР === 1 ? [2000, 22, 0.7] : УР === 0 ? [900, 15, 0.85] : телефон ? [3500, 28, 0.62] : [7000, 36, 0.5];
+  let R = R0, ШАГ = ШАГ0;
   const меш = new THREE.InstancedMesh(g, мягкийСвет(new THREE.MeshStandardMaterial({ map: т, alphaTest: 0.45, side: THREE.DoubleSide, roughness: 1 }), 0.12), МАКС);
   меш.receiveShadow = true; меш.frustumCulled = false; сцена.add(меш);
   const м = new THREE.Matrix4(), q = new THREE.Quaternion(), ось = new THREE.Vector3(0, 1, 0), ц = new THREE.Color();
@@ -21980,7 +21982,9 @@ const трава = (() => {
   }
   // растёт ли тут трава (не дорога, не двор, не пашня, не дом): -1 — нет, иначе сухость 0…255
   const можно = (x, z) => { const [r, gр, b] = сплатВ(x, z); return b > 120 || r > 120 ? -1 : gр; };
-  return { обновить, меш, можно, урезать: () => { предел = Math.floor(МАКС / 2); обновить(cx0, cz0, true); } };
+  // графика на лету: травинок не больше, чем выделено при стройке; радиус и шаг — как у ступени
+  const настроить = (макс, r, шаг) => { предел = Math.min(МАКС, макс); R = r; ШАГ = макс > МАКС ? шаг * Math.sqrt(макс / МАКС) : шаг; обновить(cx0, cz0, true); };   // больше запаса — реже, но на тот же радиус
+  return { обновить, меш, можно, настроить, урезать: () => { предел = Math.floor(МАКС / 2); обновить(cx0, cz0, true); } };
 })();
 window.__трава = трава;
 трава.обновить(поз.x, поз.z, true);
@@ -22539,14 +22543,44 @@ setTimeout(готов, 12000);            // медленный интернет
   // на весь экран и закрепить горизонтально — где браузер разрешает (в рамке может не разрешить)
   if (window.__весьЭкран) window.__весьЭкран.вкл();
 });
+// Графика — на лету, без перезагрузки (игра не теряет, где ты и что сделал): чёткость, тени, трава, дальность
+// деревьев. То, что строится один раз при загрузке посёлка (фото-текстуры 1К, сколько сельчан, детальность
+// крон и луж, «красивая картинка» ультры), — со следующего запуска.
+const ГРАФИКА_ЖИВЬЁМ = {
+  низкая:  { пр: 1, тени: false, мягкие: false, карта: 1024, тень: 50, трава: [900, 15, 0.85], деревья: [40, 120, 450] },
+  средняя: { пр: 1.25, тени: true, мягкие: false, карта: 1024, тень: 50, трава: [2000, 22, 0.7], деревья: [60, 180, 700] },
+  высокая: { пр: телефон ? 1.6 : 2, тени: true, мягкие: true, карта: телефон ? 1024 : 2048, тень: 70, трава: телефон ? [3500, 28, 0.62] : [7000, 36, 0.5], деревья: [80, 260, 1100] },
+  ультра:  { пр: 2, тени: true, мягкие: true, карта: 4096, тень: 110, трава: [22000, 55, 0.46], деревья: [80, 260, 1100] },
+};
+let графикаСейчас = КАЧЕСТВО;
+function графикаЖивьём(к) {
+  const П = ГРАФИКА_ЖИВЬЁМ[к]; if (!П) return;
+  const пр = Math.min(devicePixelRatio || 1, П.пр);
+  замер.база = пр; замер.ступень = 0; замер.запас = 0; рендер.setPixelRatio(пр); размер();
+  const тип = П.мягкие ? THREE.PCFSoftShadowMap : THREE.PCFShadowMap;
+  if (рендер.shadowMap.enabled !== П.тени || рендер.shadowMap.type !== тип) {
+    рендер.shadowMap.enabled = П.тени; рендер.shadowMap.type = тип;
+    сцена.traverse(о => { if (о.material) for (const м of Array.isArray(о.material) ? о.material : [о.material]) м.needsUpdate = true; });   // шейдеры — заново, с тенями или без
+  }
+  if (солнце.shadow.mapSize.x !== П.карта) { солнце.shadow.mapSize.set(П.карта, П.карта); if (солнце.shadow.map) { солнце.shadow.map.dispose(); солнце.shadow.map = null; } }
+  Object.assign(солнце.shadow.camera, { left: -П.тень, right: П.тень, top: П.тень, bottom: -П.тень }); солнце.shadow.camera.updateProjectionMatrix();
+  трава.настроить(...П.трава);
+  window.__деревья && window.__деревья.дальность && window.__деревья.дальность(...П.деревья);
+  if (ПОСТ) ПОСТ.вкл = к === 'ультра';
+  графикаСейчас = к;
+}
 document.querySelectorAll('#графика .кн').forEach(к => {
   к.setAttribute('aria-pressed', String(к.dataset.к === КАЧЕСТВО));
   к.addEventListener('click', () => {
-    if (к.dataset.к === КАЧЕСТВО) return;
+    if (к.dataset.к === графикаСейчас) return;
     try { localStorage.setItem('бороздиновский.графика', к.dataset.к); } catch (e) {}
-    location.reload();                         // графика задаётся при стройке посёлка
+    document.querySelectorAll('#графика .кн').forEach(б => б.setAttribute('aria-pressed', String(б === к)));
+    try { графикаЖивьём(к.dataset.к); } catch (e) { console.error('графика:', e); }
+    const подробнее = (к.dataset.к === 'ультра') !== УЛЬТРА || Math.abs(КАЧЕСТВА.indexOf(к.dataset.к) - УР) > 1;
+    window.__подсказки && window.__подсказки.совет('Графика: ' + к.dataset.к + ' ✓' + (подробнее ? ' Детали (текстуры, сельчане) — со следующего запуска.' : ''), 3);
   });
 });
+window.__графикаЖивьём = графикаЖивьём;
 
 // ручки для проверок
 window.__счёт = window.__счёт || {};
