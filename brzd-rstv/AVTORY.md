@@ -57,3 +57,8 @@
 - Самолёт Ан-2 (samolyot_an) — «An-2 airplane lowpoly», Mehozavr, CC0, https://opengameart.org/content/an-2-airplane-lowpoly
 - Грузовик (gruzovik) — «Free Low Poly Vehicles Pack», Raphael Gonçalves (rgsdev), CC0, https://opengameart.org/content/free-low-poly-vehicles-pack
 - УАЗ (uaz) — «Soviet military off-road vehicle», artie31, CC0, https://opengameart.org/content/soviet-military-off-road-vehicle
+
+## Шрифты (SIL Open Font License 1.1) — папка fonts/
+- Ruslan Display — Oleg Pospelov (название в меню)
+- Rubik — Hubert & Fischer (кнопки меню)
+- PT Serif — ParaType (подзаголовки, курсив)
