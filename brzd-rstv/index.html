@@ -13133,6 +13133,14 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     #онлПанель .кн2[disabled] { opacity: 0.4; }
     #онлФразы { position: fixed; left: calc(192px + env(safe-area-inset-left, 0px)); top: calc(88px + env(safe-area-inset-top, 0px)); z-index: 9; display: none; flex-wrap: wrap; gap: 6px; width: 260px; }
     #онлФразы.видно { display: flex; }
+    #онлФразы .чатРяд { display: flex; gap: 6px; width: 100%; }
+    #онлФразы input { flex: 1; min-width: 0; height: 34px; border-radius: 17px; border: 1px solid rgba(244,196,48,0.55); background: rgba(18,12,8,0.92); color: #F2E6CC; padding: 0 12px; font: 14px system-ui, sans-serif; }
+    #онлФразы .чатРяд button { width: 40px; padding: 0; border-color: #F4C430; color: #F4C430; font-size: 15px; }
+    #онлЧат { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; width: min(72vw, 460px);
+              display: flex; flex-direction: column; align-items: center; gap: 3px; pointer-events: none; }
+    #онлЧат div { max-width: 100%; padding: 3px 11px; border-radius: 11px; background: rgba(14,10,6,0.74); color: #F2E6CC; font: 13px/1.35 system-ui, sans-serif; overflow-wrap: anywhere; transition: opacity .6s; }
+    #онлЧат b { font-weight: 800; }
+    body.кино #онлЧат { opacity: 0; }
     #онлФразы button { height: 32px; padding: 0 10px; border-radius: 16px; border: 1px solid rgba(242,230,204,0.3); background: rgba(18,12,8,0.85); color: #F2E6CC; font: 600 12px system-ui, sans-serif; }
     #онлСтрелка { position: fixed; left: 50%; top: calc(60px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 7; display: none; pointer-events: none;
                   text-align: center; color: #fff; font: 800 12px system-ui, sans-serif; text-shadow: 0 1px 3px #000; }
@@ -13532,6 +13540,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     }
     if (м.k === 'h') { приветОт(п, м); return; }
     const сейчас = performance.now();
+    if (м.k === 'ч') { if (typeof м.т === 'string') чатПришёл(п, м.т); return; }
     if (м.k === 'ф') { if (Number.isInteger(м.н) && м.н >= 0 && м.н < ФРАЗЫ.length && сейчас - (п.фразаТ || 0) > 400) { п.фразаТ = сейчас; пузырь(п, ФРАЗЫ[м.н]); } return; }
     if (м.k === 'с') {
       if (typeof м.счёт !== 'number' || сейчас - (п.счётТ || 0) < 300) return; п.счётТ = сейчас;
@@ -13739,6 +13748,38 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   }
   const мой = { пуз: null };
 
+  // ===================== ЧАТ =====================
+  // Короткие сообщения (до 80 знаков): облачко над головой и строка в ленте над джойстиком (гаснет за 8 с).
+  // Мат прячем звёздочками, если в ⚙ МАТ выключен. Не чаще раза в 1,5 с; от одного игрока — не больше 3 за 5 с.
+  const лента = эл('div', { id: 'онлЧат', 'aria-live': 'polite' }); document.body.appendChild(лента);
+  const МАТ_Р = /(х[уy][йияеёюл]|п[иi]зд|[её]б[аеуы]?(?:ну|ан|ат|ал|ош|уч|ыв|ись|ля)|бля|сук[аио]|муд[аио]к|пид[оа]р|гандон|залуп|шлюх)/gi;
+  const матВклЧат = () => { try { return localStorage.getItem('бороздиновский.мат') !== 'нет'; } catch (e) { return true; } };
+  const чистыйЧат = т => String(т || '').replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  const безМата = т => матВклЧат() ? т : т.replace(МАТ_Р, с => с[0] + '*'.repeat(Math.max(1, с.length - 1)));
+  function вЛенту(кто, цвет, т) {
+    const стр = эл('div'); const и = эл('b', { style: `color:${цвет}` }, кто + ': '); стр.append(и, document.createTextNode(т));
+    лента.appendChild(стр); while (лента.children.length > 5) лента.firstChild.remove();
+    setTimeout(() => { стр.style.opacity = 0; setTimeout(() => стр.remove(), 700); }, 8000);
+  }
+  const коротко = т => т.length > 26 ? т.slice(0, 25) + '…' : т;
+  let мойЧатТ = 0;
+  function написать(т) {
+    т = чистыйЧат(т); if (!т || !я.роль) return false;
+    const сейчас = performance.now(); if (сейчас - мойЧатТ < 1500) { совет('Не так быстро — секунду.', 1.5); return false; }
+    мойЧатТ = сейчас;
+    всем({ k: 'ч', т });
+    const р = РОЛИ[я.роль];
+    пузырь(мой, коротко(безМата(т))); вЛенту(я.роль === 'житель' ? (я.ник || 'Житель') : (я.роль === 'шторм' ? '⚡ Шторм' : р.имя), р.цвет, безМата(т));
+    return true;
+  }
+  function чатПришёл(п, т) {
+    т = чистыйЧат(т); if (!т || !п.роль) return;
+    const сейчас = performance.now(); п.чатТ = (п.чатТ || []).filter(x => сейчас - x < 5000); if (п.чатТ.length >= 3) return; п.чатТ.push(сейчас);
+    const р = РОЛИ[рольПира(п)] || {};
+    пузырь(п, коротко(безМата(т))); вЛенту(подписьПира(п), п.роль === 'шторм' && п.шторм ? '#F4C430' : (р.цвет || '#F2E6CC'), безМата(т));
+    бип([880], 0.05, 0.03, 'sine');
+  }
+
   // ===================== ПРЕДМЕТЫ ЗАДАЧ =====================
   const м = (ц, доп = {}) => new THREE.MeshStandardMaterial({ color: API.цвет ? API.цвет(ц) : new THREE.Color(ц), roughness: 0.6, ...доп });
   const ящ = (w, h, d, мат, x = 0, y = 0, z = 0) => { const о = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), мат); о.position.set(x, y, z); о.castShadow = true; return о; };
@@ -13866,6 +13907,13 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       if (!всеГотовы()) { пуск.disabled = true; пуск.title = 'Сначала все должны сделать свои задачи'; }
       силы.append(пуск); силы.classList.add('видно');
     } else if (всеГотовы()) панель.append(эл('div', { style: 'font-size:11px;color:#F4C430;margin-top:6px' }, [...пиры.values()].some(п => п.роль === 'шторм' && п.шторм) ? 'Все задачи сделаны! Шторм готовит запуск…' : 'Все задачи сделаны! Ждём Шторма — запуск за ним.'));
+  }
+  {
+    const поле = эл('input', { type: 'text', maxlength: '80', placeholder: 'Написать в чат…', 'aria-label': 'Сообщение в чат', enterkeyhint: 'send' });
+    const отпр = () => { if (написать(поле.value)) { поле.value = ''; поле.blur(); фразы.classList.remove('видно'); } };
+    поле.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); отпр(); } });
+    поле.addEventListener('keyup', e => e.stopPropagation());
+    фразы.append(эл('div', { class: 'чатРяд' }, поле, эл('button', { onclick: отпр, 'aria-label': 'Отправить' }, '➤')));
   }
   фразы.append(...ФРАЗЫ.map((т, i) => эл('button', { onclick: () => { всем({ k: 'ф', н: i }); пузырь(мой, т); фразы.classList.remove('видно'); } }, т)));
 
@@ -14105,7 +14153,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     }
     if (я.роль === 'шторм') { const г = всеГотовы(); if (г !== былоГотово) { былоГотово = г; обновитьПанель(); } }   // кнопка запуска оживает, когда все готовы
   });
-  window.__онлайн = { я, пиры, РОЛИ, подписьПира, взятьРоль, выборРоли, сила, разложить, обновитьПанель, предметы: () => предметы, пир, приветОт, всем };   // пир и приветОт — для проверок
+  window.__онлайн = { я, пиры, РОЛИ, подписьПира, написать, чатПришёл, взятьРоль, выборРоли, сила, разложить, обновитьПанель, предметы: () => предметы, пир, приветОт, всем };   // пир и приветОт — для проверок
 }]);
 
 </script>
@@ -19462,7 +19510,7 @@ window.ДЕТАЛИ.push(['сезоны', function (API) {
 // радар Шторма и руль Феникса не трогаем: там важны точные координаты пальца.
 window.ДЕТАЛИ.push(['размер интерфейса', function () {
   const ЧТО = ['#кнопки', '#шестерня', '#онлКн', '#компас', '#миникарта:not(.большая)', '#улица', '#цель', '#совет', '#меню',
-    '#онлПанель', '#онлСилы', '#онлФразы', '#онлСтрелка', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
+    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
     '#войнаПанель', '#войнаНаВойну', '#войнаКинуть', '#войнаДрон', '#войнаЖизни', '#войнаТревога',
     '#полигонВерх', '#полигонКн1', '#полигонКн2', '#полигонСесть', '#полигонЛёт', '#полигонСвин', '#полётВВ', '#полётВН',
     '#яшолёт', '#яшолётСесть', '#яшолётКуры', '#фениксСесть', '#выход-каб', '#кн-сюжет', '#кн-халупа', '#кн-шторм', '#озон-окно',
