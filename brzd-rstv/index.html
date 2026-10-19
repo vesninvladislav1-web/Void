@@ -9878,7 +9878,7 @@ window.ДЕТАЛИ.push(['люди 3D', function (API) {
     const j = (window.__герои3д || []).indexOf(г);
     if (j >= 0) window.__герои3д.splice(j, 1);
   }
-  window.__люди3д = { пул, игрок: () => игрокМ, переодеть, аватар, убратьАватар, готово, мх, модель, убратьГероя };
+  window.__люди3д = { пул, игрок: () => игрокМ, переодеть, аватар, убратьАватар, готово, мх, модель, убратьГероя, прицепить };
 }]);
 
 </script>
@@ -13496,7 +13496,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   }
   async function привет(кому) {
     if (!я.роль) return;
-    const д = { k: 'h', роль: я.роль, ник: я.ник, t0: я.t0, счёт: я.счёт, облик: я.роль === 'шторм' && я.облик ? я.облик : undefined };
+    const д = { k: 'h', роль: я.роль, ник: я.ник, t0: я.t0, счёт: я.счёт, облик: я.роль === 'шторм' && я.облик ? я.облик : undefined, гр: window.__гардероб ? window.__гардероб.строка() : undefined };
     кому ? отправить(кому, д) : всем(д);
   }
   const идОк = ид => typeof ид === 'string' && ид.length > 0 && ид.length <= 32 && ид !== я.ид;
@@ -13578,6 +13578,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   function приветОт(п, м) {
     const роль = typeof м.роль === 'string' && есть(РОЛИ, м.роль) ? м.роль : null;
     if (!роль) return;
+    п.гр = typeof м.гр === 'string' ? м.гр.slice(0, 60) : '';          // что надето (гардероб) — проверит сам гардероб
     const новый = п.роль !== роль;
     const облик = роль === 'шторм' && typeof м.облик === 'string' && есть(РОЛИ, м.облик) && м.облик !== 'шторм' ? м.облик : null;
     const сменаОблика = (п.облик || null) !== облик; п.облик = облик;
@@ -14153,7 +14154,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     }
     if (я.роль === 'шторм') { const г = всеГотовы(); if (г !== былоГотово) { былоГотово = г; обновитьПанель(); } }   // кнопка запуска оживает, когда все готовы
   });
-  window.__онлайн = { я, пиры, РОЛИ, подписьПира, написать, чатПришёл, взятьРоль, выборРоли, сила, разложить, обновитьПанель, предметы: () => предметы, пир, приветОт, всем };   // пир и приветОт — для проверок
+  window.__онлайн = { я, пиры, РОЛИ, подписьПира, написать, чатПришёл, привет, взятьРоль, выборРоли, сила, разложить, обновитьПанель, предметы: () => предметы, пир, приветОт, всем };   // пир и приветОт — для проверок
 }]);
 
 </script>
@@ -18932,7 +18933,7 @@ window.ДЕТАЛИ.push(['главное меню', function (API) {
   const чит = к => { try { return JSON.parse(localStorage.getItem(к)) || null; } catch (e) { return null; } };
   const стиль = document.createElement('style');
   стиль.textContent = `
-    body.гм > :not(#мир):not(#старт):not(#меню):not(#итогиСлой):not(#онлОкно):not(#поверни):not(#гмАвторы):not(#глава):not(#онлКарта) { visibility: hidden !important; }
+    body.гм > :not(#мир):not(#старт):not(#меню):not(#итогиСлой):not(#онлОкно):not(#поверни):not(#гмАвторы):not(#глава):not(#онлКарта):not(#гардероб) { visibility: hidden !important; }
     #старт.гм { align-items: stretch !important; justify-content: center !important; text-align: left !important; gap: 0 !important;
       padding: max(14px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(26px, calc(env(safe-area-inset-left) + 12px)) !important;
       background: linear-gradient(90deg, rgba(10,6,4,0.93) 0%, rgba(10,6,4,0.78) 30%, rgba(10,6,4,0.18) 60%, rgba(10,6,4,0) 100%) !important; }
@@ -19164,6 +19165,167 @@ window.ДЕТАЛИ.push(['главное меню', function (API) {
   }
   обновить(); загрузкаШаг();
   window.__главноеМеню = { обновить, авторы, пункты: { пДальше, пНовая, пОнлайн, пАчивки, пНастр, пАвторы }, открыто: () => открыто };
+}]);
+
+</script>
+<script>
+// Гардероб: вещи за ачивки. Голова (одна вещь), лицо, шея. Выбор — в ⚙ → ГАРДЕРОБ, запоминается.
+// Крепится к костям модели в позе покоя (как очки и цепь у героев). В онлайне — видно всем: что надето,
+// уходит в приветствии (гр: «кепка,тёмные»), у других игроков вешаем то же самое.
+window.ДЕТАЛИ.push(['гардероб', function (API) {
+  const { THREE } = API;
+  const ц = h => API.цвет ? API.цвет(h) : new THREE.Color(h);
+  const мат = (h, доп = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: ц(h), roughness: 0.7 }, доп));
+  const полусфера = (r, м, сегм = 18) => new THREE.Mesh(new THREE.SphereGeometry(r, сегм, 9, 0, Math.PI * 2, 0, Math.PI / 2), м);
+  const ВЕЩИ = {
+    кепка: { слот: 'голова', имя: 'Кепка', знак: '🧢', ачивка: 'началось', ачИмя: 'Началось', кость: 'head', где: гл => [0, гл.y + 0.035, гл.z - 0.1],
+      сделать() { const г = new THREE.Group(), м = мат('#C62828', { roughness: 0.85 });
+        const верх = полусфера(0.104, м); верх.scale.set(1, 0.8, 1.08);
+        const козырёк = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.095, 0.008, 16, 1, false, -Math.PI / 2, Math.PI), м); козырёк.position.set(0, 0.004, 0.075); козырёк.rotation.x = 0.12;
+        const пуговка = new THREE.Mesh(new THREE.SphereGeometry(0.01, 6, 4), м); пуговка.position.y = 0.083;
+        г.add(верх, козырёк, пуговка); return г; } },
+    ушанка: { слот: 'голова', имя: 'Ушанка', знак: '🪖', ачивка: 'ростов', ачИмя: 'Продолжение следует', кость: 'head', где: гл => [0, гл.y + 0.02, гл.z - 0.1],
+      сделать() { const г = new THREE.Group(), мех = мат('#5A4632', { roughness: 1 }), мех2 = мат('#7A644A', { roughness: 1 });
+        const верх = полусфера(0.118, мех); верх.scale.set(1, 0.9, 1.1);
+        const лоб = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.05, 0.03), мех2); лоб.position.set(0, 0.06, 0.098); лоб.rotation.x = -0.45;
+        г.add(верх, лоб);
+        for (const s of [-1, 1]) { const ухо = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.11, 0.09), мех2); ухо.position.set(s * 0.112, -0.05, 0.0); г.add(ухо); }
+        return г; } },
+    каска: { слот: 'голова', имя: 'Каска', знак: '⛑', ачивка: 'ополченец', ачИмя: 'Ополченец', кость: 'head', где: гл => [0, гл.y + 0.025, гл.z - 0.1],
+      сделать() { const г = new THREE.Group(), м = мат('#4B5A34', { roughness: 0.75 });
+        const верх = полусфера(0.126, м); верх.scale.set(1, 0.85, 1.12);
+        const поля = new THREE.Mesh(new THREE.TorusGeometry(0.128, 0.012, 6, 24), м); поля.rotation.x = Math.PI / 2; поля.scale.set(1, 1.12, 1);
+        г.add(верх, поля); return г; } },
+    шлем: { слот: 'голова', имя: 'Мотошлем', знак: '🏍', ачивка: 'мопед', ачИмя: 'Альфач', кость: 'head', где: гл => [0, гл.y - 0.005, гл.z - 0.085],
+      сделать() { const г = new THREE.Group();
+        const ш = new THREE.Mesh(new THREE.SphereGeometry(0.136, 20, 14), мат('#B71C1C', { roughness: 0.25, metalness: 0.3 })); ш.scale.set(1, 1.06, 1.1);
+        const стекло = new THREE.Mesh(new THREE.SphereGeometry(0.139, 20, 8, Math.PI / 2 - 0.85, 1.7, 1.2, 0.62), мат('#101418', { roughness: 0.05, metalness: 0.6 })); стекло.scale.set(1, 1.06, 1.1);
+        г.add(ш, стекло); return г; } },
+    ушки: { слот: 'голова', имя: 'Кошачьи ушки', знак: '🐱', ачивка: 'яша', ачИмя: 'Мяу', кость: 'head', где: гл => [0, гл.y + 0.0, гл.z - 0.09],
+      сделать() { const г = new THREE.Group(), ч = мат('#1A1A1A'), роз = мат('#F08AA8');
+        const ободок = new THREE.Mesh(new THREE.TorusGeometry(0.108, 0.007, 6, 20, Math.PI), ч); г.add(ободок);
+        for (const s of [-1, 1]) { const у = new THREE.Mesh(new THREE.ConeGeometry(0.038, 0.075, 4), ч); у.position.set(s * 0.065, 0.11, 0); у.rotation.z = -s * 0.35;
+          const вн = new THREE.Mesh(new THREE.ConeGeometry(0.022, 0.05, 4), роз); вн.position.set(s * 0.063, 0.103, 0.012); вн.rotation.z = -s * 0.35; г.add(у, вн); }
+        return г; } },
+    корона: { слот: 'голова', имя: 'Корона', знак: '🚽', ачивка: 'стульчак', ачИмя: 'Корона', кость: 'head', где: гл => [0, гл.y + 0.075, гл.z - 0.09],
+      сделать() { const г = new THREE.Group(), б = мат('#F4F4F0', { roughness: 0.3 });
+        const кольцо = new THREE.Mesh(new THREE.TorusGeometry(0.11, 0.026, 8, 26), б); кольцо.rotation.x = Math.PI / 2; кольцо.scale.set(1, 1.25, 1);
+        const петли = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.025), мат('#C8C8C0', { metalness: 0.6, roughness: 0.3 })); петли.position.set(0, 0.0, -0.14);
+        г.add(кольцо, петли); г.rotation.x = -0.12; return г; } },
+    бини: { слот: 'голова', имя: 'Шапка Clawd', знак: '🟧', ачивка: 'clawd', ачИмя: 'секретная', кость: 'head', где: гл => [0, гл.y + 0.03, гл.z - 0.1],
+      сделать() { const г = new THREE.Group(), о = мат('#E8823A', { roughness: 0.95 });
+        const верх = полусфера(0.108, о); верх.scale.set(1, 0.95, 1.08);
+        const отворот = new THREE.Mesh(new THREE.TorusGeometry(0.106, 0.02, 6, 24), мат('#C96A28', { roughness: 0.95 })); отворот.rotation.x = Math.PI / 2; отворот.scale.set(1, 1.08, 1);
+        г.add(верх, отворот);
+        for (const s of [-1, 1]) { const гл = new THREE.Mesh(new THREE.BoxGeometry(0.014, 0.03, 0.01), мат('#111')); гл.position.set(s * 0.03, 0.05, 0.106); г.add(гл); }
+        return г; } },
+    тёмные: { слот: 'лицо', имя: 'Тёмные очки', знак: '🕶', ачивка: 'лётчик', ачИмя: 'Лётчик', кость: 'head', где: гл => [0, гл.y + 0.002, гл.z + 0.022],
+      сделать() { const г = new THREE.Group(), о = мат('#111', { roughness: 0.3, metalness: 0.5 }), ст = мат('#0B0D10', { roughness: 0.05, metalness: 0.7 });
+        for (const s of [-1, 1]) { const л = new THREE.Mesh(new THREE.CircleGeometry(0.022, 16), ст); л.scale.set(1.35, 1, 1); л.position.set(s * 0.034, 0, 0.001);
+          const р = new THREE.Mesh(new THREE.TorusGeometry(0.022, 0.0025, 4, 18), о); р.scale.set(1.35, 1, 1); р.position.set(s * 0.034, 0, 0);
+          const д = new THREE.Mesh(new THREE.BoxGeometry(0.003, 0.004, 0.1), о); д.position.set(s * 0.07, 0.003, -0.05); г.add(л, р, д); }
+        const мост = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.003, 0.003), о); мост.position.y = 0.008; г.add(мост); return г; } },
+    цепь: { слот: 'шея', имя: 'Золотая цепь', знак: '📿', ачивка: 'босс', ачИмя: 'Пятиэтажный', кость: 'spine_03', где: (гл, И) => [0, И.рост * 0.84 - 0.065, 0.07],
+      сделать() { const г = new THREE.Group(), з = мат('#E2B93B', { roughness: 0.3, metalness: 0.45, emissive: ц('#3A2A00') });
+        const ц0 = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.006, 6, 32), з); ц0.rotation.x = Math.PI / 2 - 0.75; ц0.scale.set(0.95, 1.15, 1);
+        const кулон = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.04, 0.008), з); кулон.position.set(0, -0.07, 0.06); кулон.rotation.x = -0.6;
+        г.add(ц0, кулон); return г; } },
+  };
+  const СЛОТЫ = [['голова', 'ГОЛОВА'], ['лицо', 'ЛИЦО'], ['шея', 'ШЕЯ']];
+  const есть = () => (window.__итоги && window.__итоги.есть && window.__итоги.есть()) || {};
+  const открыта = ид => !!(ВЕЩИ[ид] && есть()[ВЕЩИ[ид].ачивка]);
+  let выбор = (() => { try { return JSON.parse(localStorage.getItem('бороздиновский.образ')) || {}; } catch (e) { return {}; } })();
+  const надето = () => СЛОТЫ.map(([с]) => выбор[с]).filter(ид => ид && открыта(ид));
+  const строка = () => надето().join(',');
+  const разобрать = с => { const сп = String(с || '').split(',').filter(ид => Object.prototype.hasOwnProperty.call(ВЕЩИ, ид)), занято = new Set(), итог = [];
+    for (const ид of сп) { const сл = ВЕЩИ[ид].слот; if (!занято.has(сл)) { занято.add(сл); итог.push(ид); } } return итог; };
+
+  // ---- надеть на модель: сбросить в позу покоя, прицепить, анимация продолжится сама ----
+  function надеть(м, список) {
+    const Л = window.__люди3д; if (!м || !Л || !Л.прицепить) return;
+    for (const о of м.__вещи || []) if (о.parent) о.parent.remove(о);
+    м.__вещи = [];
+    if (!список.length) return;
+    м.миксер.stopAllAction(); м.текущее = null;
+    let ск = null; м.корень.traverse(о => { if (!ск && о.isSkinnedMesh) ск = о.skeleton; }); if (ск) ск.pose();
+    const И = м.И, гл = И.глаза || new THREE.Vector3(0, И.рост * 0.93, 0.08);
+    for (const ид of список) {
+      const в = ВЕЩИ[ид], о = в.сделать(); о.traverse(ч => { if (ч.isMesh) ч.castShadow = true; });
+      const [x, y, z] = в.где(гл, И); Л.прицепить(м, в.кость, о, x, y, z); м.__вещи.push(о);
+    }
+    // у Шторма-голограммы своя одёжка светится, а вещи — обычные; у шлема прячем волосы, чтобы не торчали
+    м.корень.traverse(о => { if (о.isMesh && /_hair_/.test(о.material && о.material.name || '')) о.visible = !список.includes('шлем') && !(м.г && м.г.ёжик); });
+  }
+  let мояМ = null, моиБыли = '';
+  API.каждыйКадр.push(() => {
+    const Л = window.__люди3д; if (!Л) return;
+    const м = Л.игрок && Л.игрок(), с = строка();
+    if (м && (м !== мояМ || с !== моиБыли)) { мояМ = м; моиБыли = с; надеть(м, надето()); }
+    const О = window.__онлайн;
+    if (О && О.пиры) for (const п of О.пиры.values()) {
+      const ам = п.ав && п.ав.м; if (!ам) continue;
+      const гр = разобрать(п.гр).join(',');
+      if (ам.__гр !== гр) { ам.__гр = гр; надеть(ам, гр ? гр.split(',') : []); }
+    }
+  });
+
+  // ---- окно гардероба ----
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #гардероб { position: fixed; inset: 0; z-index: 16; display: none; background: rgba(8,5,3,0.86); padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom)); overflow-y: auto; }
+    #гардероб.видно { display: flex; }
+    #гардероб .лист { margin: auto; width: min(640px, 100%); background: #1A140E; border: 1px solid rgba(242,230,204,0.22); border-radius: 16px; padding: 14px; color: #F2E6CC; font: 13px system-ui, sans-serif; box-sizing: border-box; }
+    #гардероб h2 { margin: 0 0 2px; font: 800 16px system-ui, sans-serif; letter-spacing: 2px; } #гардероб .мел { color: #B8AC94; font-size: 12px; margin: 0 0 8px; }
+    #гардероб h3 { margin: 10px 0 6px; font: 700 11px system-ui, sans-serif; letter-spacing: 2px; color: #B8AC94; }
+    #гардероб .сетка { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
+    #гардероб .вещь { text-align: left; display: flex; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 12px; border: 1px solid rgba(242,230,204,0.18); background: #2A2018; color: #F2E6CC; font: inherit; cursor: pointer; min-height: 52px; }
+    #гардероб .вещь i { font-style: normal; font-size: 22px; } #гардероб .вещь b { display: block; font-size: 13px; } #гардероб .вещь small { color: #B8AC94; font-size: 11px; }
+    #гардероб .вещь.надета { border-color: #F4C430; background: linear-gradient(135deg, #3A2E10, #2A2018); } #гардероб .вещь.надета small { color: #F4C430; }
+    #гардероб .вещь[disabled] { opacity: 0.5; cursor: default; }
+    #гардероб .низ { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+    #гардероб .низ button { height: 36px; padding: 0 16px; border-radius: 18px; border: 1px solid #F4C430; background: none; color: #F4C430; font: 800 12px system-ui, sans-serif; letter-spacing: 1px; cursor: pointer; }
+  `;
+  document.head.appendChild(стиль);
+  const окно = document.createElement('div'); окно.id = 'гардероб'; окно.setAttribute('role', 'dialog'); окно.setAttribute('aria-label', 'Гардероб');
+  document.body.appendChild(окно);
+  окно.addEventListener('click', e => { if (e.target === окно) закрыть(); });
+  const закрыть = () => окно.classList.remove('видно');
+  function показать() {
+    окно.innerHTML = '';
+    const лист = document.createElement('div'); лист.className = 'лист';
+    const h = document.createElement('h2'); h.textContent = '👕 ГАРДЕРОБ';
+    const м = document.createElement('p'); м.className = 'мел'; м.textContent = 'Вещи открываются ачивками. В онлайне друзья видят, что на тебе.';
+    лист.append(h, м);
+    for (const [слот, подпись] of СЛОТЫ) {
+      const з = document.createElement('h3'); з.textContent = подпись; лист.appendChild(з);
+      const сетка = document.createElement('div'); сетка.className = 'сетка';
+      for (const [ид, в] of Object.entries(ВЕЩИ)) {
+        if (в.слот !== слот) continue;
+        const откр = открыта(ид), на = выбор[слот] === ид && откр;
+        const б = document.createElement('button'); б.className = 'вещь' + (на ? ' надета' : ''); б.disabled = !откр;
+        const зн = document.createElement('i'); зн.textContent = откр ? в.знак : '🔒';
+        const т = document.createElement('div'); const н = document.createElement('b'); н.textContent = откр || в.ачивка !== 'clawd' ? в.имя : '???';
+        const под = document.createElement('small'); под.textContent = на ? 'надето ✓' : откр ? 'надеть' : `ачивка «${в.ачИмя}»`;
+        т.append(н, под); б.append(зн, т);
+        б.addEventListener('click', () => { выбор[слот] = выбор[слот] === ид ? null : ид; сохранить(); показать(); });
+        сетка.appendChild(б);
+      }
+      лист.appendChild(сетка);
+    }
+    const низ = document.createElement('div'); низ.className = 'низ';
+    const снять = document.createElement('button'); снять.textContent = 'СНЯТЬ ВСЁ'; снять.addEventListener('click', () => { выбор = {}; сохранить(); показать(); });
+    const ок = document.createElement('button'); ок.textContent = 'ГОТОВО'; ок.addEventListener('click', закрыть);
+    низ.append(снять, ок); лист.appendChild(низ);
+    окно.appendChild(лист); окно.classList.add('видно');
+  }
+  function сохранить() { try { localStorage.setItem('бороздиновский.образ', JSON.stringify(выбор)); } catch (e) {} const О = window.__онлайн; if (О && О.привет) О.привет(); }
+  // ⚙ → ГАРДЕРОБ
+  { const меню = document.getElementById('меню');
+    if (меню) { const с = document.createElement('div'); с.className = 'строка'; const п = document.createElement('span'); п.textContent = 'ГАРДЕРОБ';
+      const б = document.createElement('button'); б.className = 'кн шрифт'; б.textContent = 'ОТКРЫТЬ';
+      б.addEventListener('click', () => { меню.classList.remove('открыто'); показать(); });
+      с.append(п, б); const ач = [...меню.querySelectorAll('.строка')].find(р => /АЧИВКИ/.test(р.textContent)); if (ач) ач.after(с); else меню.appendChild(с); } }
+  window.__гардероб = { ВЕЩИ, строка, показать, надеть, выбор: () => выбор, разобрать };
 }]);
 
 </script>
@@ -19514,7 +19676,7 @@ window.ДЕТАЛИ.push(['размер интерфейса', function () {
     '#войнаПанель', '#войнаНаВойну', '#войнаКинуть', '#войнаДрон', '#войнаЖизни', '#войнаТревога',
     '#полигонВерх', '#полигонКн1', '#полигонКн2', '#полигонСесть', '#полигонЛёт', '#полигонСвин', '#полётВВ', '#полётВН',
     '#яшолёт', '#яшолётСесть', '#яшолётКуры', '#фениксСесть', '#выход-каб', '#кн-сюжет', '#кн-халупа', '#кн-шторм', '#озон-окно',
-    '#онлОкно .лист', '#итогиСлой > *', '#онлКарта .к', '#гмАвторы .лист'];
+    '#онлОкно .лист', '#итогиСлой > *', '#онлКарта .к', '#гмАвторы .лист', '#гардероб .лист'];
   const ст = document.createElement('style');
   ст.textContent = `:root { --ui: 1; } ${ЧТО.join(', ')} { zoom: var(--ui); }`;
   document.head.appendChild(ст);
