@@ -13524,6 +13524,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
       if (п.x === null) { п.x = п.цx; п.z = п.цz; п.y = п.цy; п.угол = п.цугол; }
       п.поза = typeof м.поза === 'string' && /^[A-Za-z_]{1,32}$/.test(м.поза) ? м.поза : null;
       п.невидим = !!м.нв; п.вв = !!м.вв;                     // выбыл в войне за времянку
+      п.мп = !!м.мп;                                          // едет на мопеде
       const чис = (v, м0) => typeof v === 'number' && isFinite(v) ? Math.max(-м0, Math.min(м0, v)) : 0;
       п.лёт = !!м.лёт; п.кр = чис(м.кр, 3.2); п.тг = чис(м.тг, 1.6);
       п.са = п.лёт && typeof м.са === 'string' && /^[a-zа-яё0-9]{1,12}$/.test(м.са) ? м.са : null;     // с какой стоянки взлетел
@@ -14033,7 +14034,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
           const И = Ф.И; всем({ k: 'p', x: +И.P.x.toFixed(2), z: +И.P.z.toFixed(2), y: +И.P.y.toFixed(2), угол: +И.курс.toFixed(3), лёт: 1, кр: +И.крен.toFixed(2), тг: +И.тангаж.toFixed(2), са: И.откуда && И.откуда.ид || undefined, нв: я.невидим || undefined });
         } else {
           const y = window.__игрокY !== undefined ? window.__игрокY : window.__мир.высота ? window.__мир.высота() : В(поз.x, поз.z);
-          всем({ k: 'p', x: +поз.x.toFixed(2), z: +поз.z.toFixed(2), y: +y.toFixed(2), угол: +поз.угол.toFixed(3), поза: window.__игрокПоза || null, нв: я.невидим || undefined,
+          всем({ k: 'p', x: +поз.x.toFixed(2), z: +поз.z.toFixed(2), y: +y.toFixed(2), угол: +поз.угол.toFixed(3), поза: window.__игрокПоза || null, нв: я.невидим || undefined, мп: window.__мопедЕдет ? 1 : undefined,
             вв: window.__война && window.__война.яВыбыл() ? 1 : undefined });
         }
       }
@@ -14206,6 +14207,7 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     ['задача', 'Сделал своё', 'Выполнить задачу своей роли в онлайне.'],
     ['яша', 'Мяу', 'Сыграть за Яшу.'],
     ['водила', 'Права не нужны', 'Проехать на Фениксе 150 метров.'],
+    ['мопед', 'Альфач', 'Проехать на мопеде «Альфа» километр.'],
     ['вертолёт', 'Почти вертолёт', 'Раскрутить стрелу Феникса так, что он оторвался от земли.'],
     ['дымка', 'Ёжик в тумане', 'Дождаться, пока Денис задымит весь посёлок.'],
     ['минздрав', 'Минздрав предупреждал', 'Отобрать у Дениса сигарету.'],
@@ -19114,6 +19116,209 @@ window.ДЕТАЛИ.push(['главное меню', function (API) {
   }
   обновить(); загрузкаШаг();
   window.__главноеМеню = { обновить, авторы, пункты: { пДальше, пНовая, пОнлайн, пАчивки, пНастр, пАвторы }, открыто: () => открыто };
+}]);
+
+</script>
+<script>
+// Мопед «Альфа»: стоит у тебя во дворе. Подошёл — «СЕСТЬ НА МОПЕД», и катайся по посёлку:
+// джойстик (или WASD) — газ и руль, на поворотах кренится, колёса крутятся, мотор тарахтит, вечером горит фара,
+// «БИП» — гудок. Игрок сидит за рулём (поза сидя). В ⚙ — «МОПЕД: КО МНЕ». В онлайне видно, кто едет на мопеде.
+window.ДЕТАЛИ.push(['мопед', function (API) {
+  const { THREE, сцена } = API;
+  const В = API.землиВысота, СИДЕНЬЕ = 0.48, СЕДЛО_Z = -0.08;   // высота посадки над землёй; седло — чуть позади центра
+  const цв = h => API.цвет ? API.цвет(h) : new THREE.Color(h);
+  const М = (h, доп = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: цв(h), roughness: 0.55, metalness: 0.1 }, доп));
+  const крас = М('#B3261E', { roughness: 0.35, metalness: 0.25 }), чёрн = М('#1A1A1A', { roughness: 0.9 }), хром = М('#C9CDD2', { roughness: 0.25, metalness: 0.9 }),
+    серый = М('#5A5D62', { roughness: 0.6, metalness: 0.5 }), фараМ = М('#FFF6D8', { emissive: цв('#FFE9A8'), emissiveIntensity: 0 });
+  const труба = (a, b, r, мат) => { const A = new THREE.Vector3(...a), Б = new THREE.Vector3(...b), д = Б.clone().sub(A), L = д.length();
+    const м = new THREE.Mesh(new THREE.CylinderGeometry(r, r, L, 8), мат); м.position.copy(A).add(Б).multiplyScalar(0.5); м.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), д.normalize()); м.castShadow = true; return м; };
+  const ящ = (w, h, d, мат, x, y, z) => { const м = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), мат); м.position.set(x, y, z); м.castShadow = true; return м; };
+  function колесо() {
+    const г = new THREE.Group();
+    const шина = new THREE.Mesh(new THREE.TorusGeometry(0.25, 0.055, 8, 20), чёрн); шина.rotation.y = Math.PI / 2; шина.castShadow = true;
+    const обод = new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.012, 6, 20), хром); обод.rotation.y = Math.PI / 2;
+    const ступица = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.1, 10), серый); ступица.rotation.z = Math.PI / 2;
+    г.add(шина, обод, ступица);
+    for (let k = 0; k < 6; k++) { const сп = new THREE.Mesh(new THREE.BoxGeometry(0.008, 0.4, 0.008), хром); сп.rotation.x = k / 6 * Math.PI; г.add(сп); }
+    return г;
+  }
+  function сделать() {
+    const гр = new THREE.Group(), корпус = new THREE.Group(); гр.add(корпус);
+    const перед = колесо(), зад = колесо(); перед.position.set(0, 0.3, 0.66); зад.position.set(0, 0.3, -0.62);
+    корпус.add(перед, зад);
+    корпус.add(труба([0, 0.92, 0.5], [0, 0.42, 0.02], 0.035, крас), труба([0, 0.42, 0.02], [0, 0.6, -0.5], 0.03, крас), труба([0, 0.6, -0.5], [0, 0.3, -0.62], 0.025, серый));
+    корпус.add(труба([0.07, 0.3, 0.66], [0.06, 0.95, 0.5], 0.02, хром), труба([-0.07, 0.3, 0.66], [-0.06, 0.95, 0.5], 0.02, хром));
+    корпус.add(ящ(0.2, 0.16, 0.36, крас, 0, 0.78, 0.2), ящ(0.24, 0.08, 0.48, чёрн, 0, 0.73, СЕДЛО_Z), ящ(0.2, 0.22, 0.28, серый, 0, 0.38, 0.0));
+    корпус.add(труба([0.12, 0.3, 0.08], [0.15, 0.36, -0.72], 0.035, хром));
+    корпус.add(труба([-0.32, 1.0, 0.47], [0.32, 1.0, 0.47], 0.016, хром), труба([-0.34, 1.0, 0.47], [-0.25, 1.0, 0.47], 0.024, чёрн), труба([0.25, 1.0, 0.47], [0.34, 1.0, 0.47], 0.024, чёрн));
+    const фара = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.08, 14), [хром, фараМ, хром]); фара.rotation.x = Math.PI / 2; фара.position.set(0, 0.9, 0.6); корпус.add(фара);
+    const крыло = (z, y) => { const к = new THREE.Mesh(new THREE.TorusGeometry(0.31, 0.03, 4, 12, Math.PI * 0.55), крас); к.rotation.set(0, Math.PI / 2, Math.PI * 0.22); к.position.set(0, y, z); return к; };
+    корпус.add(крыло(0.66, 0.3), крыло(-0.62, 0.3));
+    корпус.add(ящ(0.22, 0.02, 0.26, серый, 0, 0.8, -0.55), ящ(0.08, 0.05, 0.02, М('#C0201A', { emissive: цв('#600000') }), 0, 0.66, -0.86));
+    return { гр, корпус, перед, зад };
+  }
+  const мой = сделать(); мой.гр.visible = false; сцена.add(мой.гр);
+
+  // ---- состояние ----
+  const ст = { стоит: false, едет: false, v: 0, курс: 0, крен: 0, пробег: 0, было: null, поза: undefined, y: undefined, звук: null, х: 0, z: 0 };
+  function поставить(x, z, курс) { ст.х = x; ст.z = z; ст.курс = курс; ст.стоит = true; мой.гр.visible = true; разместить(0); }
+  // передом — к ближайшей дороге, чтобы сразу выехать
+  function курсКДороге(x, z, запас) { const д = API.ближайшаяДорога && API.ближайшаяДорога(x, z); return д && Math.hypot(д.px - x, д.pz - z) > 0.5 ? Math.atan2(д.px - x, д.pz - z) : запас; }
+  function рядомСИгроком() {
+    const П = window.__мир.поз, fx = Math.sin(П.угол), fz = Math.cos(П.угол);
+    for (const [a, b] of [[0, 2.2], [0, -2.2], [-2.2, 0], [2.2, 0], [0, 3.5], [0, -3.5]]) {
+      const x = П.x + fx * a + fz * b, z = П.z + fz * a - fx * b;
+      if (!API.вДоме(x, z, 0.6) && !API.вВоде(x, z)) return [x, z, курсКДороге(x, z, П.угол)];
+    }
+    return [П.x, П.z, курсКДороге(П.x, П.z, П.угол)];
+  }
+  function разместить(dt) {
+    const fx = Math.sin(ст.курс), fz = Math.cos(ст.курс);
+    const yП = В(ст.х + fx * 0.65, ст.z + fz * 0.65), yЗ = В(ст.х - fx * 0.62, ст.z - fz * 0.62);
+    мой.гр.position.set(ст.х, (yП + yЗ) / 2, ст.z); мой.гр.rotation.set(0, ст.курс, 0);
+    мой.корпус.rotation.set(-Math.atan2(yП - yЗ, 1.27), 0, ст.едет ? ст.крен : 0.12);   // стоит — на подножке, чуть набок
+    const об = ст.v * dt / 0.3; мой.перед.rotation.x += об; мой.зад.rotation.x += об;
+  }
+
+  // ---- кнопки ----
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #мопедСесть { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
+                  height: 48px; padding: 0 22px; border: 0; border-radius: 14px; background: #F2E6C8; color: #1A1A1A; font: 800 14px system-ui, sans-serif; letter-spacing: 1px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+    #мопедПульт { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 8; display: none; gap: 10px; align-items: center; }
+    #мопедПульт.видно { display: flex; }
+    #мопедПульт button { height: 52px; min-width: 52px; padding: 0 14px; border-radius: 26px; border: 1px solid #F4C430; background: rgba(30,22,6,0.82); color: #F4E0A0; font: 800 13px system-ui, sans-serif; letter-spacing: 1px; touch-action: manipulation; }
+    #мопедСкорость { position: fixed; left: 50%; top: calc(48px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 8; display: none; padding: 2px 12px; border-radius: 10px;
+                     background: rgba(18,12,8,0.7); color: #F4E0A0; font: 700 15px ui-monospace, monospace; pointer-events: none; }
+    body.мопед #мопедСкорость { display: block; } body.мопед #сверху { display: none !important; }
+    body.кино #мопедСесть, body.кино #мопедПульт, body.кино #мопедСкорость { opacity: 0; pointer-events: none; }
+  `;
+  document.head.appendChild(стиль);
+  const кнСесть = document.createElement('button'); кнСесть.id = 'мопедСесть'; кнСесть.textContent = '🛵 СЕСТЬ НА МОПЕД';
+  const пульт = document.createElement('div'); пульт.id = 'мопедПульт';
+  const кнБип = document.createElement('button'); кнБип.textContent = 'БИП'; кнБип.setAttribute('aria-label', 'Гудок');
+  const кнСлезть = document.createElement('button'); кнСлезть.textContent = 'СЛЕЗТЬ';
+  пульт.append(кнБип, кнСлезть);
+  const спидометр = document.createElement('div'); спидометр.id = 'мопедСкорость';
+  document.body.append(кнСесть, пульт, спидометр);
+  кнСесть.addEventListener('click', () => сесть());
+  кнСлезть.addEventListener('click', () => слезть());
+  кнБип.addEventListener('pointerdown', e => { e.preventDefault(); бип(); });
+  // ⚙ → МОПЕД: КО МНЕ
+  { const меню = document.getElementById('меню');
+    if (меню) { const с = document.createElement('div'); с.className = 'строка'; const п = document.createElement('span'); п.textContent = 'МОПЕД';
+      const б = document.createElement('button'); б.className = 'кн шрифт'; б.textContent = 'КО МНЕ';
+      б.addEventListener('click', () => { if (ст.едет || !document.getElementById('старт').hidden) return; поставить(...рядомСИгроком()); меню.classList.remove('открыто');
+        window.__подсказки && window.__подсказки.совет('🛵 Мопед рядом. Подходи и садись.', 2.5); });
+      с.append(п, б); меню.appendChild(с); } }
+
+  // ---- звук: мотор (пила через фильтр, «тр-тр» — дрожание громкости) и гудок ----
+  const ядро = () => window.__бахЯдро;
+  function моторВкл() {
+    const Я = ядро(), к = Я && Я.звук && Я.звук(); if (!к || ст.звук) return;
+    const о = к.createOscillator(), ф = к.createBiquadFilter(), g = к.createGain(), тр = к.createOscillator(), трG = к.createGain();
+    о.type = 'sawtooth'; о.frequency.value = 45; ф.type = 'lowpass'; ф.frequency.value = 700; g.gain.value = 0.0001;
+    тр.type = 'square'; тр.frequency.value = 18; трG.gain.value = 0.03; тр.connect(трG); трG.connect(g.gain);
+    о.connect(ф); ф.connect(g); g.connect(Я.выход()); о.start(); тр.start();
+    ст.звук = { к, о, ф, g, тр };
+  }
+  function моторВыкл() { const з = ст.звук; if (!з) return; try { з.g.gain.setTargetAtTime(0.0001, з.к.currentTime, 0.1); з.о.stop(з.к.currentTime + 0.4); з.тр.stop(з.к.currentTime + 0.4); } catch (e) {} ст.звук = null; }
+  function бип() {
+    const Я = ядро(), к = Я && Я.звук && Я.звук(); if (!к) return;
+    const t = к.currentTime;
+    for (const [нач, дл] of [[0, 0.12], [0.18, 0.22]]) {
+      const о = к.createOscillator(), g = к.createGain(); о.type = 'square'; о.frequency.value = 420;
+      g.gain.setValueAtTime(0.0001, t + нач); g.gain.exponentialRampToValueAtTime(0.12, t + нач + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + нач + дл);
+      о.connect(g); g.connect(Я.выход()); о.start(t + нач); о.stop(t + нач + дл + 0.05);
+    }
+    window.__люди && window.__люди.паника && Math.random() < 0.25 && window.__люди.паника();     // иногда сельчане шарахаются
+  }
+
+  // ---- сесть / слезть ----
+  const занят = () => window.__заРулём || window.__поездка || window.__летитЯша || window.__перемотка || document.body.classList.contains('кино') || document.body.classList.contains('кабина') || window.__управлениеСтоп;
+  function сесть() {
+    const Мир = window.__мир; if (!ст.стоит || ст.едет || занят() || !Мир) return;
+    Object.assign(ст, { едет: true, v: 0, крен: 0 });
+    ст.было = { высота: Мир.кам.высота, даль: Мир.кам.даль }; ст.поза = window.__игрокПоза; ст.y = window.__игрокY;
+    window.__заРулём = true; window.__мопедЕдет = true; window.__игрокПоза = 'Sitting_Idle_Loop';
+    Мир.кам.высота = 1.9; Мир.кам.даль = 5.6;
+    document.body.classList.add('мопед'); кнСесть.style.display = 'none'; пульт.classList.add('видно');
+    моторВкл();
+    if (!ст.знает) { ст.знает = true; window.__подсказки && window.__подсказки.совет('🛵 Джойстик — газ и руль. БИП — гудок. Слезть — справа.', 4); }
+  }
+  function слезть() {
+    if (!ст.едет) return;
+    const Мир = window.__мир;
+    ст.едет = false; ст.v = 0; window.__заРулём = false; window.__мопедЕдет = false; window.__игрокПоза = ст.поза; window.__игрокY = ст.y;
+    Мир.кам.высота = ст.было.высота; Мир.кам.даль = ст.было.даль;
+    document.body.classList.remove('мопед'); пульт.classList.remove('видно'); моторВыкл();
+    const fx = Math.sin(ст.курс), fz = Math.cos(ст.курс);
+    for (const [a, b] of [[0, 0.9], [0, -0.9], [-1.4, 0]]) { const x = ст.х + fx * a + fz * b, z = ст.z + fz * a - fx * b; if (!API.вДоме(x, z, 0.3) && !API.вВоде(x, z)) { Мир.поз.x = x; Мир.поз.z = z; break; } }
+    разместить(0);
+  }
+  function упёрся(x, z, fx, fz) {
+    for (const a of [0.95, -0.9]) for (const b of [-0.25, 0.25]) { const px = x + fx * a + fz * b, pz = z + fz * a - fx * b; if (API.вДоме(px, pz, 0.1) || API.вВоде(px, pz)) return true; }
+    return false;
+  }
+
+  // ---- кадр ----
+  const чужие = new Map();     // ид → мопед под другим игроком
+  let первый = true, приглашён = false;
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt) return;
+    const Мир = window.__мир, начато = document.getElementById('старт').hidden;
+    if (первый && начато && !window.__перемотка) { первый = false; поставить(...рядомСИгроком()); }
+    // вечером фара горит
+    фараМ.emissiveIntensity = window.__свет && window.__свет.какой() === 'вечер' ? 2.2 : 0.15;
+    if (ст.едет) {
+      if (window.__поездка || window.__летитЯша || document.body.classList.contains('кабина')) { слезть(); return; }
+      const д = Мир.джойстик, кл = Мир.клавиши || new Set();
+      let газ = -д.dy, руль = д.dx;
+      if (кл.has('KeyW') || кл.has('ArrowUp')) газ = 1; if (кл.has('KeyS') || кл.has('ArrowDown')) газ = -1;
+      if (кл.has('KeyA') || кл.has('ArrowLeft')) руль = -1; if (кл.has('KeyD') || кл.has('ArrowRight')) руль = 1;
+      if (Math.abs(газ) < 0.12) газ = 0; if (Math.abs(руль) < 0.12) руль = 0;
+      if (document.body.classList.contains('кино')) { газ = 0; руль = 0; }
+      const макс = газ >= 0 ? 14 : 3;
+      ст.v += (газ * макс - ст.v) * Math.min(1, dt * (газ ? 0.8 : 1.5));
+      if (Math.abs(ст.v) < 0.05 && !газ) ст.v = 0;
+      // на ходу руль — по скорости; почти на месте — всё равно доворачивает (как будто разворачиваешь руками)
+      const kр = Math.abs(ст.v) < 1.5 ? 0.45 * (ст.v < -0.1 ? -1 : 1) : Math.max(-1, Math.min(1, ст.v / 4));
+      ст.курс -= руль * dt * 1.9 * kр;
+      ст.крен += (-руль * Math.min(1, Math.abs(ст.v) / 9) * 0.38 - ст.крен) * Math.min(1, dt * 5);
+      const fx = Math.sin(ст.курс), fz = Math.cos(ст.курс), nx = ст.х + fx * ст.v * dt, nz = ст.z + fz * ст.v * dt;
+      if (ст.v && упёрся(nx, nz, fx, fz)) { if (Math.abs(ст.v) > 4) { const Я = ядро(); Я && Я.удар && Я.удар(0.1, 0.4, 0); Я && Я.тряхнуть && Я.тряхнуть(0.15); } ст.v *= -0.2; }
+      else { ст.пробег += Math.hypot(nx - ст.х, nz - ст.z); ст.х = Math.max(-API.ШИР / 2 + 25, Math.min(API.ШИР / 2 - 25, nx)); ст.z = Math.max(-API.ГЛУБ / 2 + 25, Math.min(API.ГЛУБ / 2 - 25, nz)); }
+      разместить(dt);
+      // игрок — в седле
+      поз.x = ст.х + fx * СЕДЛО_Z; поз.z = ст.z + fz * СЕДЛО_Z; поз.угол = ст.курс;
+      window.__игрокY = мой.гр.position.y + СИДЕНЬЕ;
+      // камера — сзади, плавно доворачивает
+      if (Math.abs(ст.v) > 1 && (!Мир.взгляд || Мир.взгляд.ид === null)) { let dк = ст.курс + Math.PI - Мир.кам.рыск; dк = Math.atan2(Math.sin(dк), Math.cos(dк)); Мир.кам.рыск += dк * Math.min(1, dt * 2.2); }
+      спидометр.textContent = Math.round(Math.abs(ст.v) * 3.6) + ' км/ч';
+      const з = ст.звук; if (з) { const к = Math.abs(ст.v) / 14; з.о.frequency.setTargetAtTime(42 + к * 75 + (газ > 0 ? 8 : 0), з.к.currentTime, 0.08); з.тр.frequency.setTargetAtTime(14 + к * 22, з.к.currentTime, 0.08); з.ф.frequency.setTargetAtTime(500 + к * 900, з.к.currentTime, 0.1); з.g.gain.setTargetAtTime(0.035 + к * 0.05, з.к.currentTime, 0.1); }
+      if (ст.пробег >= 1000 && !ст.ачивка) { ст.ачивка = true; window.__итоги && window.__итоги.дать('мопед'); }
+    } else if (ст.стоит) {
+      const d = Math.hypot(поз.x - ст.х, поз.z - ст.z);
+      const можно = d < 2.6 && начато && !занят();
+      кнСесть.style.display = можно ? 'block' : 'none';
+      if (можно && !приглашён) { приглашён = true; window.__подсказки && window.__подсказки.совет('🛵 Мопед «Альфа». Твой. Садись — покатайся по посёлку.', 3.5); }
+    }
+    // мопеды под другими игроками (онлайн)
+    const О = window.__онлайн;
+    if (О && О.пиры) {
+      for (const [ид, п] of О.пиры) {
+        let м = чужие.get(ид);
+        if (п.мп && п.x !== null && !п.невидим) {
+          if (!м) { м = сделать(); сцена.add(м.гр); чужие.set(ид, м); }
+          const fx = Math.sin(п.угол), fz = Math.cos(п.угол);
+          м.гр.visible = true; м.гр.position.set(п.x - fx * СЕДЛО_Z, (п.y || В(п.x, п.z) + СИДЕНЬЕ) - СИДЕНЬЕ, п.z - fz * СЕДЛО_Z); м.гр.rotation.set(0, п.угол, 0);
+          const пр = м.пр || [п.x, п.z], ск = Math.hypot(п.x - пр[0], п.z - пр[1]); м.пр = [п.x, п.z]; м.перед.rotation.x += ск / 0.3; м.зад.rotation.x += ск / 0.3;
+        } else if (м) м.гр.visible = false;
+      }
+      for (const [ид, м] of чужие) if (!О.пиры.has(ид)) { сцена.remove(м.гр); чужие.delete(ид); }
+    }
+  });
+  window.__мопед = { ст, поставить, сесть, слезть, бип, гр: мой.гр, рядомСИгроком };
 }]);
 
 </script>
