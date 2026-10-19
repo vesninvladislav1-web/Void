@@ -14257,6 +14257,7 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     ['яша', 'Мяу', 'Сыграть за Яшу.'],
     ['водила', 'Права не нужны', 'Проехать на Фениксе 150 метров.'],
     ['мопед', 'Альфач', 'Проехать на мопеде «Альфа» километр.'],
+    ['рыбак', 'Рыбак', 'Поймать на пруду 10 рыб.'],
     ['вертолёт', 'Почти вертолёт', 'Раскрутить стрелу Феникса так, что он оторвался от земли.'],
     ['дымка', 'Ёжик в тумане', 'Дождаться, пока Денис задымит весь посёлок.'],
     ['минздрав', 'Минздрав предупреждал', 'Отобрать у Дениса сигарету.'],
@@ -19330,6 +19331,168 @@ window.ДЕТАЛИ.push(['гардероб', function (API) {
 
 </script>
 <script>
+// Рыбалка: подошёл к пруду — «🎣 РЫБАЧИТЬ». Заброс — поплавок летит в воду; ждёшь 3–11 с; клюёт — поплавок
+// дёргается и тонет, жми «ПОДСЕЧЬ!» (есть ~1,2 с). Рано подсёк — пусто. Улов: карась, окунь, плотва, щука, ротан…
+// и сапог. Зимой — подлёдная: поплавок в лунке. Счёт и рекорд — в памяти, ачивка «Рыбак» за 10 рыб.
+window.ДЕТАЛИ.push(['рыбалка', function (API) {
+  const { THREE, сцена } = API;
+  const В = API.землиВысота, ц = h => API.цвет ? API.цвет(h) : new THREE.Color(h);
+  const УЛОВ = [
+    ['Карась', 40, 0.1, 0.6, '🐟'], ['Окунь', 24, 0.1, 0.5, '🐟'], ['Плотва', 15, 0.08, 0.35, '🐟'], ['Ротан', 9, 0.05, 0.25, '🐟'],
+    ['Щука', 7, 1.0, 4.2, '🐊'], ['Сапог', 3, 0.6, 0.6, '🥾'], ['Карп', 2, 1.5, 5.5, '🐠'],
+  ];
+  const РЫБЫ = new Set(['Карась', 'Окунь', 'Плотва', 'Ротан', 'Щука', 'Карп']);
+  const хран = (() => { try { return JSON.parse(localStorage.getItem('бороздиновский.рыбалка')) || {}; } catch (e) { return {}; } })();
+  хран.всего = хран.всего || 0; хран.лучшая = хран.лучшая || null;
+  const сохранить = () => { try { localStorage.setItem('бороздиновский.рыбалка', JSON.stringify(хран)); } catch (e) {} };
+
+  // ---- удочка, леска, поплавок ----
+  const удочка = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.018, 2.4, 6), new THREE.MeshStandardMaterial({ color: ц('#6B4A2A'), roughness: 0.7 }));
+  удочка.geometry.translate(0, 1.2, 0); удочка.visible = false; удочка.castShadow = true; сцена.add(удочка);
+  const поплавок = new THREE.Group();
+  { const верх = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshStandardMaterial({ color: ц('#E8281E'), roughness: 0.4, emissive: ц('#300000') }));
+    const низ = new THREE.Mesh(new THREE.SphereGeometry(0.035, 10, 6, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), new THREE.MeshStandardMaterial({ color: ц('#F4F4F0'), roughness: 0.4 }));
+    const антенна = new THREE.Mesh(new THREE.CylinderGeometry(0.004, 0.004, 0.08, 4), верх.material); антенна.position.y = 0.06;
+    поплавок.add(верх, низ, антенна); }
+  поплавок.scale.setScalar(2); поплавок.visible = false; сцена.add(поплавок);        // крупнее настоящего — чтобы видно с берега
+  const лунка = new THREE.Mesh(new THREE.CircleGeometry(0.28, 18), new THREE.MeshStandardMaterial({ color: ц('#1C2A30'), roughness: 0.1 })); лунка.rotation.x = -Math.PI / 2; лунка.visible = false; лунка.userData.безСнега = true; сцена.add(лунка);
+  const леска = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), new THREE.LineBasicMaterial({ color: 0xDDDDDD, transparent: true, opacity: 0.6 }));
+  леска.visible = false; леска.frustumCulled = false; сцена.add(леска);
+
+  // ---- кнопки ----
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #рыбалкаКн { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
+                 height: 48px; padding: 0 22px; border: 0; border-radius: 14px; background: #CFE8F2; color: #0E1E26; font: 800 14px system-ui, sans-serif; letter-spacing: 1px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+    #рыбалкаПульт { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 8; display: none; gap: 10px; align-items: center; }
+    #рыбалкаПульт.видно { display: flex; }
+    #рыбалкаПульт button { height: 56px; padding: 0 18px; border-radius: 28px; border: 1px solid #8FD3F0; background: rgba(8,22,30,0.82); color: #CFEFFF; font: 800 13px system-ui, sans-serif; letter-spacing: 1px; touch-action: manipulation; }
+    #рыбалкаПульт .подсечь { min-width: 130px; font-size: 15px; }
+    #рыбалкаПульт .подсечь.клюёт { background: #F4C430; color: #1A1A1A; border-color: #F4C430; animation: клюёт .25s ease-in-out infinite alternate; }
+    @keyframes клюёт { from { transform: scale(1); } to { transform: scale(1.08); } }
+    #рыбалкаУлов { position: fixed; left: 50%; top: 22%; transform: translateX(-50%); z-index: 12; display: none; padding: 12px 22px; border-radius: 16px; background: rgba(8,22,30,0.9);
+                   border: 1px solid #8FD3F0; color: #E8F6FF; text-align: center; font: 600 14px system-ui, sans-serif; pointer-events: none; }
+    #рыбалкаУлов b { display: block; font-size: 22px; margin: 2px 0; } #рыбалкаУлов .з { font-size: 34px; }
+    body.кино #рыбалкаКн, body.кино #рыбалкаПульт { opacity: 0; pointer-events: none; }
+    body.рыбалка #сверху { display: none !important; }
+  `;
+  document.head.appendChild(стиль);
+  const кн = document.createElement('button'); кн.id = 'рыбалкаКн';
+  const пульт = document.createElement('div'); пульт.id = 'рыбалкаПульт';
+  const кнПодсечь = document.createElement('button'); кнПодсечь.className = 'подсечь'; кнПодсечь.textContent = 'ПОДСЕЧЬ';
+  const кнСмотать = document.createElement('button'); кнСмотать.textContent = 'СМОТАТЬ';
+  пульт.append(кнПодсечь, кнСмотать);
+  const улов = document.createElement('div'); улов.id = 'рыбалкаУлов';
+  document.body.append(кн, пульт, улов);
+  кн.addEventListener('click', () => начать());
+  кнСмотать.addEventListener('click', () => смотать());
+  кнПодсечь.addEventListener('pointerdown', e => { e.preventDefault(); подсечь(); });
+  addEventListener('keydown', e => { if (ст.эт !== 'нет' && e.code === 'Space') { e.preventDefault(); подсечь(); } });
+
+  // ---- звук ----
+  const звук = (част, длит, тип = 'sine', гр = 0.08) => { const Я = window.__бахЯдро, к = Я && Я.звук && Я.звук(); if (!к) return; const t = к.currentTime, о = к.createOscillator(), g = к.createGain();
+    о.type = тип; о.frequency.setValueAtTime(част, t); о.frequency.exponentialRampToValueAtTime(част * 0.6, t + длит); g.gain.setValueAtTime(гр, t); g.gain.exponentialRampToValueAtTime(0.0001, t + длит); о.connect(g); g.connect(Я.выход()); о.start(t); о.stop(t + длит + 0.02); };
+  const плюх = () => { звук(320, 0.18, 'sine', 0.1); setTimeout(() => звук(180, 0.25, 'triangle', 0.05), 60); };
+
+  // ---- где вода рядом ----
+  function водаРядом(поз) {
+    let лучш = null;
+    for (let k = 0; k < 16; k++) {
+      const а = k / 16 * Math.PI * 2;
+      for (const r of [1.5, 3, 4.5]) { const x = поз.x + Math.sin(а) * r, z = поз.z + Math.cos(а) * r, в = API.вВоде(x, z);
+        if (в) { if (!лучш || r < лучш.r) лучш = { а, r, в }; break; } }
+    }
+    return лучш;
+  }
+  const зима = () => window.__сезон && window.__сезон.какой === 'зима';
+
+  // ---- ход рыбалки ----
+  const ст = { эт: 'нет', t: 0, ждать: 0, клюёт: 0, вода: null, угол: 0, точка: new THREE.Vector3(), уровень: 0, рыба: null };
+  const занят = () => window.__заРулём || window.__поездка || window.__летитЯша || window.__перемотка || document.body.classList.contains('кино') || document.body.classList.contains('кабина') || window.__управлениеСтоп;
+  function начать() {
+    if (ст.эт !== 'нет' || занят()) return;
+    const П = window.__мир.поз, вр = водаРядом(П); if (!вр) return;
+    // куда кидаем: вглубь пруда, пока под нами вода (4–8 м)
+    let d = вр.r + 2; for (let r = вр.r + 6; r >= вр.r + 1.5; r -= 0.5) { if (API.вВоде(П.x + Math.sin(вр.а) * r, П.z + Math.cos(вр.а) * r)) { d = r; break; } }
+    Object.assign(ст, { эт: 'заброс', t: 0, вода: вр.в, угол: вр.а, уровень: вр.в.уровень || В(П.x, П.z), рыба: null });
+    ст.точка.set(П.x + Math.sin(вр.а) * d, ст.уровень + 0.02, П.z + Math.cos(вр.а) * d);
+    П.угол = вр.а; window.__управлениеСтоп = true; document.body.classList.add('рыбалка');
+    const Мир = window.__мир; if (Мир.кам) Мир.кам.рыск = вр.а + Math.PI;               // камера — за спину, поплавок перед глазами
+    удочка.visible = леска.visible = true; кн.style.display = 'none'; пульт.classList.add('видно');
+    кнПодсечь.classList.remove('клюёт'); кнПодсечь.textContent = 'ПОДСЕЧЬ';
+    звук(900, 0.25, 'sawtooth', 0.025);
+    if (!хран.знает) { хран.знает = true; сохранить(); window.__подсказки && window.__подсказки.совет(зима() ? '🎣 Подлёдная рыбалка. Ждём поклёвку — поплавок задёргается. Тогда жми «ПОДСЕЧЬ»!' : '🎣 Ждём поклёвку. Поплавок задёргается и уйдёт под воду — тогда жми «ПОДСЕЧЬ»!', 4.5); }
+  }
+  function смотать() {
+    if (ст.эт === 'нет') return;
+    ст.эт = 'нет'; window.__управлениеСтоп = false; document.body.classList.remove('рыбалка');
+    удочка.visible = леска.visible = поплавок.visible = лунка.visible = false; пульт.classList.remove('видно');
+  }
+  function выбратьУлов() {
+    const всего = УЛОВ.reduce((s, у) => s + у[1], 0); let r = Math.random() * всего;
+    for (const у of УЛОВ) { if ((r -= у[1]) <= 0) return { имя: у[0], вес: +(у[2] + Math.random() * (у[3] - у[2])).toFixed(2), знак: у[4] }; }
+    return { имя: 'Карась', вес: 0.3, знак: '🐟' };
+  }
+  function показатьУлов(з, имя, строка, сек = 2.6) {
+    улов.innerHTML = ''; const a = document.createElement('div'); a.className = 'з'; a.textContent = з; const b = document.createElement('b'); b.textContent = имя; const c = document.createElement('div'); c.textContent = строка;
+    улов.append(a, b, c); улов.style.display = 'block'; clearTimeout(ст.таймУлова); ст.таймУлова = setTimeout(() => { улов.style.display = 'none'; }, сек * 1000);
+  }
+  function подсечь() {
+    if (ст.эт === 'ждём') { показатьУлов('💨', 'Рано!', 'Рыба испугалась. Закидываем снова.', 1.8); звук(220, 0.2, 'triangle', 0.05); ст.эт = 'заброс'; ст.t = 0; return; }
+    if (ст.эт !== 'клюёт') return;
+    const у = выбратьУлов(); ст.эт = 'тащим'; ст.t = 0; ст.рыба = у; кнПодсечь.classList.remove('клюёт');
+    звук(660, 0.12, 'square', 0.05); setTimeout(() => звук(880, 0.15, 'square', 0.05), 120);
+    if (РЫБЫ.has(у.имя)) {
+      хран.всего++;
+      const рекорд = !хран.лучшая || у.вес > хран.лучшая.вес; if (рекорд) хран.лучшая = { имя: у.имя, вес: у.вес };
+      сохранить();
+      показатьУлов(у.знак, `${у.имя} · ${у.вес.toLocaleString('ru-RU')} кг`, (рекорд && хран.всего > 1 ? 'Рекорд! ' : '') + `Всего поймано: ${хран.всего}`);
+      if (хран.всего >= 10) window.__итоги && window.__итоги.дать('рыбак');
+      window.__событие && window.__событие('рыба-поймана', у);
+    } else показатьУлов(у.знак, у.имя, 'Ну хоть не пустой. Кто-то тут ходил в одном сапоге.');
+  }
+
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt) return;
+    const начато = document.getElementById('старт').hidden;
+    if (ст.эт === 'нет') {
+      const вр = начато && !занят() && !window.__мопедЕдет ? водаРядом(поз) : null;
+      if (вр) { кн.textContent = зима() ? '🎣 ПОДЛЁДНАЯ РЫБАЛКА' : '🎣 РЫБАЧИТЬ'; кн.style.display = 'block'; } else кн.style.display = 'none';
+      return;
+    }
+    // шевельнул джойстиком — сматываем
+    const д = window.__мир.джойстик; if (д && Math.hypot(д.dx, д.dy) > 0.6) { смотать(); return; }
+    if (занят() && !window.__управлениеСтоп) { смотать(); return; }
+    ст.t += dt;
+    // удочка из рук — вперёд и вверх, к воде
+    const fx = Math.sin(ст.угол), fz = Math.cos(ст.угол), y0 = (window.__мир.высота ? window.__мир.высота() : В(поз.x, поз.z));
+    удочка.position.set(поз.x + fx * 0.35 + fz * 0.22, y0 + 1.0, поз.z + fz * 0.35 - fx * 0.22);
+    удочка.rotation.set(0, 0, 0); удочка.lookAt(ст.точка.x, y0 + 4.5, ст.точка.z); удочка.rotateX(Math.PI / 2);
+    const кончик = new THREE.Vector3(0, 2.4, 0).applyMatrix4(удочка.matrixWorld.clone().compose(удочка.position, удочка.quaternion, удочка.scale));
+    if (ст.эт === 'заброс') {
+      if (ст.t < 0) { поплавок.visible = false; леска.geometry.setFromPoints([кончик, кончик]); return; }      // пауза после улова
+      const k = Math.min(1, ст.t / 0.7);
+      поплавок.visible = true; поплавок.position.lerpVectors(кончик, ст.точка, k); поплавок.position.y += Math.sin(k * Math.PI) * 1.5;
+      if (k >= 1) { ст.эт = 'ждём'; ст.t = 0; ст.ждать = 3 + Math.random() * 8; плюх(); 
+        лунка.visible = зима(); лунка.position.set(ст.точка.x, ст.уровень + 0.03, ст.точка.z); }
+    } else if (ст.эт === 'ждём') {
+      поплавок.position.set(ст.точка.x, ст.уровень + 0.02 + Math.sin(ms / 600) * 0.008, ст.точка.z);
+      if (ст.t > ст.ждать - 1.2 && Math.random() < dt * 3) поплавок.position.y -= 0.015;          // перед поклёвкой — «пробует»
+      if (ст.t > ст.ждать) { ст.эт = 'клюёт'; ст.t = 0; ст.клюёт = 1.0 + Math.random() * 0.5; кнПодсечь.classList.add('клюёт'); кнПодсечь.textContent = 'ПОДСЕЧЬ!'; звук(1200, 0.08, 'square', 0.04); }
+    } else if (ст.эт === 'клюёт') {
+      поплавок.position.set(ст.точка.x, ст.уровень - 0.03 - Math.abs(Math.sin(ст.t * 18)) * 0.05, ст.точка.z);
+      if (ст.t > ст.клюёт) { ст.эт = 'заброс'; ст.t = 0; кнПодсечь.classList.remove('клюёт'); кнПодсечь.textContent = 'ПОДСЕЧЬ'; показатьУлов('😶', 'Сорвалась', 'Не успел. Закидываем снова.', 1.8); }
+    } else if (ст.эт === 'тащим') {
+      const k = Math.min(1, ст.t / 0.9); поплавок.position.lerpVectors(ст.точка, кончик, k);
+      if (k >= 1) { ст.эт = 'заброс'; ст.t = -1.4; поплавок.visible = false; }   // пауза — и снова заброс
+    }
+    леска.geometry.setFromPoints([кончик, поплавок.visible ? поплавок.position : кончик]);
+  });
+  window.__рыбалка = { ст, начать, смотать, подсечь, хран, водаРядом };
+}]);
+
+</script>
+<script>
 // Мопед «Альфа»: стоит у тебя во дворе. Подошёл — «СЕСТЬ НА МОПЕД», и катайся по посёлку:
 // джойстик (или WASD) — газ и руль, на поворотах кренится, колёса крутятся, мотор тарахтит, вечером горит фара,
 // «БИП» — гудок. Игрок сидит за рулём (поза сидя). В ⚙ — «МОПЕД: КО МНЕ». В онлайне видно, кто едет на мопеде.
@@ -19672,7 +19835,7 @@ window.ДЕТАЛИ.push(['сезоны', function (API) {
 // радар Шторма и руль Феникса не трогаем: там важны точные координаты пальца.
 window.ДЕТАЛИ.push(['размер интерфейса', function () {
   const ЧТО = ['#кнопки', '#шестерня', '#онлКн', '#компас', '#миникарта:not(.большая)', '#улица', '#цель', '#совет', '#меню',
-    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
+    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
     '#войнаПанель', '#войнаНаВойну', '#войнаКинуть', '#войнаДрон', '#войнаЖизни', '#войнаТревога',
     '#полигонВерх', '#полигонКн1', '#полигонКн2', '#полигонСесть', '#полигонЛёт', '#полигонСвин', '#полётВВ', '#полётВН',
     '#яшолёт', '#яшолётСесть', '#яшолётКуры', '#фениксСесть', '#выход-каб', '#кн-сюжет', '#кн-халупа', '#кн-шторм', '#озон-окно',
