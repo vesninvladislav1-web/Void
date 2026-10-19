@@ -12082,7 +12082,7 @@ window.ДЕТАЛИ.push(['подсказки', function (API) {
 // Настройки — шестерёнка в углу. Внутри: звук, подписи, мат, графика.
 // На экране остаётся только «С ВЫСОТЫ». Модуль идёт последним и переносит
 // в меню кнопки, которые завели другие модули.
-window.ДЕТАЛИ.push(['настройки', function () {
+window.ДЕТАЛИ.push(['настройки', function (API) {
   const стиль = document.createElement('style');
   стиль.textContent = `
     #шестерня { position: fixed; top: calc(10px + env(safe-area-inset-top, 0px)); right: calc(126px + env(safe-area-inset-right, 0px)); z-index: 9;
@@ -12123,6 +12123,34 @@ window.ДЕТАЛИ.push(['настройки', function () {
     });
     const обн = () => { const с = window.__свет ? window.__свет.какой() : 'день'; for (const б of кнопки) б.setAttribute('aria-pressed', String(б.dataset.к === с)); };
     обн(); строка('СВЕТ', гр);
+  }
+  // кадры: 60 или 30 (30 — телефон меньше греется и дольше живёт батарея)
+  {
+    if (window.__огр30 === undefined) window.__огр30 = (() => { try { return localStorage.getItem('бороздиновский.кадры') === '30'; } catch (e) { return false; } })();
+    const б = document.createElement('button'); б.className = 'кн шрифт';
+    const обн = () => { б.textContent = window.__огр30 ? '30' : '60'; б.setAttribute('aria-pressed', String(!!window.__огр30)); };
+    б.addEventListener('click', () => { window.__огр30 = !window.__огр30; try { localStorage.setItem('бороздиновский.кадры', window.__огр30 ? '30' : '60'); } catch (e) {} обн();
+      window.__подсказки && window.__подсказки.совет(window.__огр30 ? '30 кадров: меньше греется и бережёт батарею.' : '60 кадров: плавнее, но греется сильнее.', 3); });
+    обн(); строка('КАДРЫ', б);
+  }
+  // счётчик FPS — для проверок с друзьями: кадры, чёткость, ступень графики
+  {
+    const табло = document.createElement('div');
+    табло.style.cssText = 'position:fixed;left:50%;top:calc(4px + env(safe-area-inset-top,0px));transform:translateX(-50%);z-index:12;padding:2px 8px;border-radius:8px;background:rgba(0,0,0,.6);color:#9CFF6A;font:600 11px ui-monospace,monospace;pointer-events:none;display:none';
+    document.body.appendChild(табло);
+    let вкл = false, t = 0, n = 0;
+    const б = document.createElement('button'); б.className = 'кн шрифт';
+    const обн = () => { б.textContent = вкл ? 'ВКЛ' : 'ВЫКЛ'; б.setAttribute('aria-pressed', String(вкл)); табло.style.display = вкл ? 'block' : 'none'; };
+    б.addEventListener('click', () => { вкл = !вкл; обн(); });
+    обн(); строка('FPS', б);
+    API.каждыйКадр.push(dt => {
+      if (!вкл || !dt || window.__перемотка) return;
+      const сейчас = performance.now(); if (!n++) { t = сейчас; return; } if (сейчас - t < 500) return;
+      const fps = (n - 1) / ((сейчас - t) / 1000);
+      const ч = window.__чёткость ? window.__чёткость() : null, гр = (document.querySelector('#графика .кн[aria-pressed="true"]') || {}).textContent || '';
+      табло.textContent = `FPS ${Math.round(fps)}` + (ч ? ` · ×${ч.сейчас.toFixed(2)}` : '') + (гр ? ' · ' + гр.toLowerCase() : '') + (window.__огр30 ? ' · 30' : '');
+      t = 0; n = 0;
+    });
   }
   // ===================== ВЕСЬ ЭКРАН =====================
   // Панели браузера (адресная строка, кнопки снизу) мешают: на «ГУЛЯТЬ» игра уходит на весь экран.
@@ -19203,9 +19231,34 @@ const лин = к => Math.pow(к, 2.2);
 // УР — номер ступени: 0 низкая … 3 ультра. «Средняя» и «низкая» — для слабых телефонов:
 // меньше травы, деревьев вдали, луж и сельчан, тени проще (на «низкой» их нет вовсе), картинка мельче.
 const КАЧЕСТВА = ['низкая', 'средняя', 'высокая', 'ультра'];
-// по умолчанию: на компе — «ультра», на телефоне — «высокая» (на «ультра» видеопамять телефона может кончиться)
-const КАЧЕСТВО_САМО = matchMedia('(pointer: coarse)').matches ? 'высокая' : 'ультра';
-const КАЧЕСТВО = (() => { try { const к = localStorage.getItem('бороздиновский.графика'); return КАЧЕСТВА.includes(к) ? к : КАЧЕСТВО_САМО; } catch (e) { return КАЧЕСТВО_САМО; } })();
+// Пока игрок не выбрал сам — ступень угадываем по видеочипу и памяти устройства (window.__устройство — что узнали).
+// Телефонам «ультра» не даём: видеопамяти может не хватить. Дальше подстраивает качество() — по живому FPS.
+function угадатьКачество() {
+  const тел = matchMedia('(pointer: coarse)').matches;
+  let gpu = '';
+  try {
+    const gl = document.createElement('canvas').getContext('webgl');
+    const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    gpu = String((gl && (ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER))) || '');
+    const тушить = gl && gl.getExtension('WEBGL_lose_context'); if (тушить) тушить.loseContext();   // пробный контекст сразу отдаём
+  } catch (e) {}
+  const пам = navigator.deviceMemory || 0, g = gpu.toLowerCase();
+  let к;
+  if (navigator.webdriver) к = тел ? 'высокая' : 'ультра';                         // автотесты — как раньше, без угадывания
+  else if (/swiftshader|llvmpipe|softpipe|basic render|microsoft basic/.test(g)) к = 'низкая';   // рисует процессор, видеокарты нет
+  else if (!тел) к = /intel/.test(g) ? 'высокая' : 'ультра';                       // встроенная графика Intel — без «ультра»
+  else if (/apple/.test(g) || /xclipse|immortalis/.test(g)) к = 'высокая';
+  else if (/adreno/.test(g)) { const н = +(/adreno\D*(\d{3})/.exec(g) || [])[1] || 0; к = н >= 640 || н >= 700 ? 'высокая' : н >= 530 ? 'средняя' : 'низкая'; }
+  else if (/mali/.test(g)) к = /mali-?t|mali-?4|g31|g51\b/.test(g) ? 'низкая' : /g7[1-9]|g[6-9]1\d|g7\d\d/.test(g) ? 'высокая' : 'средняя';
+  else if (/powervr/.test(g)) к = /ge8[0-3]|ge7|sgx/.test(g) ? 'низкая' : 'средняя';
+  else к = пам >= 6 ? 'высокая' : 'средняя';                                         // чип скрыт — смотрим на память
+  // мало памяти — не выше: 2 ГБ и меньше — «низкая», 3–4 ГБ — «средняя»
+  if (пам && пам <= 2) к = 'низкая'; else if (пам && пам <= 4 && (к === 'высокая' || к === 'ультра')) к = 'средняя';
+  window.__устройство = { gpu, пам, ядер: navigator.hardwareConcurrency || 0, тел, угадано: к };
+  return к;
+}
+const КАЧЕСТВО_САМО = (() => { try { return localStorage.getItem('бороздиновский.графика') ? null : угадатьКачество(); } catch (e) { return угадатьКачество(); } })();
+const КАЧЕСТВО = (() => { try { const к = localStorage.getItem('бороздиновский.графика'); return КАЧЕСТВА.includes(к) ? к : КАЧЕСТВО_САМО || угадатьКачество(); } catch (e) { return КАЧЕСТВО_САМО || угадатьКачество(); } })();
 const УЛЬТРА = КАЧЕСТВО === 'ультра', УР = КАЧЕСТВА.indexOf(КАЧЕСТВО);
 function цветнаяТекстура(к) { const т = new THREE.CanvasTexture(к); т.encoding = THREE.sRGBEncoding; return т; }
 
@@ -21321,6 +21374,8 @@ addEventListener('resize', размер);
 размер();
 
 let прошлый = 0, кадры = 0, счётКадров = 0, счётНачало = performance.now();
+if (window.__огр30 === undefined) window.__огр30 = (() => { try { return localStorage.getItem('бороздиновский.кадры') === '30'; } catch (e) { return false; } })();
+window.__чёткость = () => ({ сейчас: рендер.getPixelRatio(), база: замер.база, fps: Math.round(замер.fps), ступень: замер.ступень });
 // ===================== КРАСИВАЯ КАРТИНКА (после отрисовки) =====================
 // Сцена рисуется в отдельный кадр (со сглаживанием), потом: яркое (солнце, блики на воде, облака
 // у солнца) мягко светится ореолом, чуть больше сочности и контраста, по краям лёгкое затемнение.
@@ -21390,27 +21445,35 @@ function нарисовать() {
   if (ПОСТ && ПОСТ.вкл) ПОСТ.рисовать(сцена, камера);
   else рендер.render(сцена, камера);
 }
-// Если телефон не тянет — сначала снижаем чёткость картинки, потом траву.
-// Замер — после старта прогулки, по 3 секунды.
-const замер = { t: 0, n: 0, ступень: 0 };
+// Плавность держим чёткостью: каждые 2 с смотрим FPS. Тормозит — картинка чуть мельче (на 15 %),
+// сначала выключив «красивую картинку»; упёрлись в пол — урезаем траву и советуем ступень пониже.
+// Запас появился (две проверки подряд) — чёткость понемногу возвращается, но не выше исходной.
+// С ограничением «30 кадров» планка — 30, иначе — 60.
+const замер = { t: 0, n: 0, ступень: 0, база: рендер.getPixelRatio(), запас: 0, fps: 0 };
+const ПОЛ_ЧЁТКОСТИ = УР === 0 ? 0.55 : 0.65;
 function качество(dt) {
   if (!эл('старт').hidden || !dt) return;
-  замер.t += dt; замер.n++;
-  if (замер.t < 3) return;
-  const fps = замер.n / замер.t; замер.t = 0; замер.n = 0;
-  if (fps < 24 && замер.ступень < 3) {
-    замер.ступень++;
-    if (замер.ступень === 1) { рендер.setPixelRatio(Math.min(рендер.getPixelRatio(), 1.2)); if (ПОСТ) ПОСТ.вкл = false; }
-    if (замер.ступень === 2) { рендер.setPixelRatio(1); трава.урезать(); }
-    if (замер.ступень === 3) рендер.setPixelRatio(0.8);
-    // всё равно тормозит — подскажем ступень пониже (один раз за прогулку)
-    if (замер.ступень === 2 && УР > 0 && window.__подсказки)
-      window.__подсказки.совет('Телефон не тянет? ⚙ → ГРАФИКА → ' + (УР > 1 ? 'СРЕДНЯЯ' : 'НИЗКАЯ') + ' — пойдёт плавнее.', 6);
-    размер();
-  }
+  // по настоящим часам: dt урезан до 0,05 с, и на совсем медленном телефоне по нему вышло бы «20 FPS» вместо 5
+  const сейчас = performance.now();
+  if (!замер.n++) { замер.t = сейчас; return; }
+  if (сейчас - замер.t < 2000) return;
+  const fps = (замер.n - 1) / ((сейчас - замер.t) / 1000); замер.t = 0; замер.n = 0; замер.fps = fps;
+  const цель = window.__огр30 ? 30 : 60, тек = рендер.getPixelRatio();
+  if (fps < цель * 0.45) {                                           // < 27 (или < 13,5 при 30)
+    замер.запас = 0;
+    if (ПОСТ && ПОСТ.вкл) { ПОСТ.вкл = false; замер.ступень = Math.max(замер.ступень, 1); return; }
+    if (тек > ПОЛ_ЧЁТКОСТИ + 0.01) { рендер.setPixelRatio(Math.max(ПОЛ_ЧЁТКОСТИ, тек * 0.85)); размер(); return; }
+    if (замер.ступень < 2) {
+      замер.ступень = 2; трава.урезать();
+      if (УР > 0 && window.__подсказки) window.__подсказки.совет('Телефон не тянет? ⚙ → ГРАФИКА → ' + (УР > 1 ? 'СРЕДНЯЯ' : 'НИЗКАЯ') + ' — пойдёт плавнее.', 6);
+    }
+  } else if (fps > цель * 0.85 && тек < замер.база - 0.01) {        // > 51 (или > 25,5 при 30)
+    if (++замер.запас >= 2) { замер.запас = 0; рендер.setPixelRatio(Math.min(замер.база, тек * 1.1)); размер(); }
+  } else замер.запас = 0;
 }
 function кадр(ms) {
   requestAnimationFrame(кадр);
+  if (window.__огр30 && прошлый && ms - прошлый < 30 && !window.__перемотка) return;   // «30 кадров»: телефон меньше греется
   const dt = прошлый ? Math.min(0.05, (ms - прошлый) / 1000) : 0; прошлый = ms;
   // перемотка (продолжить сохранение): за шторкой гоним сюжет ровными шагами по 50 мс, много за кадр, без отрисовки
   const П = window.__перемотка, шагов = П ? П.шагов : 1;
