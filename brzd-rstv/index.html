@@ -12176,7 +12176,7 @@ window.ДЕТАЛИ.push(['настройки', function (API) {
   // iPhone так не умеет — там подсказка: с экрана «Домой» игра открывается без панелей.
   {
     const д = document.documentElement;
-    const вПриложении = matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone === true;
+    const вПриложении = matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone === true || /BrzdApp/.test(navigator.userAgent);   // наше приложение — и так на весь экран
     const можно = !вПриложении && !!(document.fullscreenEnabled || document.webkitFullscreenEnabled) && !!(д.requestFullscreen || д.webkitRequestFullscreen);
     const включён = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
     let хочу = (() => { try { return localStorage.getItem('бороздиновский.весьЭкран') !== 'нет'; } catch (e) { return true; } })();
