@@ -14258,6 +14258,7 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     ['водила', 'Права не нужны', 'Проехать на Фениксе 150 метров.'],
     ['мопед', 'Альфач', 'Проехать на мопеде «Альфа» километр.'],
     ['рыбак', 'Рыбак', 'Поймать на пруду 10 рыб.'],
+    ['дурак', 'Сам не дурак', 'Обыграть бабушку в дурака.'],
     ['вертолёт', 'Почти вертолёт', 'Раскрутить стрелу Феникса так, что он оторвался от земли.'],
     ['дымка', 'Ёжик в тумане', 'Дождаться, пока Денис задымит весь посёлок.'],
     ['минздрав', 'Минздрав предупреждал', 'Отобрать у Дениса сигарету.'],
@@ -19493,6 +19494,242 @@ window.ДЕТАЛИ.push(['рыбалка', function (API) {
 
 </script>
 <script>
+// Дурак с бабушкой на лавочке: подошёл к сидящей бабушке — «🃏 В ДУРАКА». Подкидной, 36 карт, козырь — последняя
+// карта колоды. Ходишь — тап по карте (подкидывать можно карты тех же достоинств, не больше 6 и не больше, чем
+// у отбивающегося карт), «БИТО» — когда всё побито. Отбиваешься — тап по своей карте: ляжет на первую карту,
+// которую бьёт; «БЕРУ» — забрать стол. Бабушка играет сама и приговаривает. Выиграл — ачивка «Сам не дурак».
+window.ДЕТАЛИ.push(['дурак', function (API) {
+  const МАСТИ = ['♠', '♣', '♥', '♦'], ДОСТ = ['6', '7', '8', '9', '10', 'В', 'Д', 'К', 'Т'];
+  const красная = к => к.м === '♥' || к.м === '♦';
+  const ФРАЗЫ = {
+    начало: ['Садись, милок. Раздаю.', 'Ну давай, внучок, проверим, чему вас в школе учат.', 'Играем на интерес. Интерес — мой.'],
+    беру: ['Ох, беру…', 'Ладно, забираю, не жадная.', 'Ишь, раскидался. Беру.'],
+    бито: ['Бито, внучок.', 'Бито. Ходи.', 'Отбилась, слава богу.'],
+    ты_берёшь: ['Бери-бери, не стесняйся.', 'Тяжело? А ты козырями!', 'Это тебе не в телефон тыкать.'],
+    победа: ['Ну дурак, ну дурак! Ничего, научишься.', 'Погоны тебе, милок! Шестёрки на плечи.', 'Деда моего тоже так обыгрывала.'],
+    поражение: ['Ох, обыграл старую… Молодец, умный.', 'Ну ты шулер! Ладно, твоя взяла.', 'Внимательный какой. Весь в деда.'],
+    ничья: ['Ничья! Оба молодцы.'],
+  };
+  const из = м => м[Math.floor(Math.random() * м.length)];
+  const хран = (() => { try { return JSON.parse(localStorage.getItem('бороздиновский.дурак')) || {}; } catch (e) { return {}; } })();
+  хран.побед = хран.побед || 0; хран.игр = хран.игр || 0;
+  const сохранить = () => { try { localStorage.setItem('бороздиновский.дурак', JSON.stringify(хран)); } catch (e) {} };
+
+  // ---- окно ----
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #дуракКн { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
+               height: 48px; padding: 0 22px; border: 0; border-radius: 14px; background: #F2E6C8; color: #1A1A1A; font: 800 14px system-ui, sans-serif; letter-spacing: 1px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+    body.кино #дуракКн { opacity: 0; pointer-events: none; }
+    #дурак { position: fixed; inset: 0; z-index: 17; display: none; flex-direction: column; color: #F2E6CC; font: 13px system-ui, sans-serif; user-select: none; -webkit-user-select: none;
+             background: radial-gradient(ellipse at center, #2E6B3A 0%, #1E4A28 70%, #163820 100%);
+             padding: max(6px, env(safe-area-inset-top)) max(10px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left)); box-sizing: border-box; }
+    #дурак.видно { display: flex; }
+    #дурак .верх { display: flex; align-items: center; gap: 10px; min-height: 0; }
+    #дурак .баба { font-size: 30px; line-height: 1; }
+    #дурак .реплика { flex: 1; font: italic 600 14px Georgia, serif; color: #F4E6B8; }
+    #дурак .рука { display: flex; justify-content: center; align-items: flex-end; flex-wrap: nowrap; padding: 2px 0; min-height: 0; }
+    #дурак .рука.её .карта { margin-left: -28px; } #дурак .рука.её .карта:first-child { margin-left: 0; }
+    #дурак .середина { flex: 1; display: flex; align-items: center; gap: 14px; min-height: 0; }
+    #дурак .колода { position: relative; width: 70px; height: 92px; flex: 0 0 70px; }
+    #дурак .колода .козырь { position: absolute; left: 14px; top: 8px; transform: rotate(90deg); }
+    #дурак .колода .рубашка { position: absolute; left: 0; top: 0; }
+    #дурак .колода .сколько { position: absolute; left: 0; right: 0; bottom: -16px; text-align: center; font: 700 11px system-ui, sans-serif; color: #CFE8C8; }
+    #дурак .стол { flex: 1; display: flex; flex-wrap: wrap; gap: 10px 14px; align-content: center; justify-content: center; min-height: 0; }
+    #дурак .пара { position: relative; width: 52px; height: 92px; }
+    #дурак .пара .карта:nth-child(2) { position: absolute; left: 12px; top: 20px; transform: rotate(8deg); }
+    #дурак .кнопки { display: flex; flex-direction: column; gap: 8px; flex: 0 0 auto; }
+    #дурак .кнопки button { height: 44px; min-width: 96px; padding: 0 14px; border-radius: 22px; border: 1px solid #F4C430; background: rgba(10,20,10,0.6); color: #F4C430; font: 800 13px system-ui, sans-serif; letter-spacing: 1px; }
+    #дурак .кнопки button[disabled] { opacity: 0.35; }
+    #дурак .кнопки .выйти { border-color: rgba(242,230,204,0.4); color: #F2E6CC; height: 36px; }
+    #дурак .карта { width: 52px; height: 72px; border-radius: 7px; background: #FAF7EE; color: #1A1A1A; box-shadow: 0 2px 6px rgba(0,0,0,.45); position: relative; flex: 0 0 auto;
+                    display: flex; flex-direction: column; align-items: center; justify-content: center; font: 800 18px system-ui, sans-serif; border: 0; padding: 0; }
+    #дурак .карта small { position: absolute; left: 4px; top: 2px; font-size: 12px; line-height: 1.05; text-align: center; }
+    #дурак .карта.красная { color: #C8102E; }
+    #дурак .карта.рубашка { background: repeating-linear-gradient(45deg, #8A1C1C 0 5px, #A52A2A 5px 10px); border: 2px solid #FAF7EE; }
+    #дурак .рука.моя .карта { margin-left: -14px; cursor: pointer; transition: transform .12s; } #дурак .рука.моя .карта:first-child { margin-left: 0; }
+    #дурак .рука.моя .карта.можно { transform: translateY(-8px); box-shadow: 0 0 0 2px #F4C430, 0 4px 10px rgba(0,0,0,.5); }
+    #дурак .рука.моя .карта.нельзя { filter: brightness(0.72); }
+    #дурак .карта.козырная::after { content: ''; position: absolute; right: 3px; bottom: 3px; width: 6px; height: 6px; border-radius: 50%; background: #F4C430; }
+    #дурак .статус { text-align: center; font: 700 12px system-ui, sans-serif; color: #CFE8C8; min-height: 16px; }
+    #дурак .итог { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.6); }
+    #дурак .итог.видно { display: flex; }
+    #дурак .итог div { background: #1A140E; border: 1px solid #F4C430; border-radius: 16px; padding: 18px 26px; text-align: center; }
+    #дурак .итог b { display: block; font: 800 22px system-ui, sans-serif; color: #F4C430; margin-bottom: 6px; }
+    #дурак .итог button { margin: 12px 6px 0; height: 40px; padding: 0 18px; border-radius: 20px; border: 1px solid #F4C430; background: none; color: #F4C430; font: 800 12px system-ui, sans-serif; }
+    @media (max-height: 420px) { #дурак .карта { width: 44px; height: 62px; font-size: 16px; } #дурак .пара { width: 44px; height: 80px; } #дурак .колода { width: 62px; height: 80px; flex-basis: 62px; } #дурак .баба { font-size: 24px; } #дурак .рука.её .карта { margin-left: -30px; } }
+  `;
+  document.head.appendChild(стиль);
+  const кн = document.createElement('button'); кн.id = 'дуракКн'; кн.textContent = '🃏 В ДУРАКА С БАБУШКОЙ';
+  const окно = document.createElement('div'); окно.id = 'дурак'; окно.setAttribute('role', 'dialog'); окно.setAttribute('aria-label', 'Дурак');
+  окно.innerHTML = `<div class="верх"><div class="баба">👵</div><div class="реплика"></div></div>
+    <div class="рука её"></div>
+    <div class="середина"><div class="колода"></div><div class="стол"></div><div class="кнопки"><button class="бито">БИТО</button><button class="беру">БЕРУ</button><button class="выйти">ВЫЙТИ</button></div></div>
+    <div class="статус"></div><div class="рука моя"></div>
+    <div class="итог"><div><b></b><span></span><br><button class="ещё">ЕЩЁ РАЗ</button><button class="хватит">ХВАТИТ</button></div></div>`;
+  document.body.append(кн, окно);
+  const $ = с => окно.querySelector(с);
+  const элРеплика = $('.реплика'), элЕё = $('.рука.её'), элКолода = $('.колода'), элСтол = $('.стол'), элМоя = $('.рука.моя'), элСтатус = $('.статус');
+  const кнБито = $('.бито'), кнБеру = $('.беру'), элИтог = $('.итог');
+
+  // ---- игра ----
+  let г = null, таймБабы = null;
+  const сила = (к, коз) => ДОСТ.indexOf(к.д) + (к.м === коз ? 100 : 0);
+  const бьёт = (верх, низ, коз) => (верх.м === низ.м && ДОСТ.indexOf(верх.д) > ДОСТ.indexOf(низ.д)) || (верх.м === коз && низ.м !== коз);
+  const сорт = (рука, коз) => рука.sort((a, b) => сила(a, коз) - сила(b, коз) || МАСТИ.indexOf(a.м) - МАСТИ.indexOf(b.м));
+  function раздать() {
+    const колода = []; for (const м of МАСТИ) for (const д of ДОСТ) колода.push({ м, д });
+    for (let i = колода.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [колода[i], колода[j]] = [колода[j], колода[i]]; }
+    const я = колода.splice(0, 6), она = колода.splice(0, 6), козырь = колода[колода.length - 1];
+    г = { колода, я, она, козырь, коз: козырь.м, стол: [], ходит: 'я', конец: false, лимит: 6 };
+    // первым ходит тот, у кого младший козырь
+    const мл = р => р.filter(к => к.м === г.коз).reduce((m, к) => Math.min(m, ДОСТ.indexOf(к.д)), 99);
+    г.ходит = мл(г.она) < мл(г.я) ? 'она' : 'я';
+    сорт(г.я, г.коз); г.лимит = Math.min(6, г.ходит === 'я' ? г.она.length : г.я.length);
+    сказать(из(ФРАЗЫ.начало) + (г.ходит === 'она' ? ' Мой ход — у меня козырь младше.' : ''));
+    рисовать(); if (г.ходит === 'она') бабаХодит();
+  }
+  const сказать = т => { элРеплика.textContent = '«' + т + '»'; };
+  const рангиНаСтоле = () => new Set(г.стол.flatMap(п => [п.а.д, п.з && п.з.д].filter(Boolean)));
+  const неПобиты = () => г.стол.filter(п => !п.з);
+  const можноПодкинуть = к => г.стол.length === 0 || (рангиНаСтоле().has(к.д) && г.стол.length < г.лимит);
+  function добрать() {
+    for (const кто of г.ходит === 'я' ? ['я', 'она'] : ['она', 'я']) while (г[кто].length < 6 && г.колода.length) г[кто].push(г.колода.shift());
+    сорт(г.я, г.коз);
+  }
+  function проверитьКонец() {
+    if (г.колода.length) return false;
+    const яПуст = !г.я.length, онаПуст = !г.она.length;
+    if (!яПуст && !онаПуст) return false;
+    г.конец = true; хран.игр++;
+    let заг, текст;
+    if (яПуст && онаПуст) { заг = 'НИЧЬЯ'; текст = из(ФРАЗЫ.ничья); }
+    else if (яПуст) { заг = 'ТЫ ВЫИГРАЛ!'; текст = из(ФРАЗЫ.поражение); хран.побед++; window.__итоги && window.__итоги.дать('дурак'); }
+    else { заг = 'ТЫ ДУРАК 🙃'; текст = из(ФРАЗЫ.победа); }
+    сохранить(); сказать(текст);
+    $('.итог b').textContent = заг; $('.итог span').textContent = `Побед у бабушек: ${хран.побед} из ${хран.игр}`;
+    элИтог.classList.add('видно'); рисовать(); return true;
+  }
+  // конец кона: бито — защитник ходит; взял — атакующий ходит снова
+  function конКончился(взял) {
+    if (взял) { const кто = г.ходит === 'я' ? 'она' : 'я'; for (const п of г.стол) { г[кто].push(п.а); if (п.з) г[кто].push(п.з); } }
+    г.стол = []; добрать(); if (проверитьКонец()) return;
+    if (!взял) г.ходит = г.ходит === 'я' ? 'она' : 'я';
+    г.лимит = Math.min(6, г.ходит === 'я' ? г.она.length : г.я.length);
+    рисовать(); if (г.ходит === 'она') бабаХодит();
+  }
+  // ---- ход игрока ----
+  function мойТап(i) {
+    if (!г || г.конец || г.ждём) return;
+    const к = г.я[i];
+    if (г.ходит === 'я') {
+      if (г.берёт) { if (!можноПодкинуть(к)) return; }          // бабушка берёт — можно накидать вдогонку
+      else if (!можноПодкинуть(к)) return;
+      г.я.splice(i, 1); г.стол.push({ а: к, з: null }); рисовать();
+      if (!г.берёт) бабаОтбивается(); else проверитьВсё();
+    } else {
+      const цель = неПобиты().find(п => бьёт(к, п.а, г.коз)); if (!цель) { встряхнуть(i); return; }
+      г.я.splice(i, 1); цель.з = к; рисовать();
+      if (!неПобиты().length) бабаПодкидывает();
+    }
+  }
+  function проверитьВсё() { рисовать(); }
+  function встряхнуть(i) { const э = элМоя.children[i]; if (!э) return; э.animate([{ transform: 'translateX(-5px)' }, { transform: 'translateX(5px)' }, { transform: 'none' }], { duration: 200 }); }
+  кнБито.addEventListener('click', () => {
+    if (!г || г.конец || г.ходит !== 'я' || !г.стол.length || г.ждём) return;
+    if (г.берёт) { г.берёт = false; сказать(из(ФРАЗЫ.беру)); конКончился(true); return; }
+    if (неПобиты().length) return;
+    сказать(из(ФРАЗЫ.бито)); конКончился(false);
+  });
+  кнБеру.addEventListener('click', () => {
+    if (!г || г.конец || г.ходит !== 'она' || !неПобиты().length || г.ждём) return;
+    сказать(из(ФРАЗЫ.ты_берёшь));
+    // бабушка накидывает вдогонку, что подходит (не козыри, пока колода есть)
+    const ранги = рангиНаСтоле();
+    for (const к of г.она.slice()) if (ранги.has(к.д) && г.стол.length < г.лимит && (к.м !== г.коз || !г.колода.length)) { г.она.splice(г.она.indexOf(к), 1); г.стол.push({ а: к, з: null }); }
+    рисовать(); г.ждём = true;
+    setTimeout(() => { г.ждём = false; конКончился(true); }, 800);
+  });
+  // ---- ход бабушки ----
+  const позже = (ф, мс = 750) => { г.ждём = true; clearTimeout(таймБабы); таймБабы = setTimeout(() => { if (!г) return; г.ждём = false; ф(); рисовать(); }, мс); };
+  function бабаХодит() {
+    позже(() => {
+      if (г.конец) return;
+      const рука = сорт(г.она.slice(), г.коз), к = рука.find(к => к.м !== г.коз) || рука[0]; if (!к) return;
+      г.она.splice(г.она.indexOf(к), 1); г.стол.push({ а: к, з: null });
+      // сразу ещё пару таких же, если не козыри
+      for (const д of рука) if (д !== к && д.д === к.д && д.м !== г.коз && г.стол.length < г.лимит && Math.random() < 0.7) { г.она.splice(г.она.indexOf(д), 1); г.стол.push({ а: д, з: null }); }
+    });
+  }
+  function бабаПодкидывает() {
+    позже(() => {
+      if (г.конец) return;
+      const ранги = рангиНаСтоле();
+      const к = сорт(г.она.slice(), г.коз).find(к => ранги.has(к.д) && (к.м !== г.коз || г.колода.length < 6));
+      if (к && г.стол.length < г.лимит && г.я.length > 0) { г.она.splice(г.она.indexOf(к), 1); г.стол.push({ а: к, з: null }); сказать('А вот ещё!'); }
+      else { сказать(из(ФРАЗЫ.бито)); конКончился(false); }
+    }, 900);
+  }
+  function бабаОтбивается() {
+    позже(() => {
+      if (г.конец) return;
+      for (const п of неПобиты()) {
+        const кандидаты = сорт(г.она.filter(к => бьёт(к, п.а, г.коз)), г.коз);
+        let к = кандидаты[0];
+        if (к && к.м === г.коз && ДОСТ.indexOf(к.д) >= 6 && г.колода.length > 10 && п.а.м !== г.коз) к = null;    // старшим козырем рано не бьёт
+        if (!к) { г.берёт = true; сказать('Беру… Накидывай, если есть.'); return; }
+        г.она.splice(г.она.indexOf(к), 1); п.з = к;
+      }
+    });
+  }
+
+  // ---- отрисовка ----
+  function карта(к, класс = '') {
+    const э = document.createElement(класс.includes('рубашка') ? 'div' : 'button'); э.className = 'карта ' + класс + (к && красная(к) ? ' красная' : '') + (к && г && к.м === г.коз ? ' козырная' : '');
+    if (к) { const м = document.createElement('small'); м.textContent = к.д + '\n' + к.м; м.style.whiteSpace = 'pre'; э.append(м, document.createTextNode(к.м)); }
+    return э;
+  }
+  function рисовать() {
+    if (!г) return;
+    элЕё.innerHTML = ''; for (let i = 0; i < г.она.length; i++) элЕё.appendChild(карта(null, 'рубашка'));
+    элКолода.innerHTML = '';
+    if (г.колода.length) { const к = карта(г.козырь, 'козырь'); элКолода.appendChild(к); if (г.колода.length > 1) элКолода.appendChild(карта(null, 'рубашка')); }
+    else { const к = document.createElement('div'); к.style.cssText = 'font-size:34px;text-align:center;line-height:92px'; к.textContent = г.коз; к.style.color = г.коз === '♥' || г.коз === '♦' ? '#FF6B6B' : '#FAF7EE'; элКолода.appendChild(к); }
+    const ск = document.createElement('div'); ск.className = 'сколько'; ск.textContent = г.колода.length ? 'колода ' + г.колода.length : 'козырь'; элКолода.appendChild(ск);
+    элСтол.innerHTML = ''; for (const п of г.стол) { const пара = document.createElement('div'); пара.className = 'пара'; пара.appendChild(карта(п.а)); if (п.з) пара.appendChild(карта(п.з)); элСтол.appendChild(пара); }
+    элМоя.innerHTML = '';
+    г.я.forEach((к, i) => {
+      const можно = !г.конец && !г.ждём && (г.ходит === 'я' ? можноПодкинуть(к) : неПобиты().some(п => бьёт(к, п.а, г.коз)));
+      const э = карта(к, можно ? 'можно' : 'нельзя'); э.addEventListener('click', () => мойТап(i)); элМоя.appendChild(э);
+    });
+    const мой = г.ходит === 'я';
+    кнБито.disabled = !(мой && г.стол.length && (г.берёт || !неПобиты().length)) || г.ждём;
+    кнБито.textContent = г.берёт ? 'ОТДАТЬ' : 'БИТО';
+    кнБеру.disabled = !(!мой && неПобиты().length) || г.ждём;
+    элСтатус.textContent = г.конец ? '' : г.ждём ? 'Бабушка думает…' : мой ? (г.берёт ? 'Бабушка берёт — подкинь ещё или жми «ОТДАТЬ»' : г.стол.length ? (неПобиты().length ? 'Бабушка отбивается…' : 'Подкидывай или «БИТО»') : 'Твой ход — выбери карту') : (неПобиты().length ? 'Отбивайся — тап по карте, которой бьёшь (или «БЕРУ»)' : 'Ждём бабушку…');
+  }
+
+  // ---- открыть / закрыть ----
+  function открыть() { if (окно.classList.contains('видно')) return; окно.classList.add('видно'); элИтог.classList.remove('видно'); window.__управлениеСтоп = true; раздать(); }
+  function закрыть() { окно.classList.remove('видно'); clearTimeout(таймБабы); г = null; window.__управлениеСтоп = false; }
+  $('.выйти').addEventListener('click', закрыть); $('.хватит').addEventListener('click', закрыть);
+  $('.ещё').addEventListener('click', () => { элИтог.classList.remove('видно'); раздать(); });
+  кн.addEventListener('click', открыть);
+
+  // кнопка — рядом с сидящей бабушкой
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt) return;
+    const Л = window.__люди; let рядом = false;
+    if (Л && Л.люди && document.getElementById('старт').hidden && !окно.classList.contains('видно') && !window.__заРулём && !window.__поездка && !window.__летитЯша && !window.__управлениеСтоп && !document.body.classList.contains('кино') && Л.режим() === 'мирно') {
+      for (const ч of Л.люди) if (ч.вид === 'бабушка' && ч.роль === 'сидит' && Math.hypot(ч.x - поз.x, ч.z - поз.z) < 2.4) { рядом = true; break; }
+    }
+    кн.style.display = рядом ? 'block' : 'none';
+  });
+  window.__дурак = { открыть, закрыть, г: () => г, мойТап, бито: () => кнБито.click(), беру: () => кнБеру.click(), раздать, хран };
+}]);
+
+</script>
+<script>
 // Мопед «Альфа»: стоит у тебя во дворе. Подошёл — «СЕСТЬ НА МОПЕД», и катайся по посёлку:
 // джойстик (или WASD) — газ и руль, на поворотах кренится, колёса крутятся, мотор тарахтит, вечером горит фара,
 // «БИП» — гудок. Игрок сидит за рулём (поза сидя). В ⚙ — «МОПЕД: КО МНЕ». В онлайне видно, кто едет на мопеде.
@@ -19835,7 +20072,7 @@ window.ДЕТАЛИ.push(['сезоны', function (API) {
 // радар Шторма и руль Феникса не трогаем: там важны точные координаты пальца.
 window.ДЕТАЛИ.push(['размер интерфейса', function () {
   const ЧТО = ['#кнопки', '#шестерня', '#онлКн', '#компас', '#миникарта:not(.большая)', '#улица', '#цель', '#совет', '#меню',
-    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
+    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#дуракКн', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
     '#войнаПанель', '#войнаНаВойну', '#войнаКинуть', '#войнаДрон', '#войнаЖизни', '#войнаТревога',
     '#полигонВерх', '#полигонКн1', '#полигонКн2', '#полигонСесть', '#полигонЛёт', '#полигонСвин', '#полётВВ', '#полётВН',
     '#яшолёт', '#яшолётСесть', '#яшолётКуры', '#фениксСесть', '#выход-каб', '#кн-сюжет', '#кн-халупа', '#кн-шторм', '#озон-окно',
