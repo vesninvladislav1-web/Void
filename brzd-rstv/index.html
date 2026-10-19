@@ -10253,6 +10253,40 @@ window.ДЕТАЛИ.push(['акт 2', function (API) {
 
 </script>
 <script>
+// ===================== ОЗВУЧКА ЖИВЫМИ ГОЛОСАМИ =====================
+// Реплики, которые записали сами ребята (каждый — своего героя). Есть запись — играет она,
+// нет — как раньше, голос телефона. Файлы — в golos/, обработаны: громкость, тишина по краям.
+window.ДЕТАЛИ.push(['озвучка', function (API) {
+  const ЗАПИСИ = {
+    'Последний чикенбургер в Бороздиновке. Не отдам.': 'golos/lyuba_01.mp3',
+    '…Ой.': 'golos/lyuba_02.mp3',
+    'Я ЛЕЧУ-У-У-У!': 'golos/lyuba_03.mp3',
+  };
+  const ключ = т => String(т).toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/g, '');
+  const файлы = new Map(), буферы = new Map(), сырые = new Map();
+  for (const [т, ф] of Object.entries(ЗАПИСИ)) файлы.set(ключ(т), ф);
+  // качаем заранее (маленькие, ~100 КБ на всех), раскодируем, когда появится звук
+  for (const ф of new Set(файлы.values())) fetch(ф).then(о => о.ok ? о.arrayBuffer() : null).then(б => { if (б) сырые.set(ф, б); }).catch(() => {});
+  const ядро = () => window.__бахЯдро && window.__бахЯдро.звук && window.__бахЯдро.звук();
+  function раскодировать() {
+    const к = ядро(); if (!к) return;
+    for (const [ф, б] of сырые) { сырые.delete(ф); к.decodeAudioData(б).then(а => буферы.set(ф, а)).catch(() => {}); }
+  }
+  let звучит = null;
+  function сыграть(текст) {
+    const ф = файлы.get(ключ(текст)); if (!ф) return false;
+    if (window.__перемотка) return true;                  // перемотка сюжета — молча, робоголос тоже не нужен
+    раскодировать();
+    const к = ядро(), а = буферы.get(ф); if (!к || !а || к.state !== 'running') return false;
+    const и = к.createBufferSource(), г = к.createGain(); и.buffer = а; г.gain.value = window.__громкость ? window.__громкость('голоса') : 1;
+    и.connect(г); г.connect(window.__бахЯдро.выход()); и.start(); звучит = и; и.onended = () => { if (звучит === и) звучит = null; };
+    try { window.speechSynthesis && speechSynthesis.cancel(); } catch (e) {}
+    return true;
+  }
+  API.каждыйКадр.push(() => { if (сырые.size && ядро()) раскодировать(); });   // звук завёлся — раскодируем всё, что успело скачаться
+  window.__озвучка = { сыграть, есть: т => файлы.has(ключ(т)), буферы };
+}]);
+
 // Акт «Халупа» (придумал Ваня Шипилов) и подсцена Любы (придумала Люба).
 // После холодильника пылесос разряжен — до Ростова не дотянет. Ваня на пустыре в центре
 // строит огромную халупу — «зарядную станцию». Игрок таскает ему стройматериалы (обломки
@@ -10271,7 +10305,7 @@ window.ДЕТАЛИ.push(['халупа', function (API) {
   const мат = (цвет, доп = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: ц(цвет), roughness: 0.85, metalness: 0 }, доп));
   const ящик = (w, h, d, м, x = 0, y = 0, z = 0) => { const о = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), м); о.position.set(x, y, z); о.castShadow = true; о.receiveShadow = true; return о; };
   const звукВкл = () => { try { return localStorage.getItem('бороздиновский.звук') !== 'нет'; } catch (e) { return true; } };
-  function голос(текст, высота = 1, скор = 1.05) { if (!звукВкл() || !window.speechSynthesis) return; try { const у = new SpeechSynthesisUtterance(текст.replace(/[«»—]/g, '')); у.lang = 'ru-RU'; у.pitch = высота; у.rate = скор; speechSynthesis.speak(у); } catch (e) {} }
+  function голос(текст, высота = 1, скор = 1.05) { if (!звукВкл()) return; if (window.__озвучка && window.__озвучка.сыграть(текст)) return; if (!window.speechSynthesis) return; try { const у = new SpeechSynthesisUtterance(текст.replace(/[«»—]/g, '')); у.lang = 'ru-RU'; у.pitch = высота; у.rate = скор; speechSynthesis.speak(у); } catch (e) {} }
   const сказать = (кто, текст, сек = 4, высота = 1) => { кино() && кино().подпись((кто ? кто + ': ' : '') + текст, сек); голос(текст, высота); };
 
   // ===================== ГДЕ =====================
@@ -10620,7 +10654,7 @@ window.ДЕТАЛИ.push(['акт 3', function (API) {
   const выход = () => Я().выход();
   const звукВкл = () => { try { return localStorage.getItem('бороздиновский.звук') !== 'нет'; } catch (e) { return true; } };
   const матВкл = () => { try { return localStorage.getItem('бороздиновский.мат') !== 'нет'; } catch (e) { return true; } };
-  function голос(текст, высота = 1, скор = 1.05) { if (!звукВкл() || !window.speechSynthesis) return; try { const у = new SpeechSynthesisUtterance(текст.replace(/[«»—]/g, '')); у.lang = 'ru-RU'; у.pitch = высота; у.rate = скор; speechSynthesis.speak(у); } catch (e) {} }
+  function голос(текст, высота = 1, скор = 1.05) { if (!звукВкл()) return; if (window.__озвучка && window.__озвучка.сыграть(текст)) return; if (!window.speechSynthesis) return; try { const у = new SpeechSynthesisUtterance(текст.replace(/[«»—]/g, '')); у.lang = 'ru-RU'; у.pitch = высота; у.rate = скор; speechSynthesis.speak(у); } catch (e) {} }
 
   // ===================== ВЫЕЗД ИЗ ПОСЁЛКА =====================
   // конец главной дороги, дальше всех от центра карты
@@ -11514,7 +11548,7 @@ window.ДЕТАЛИ.push(['Шторм и спутник', function (API) {
   const мат = (цвет, доп = {}) => new THREE.MeshStandardMaterial(Object.assign({ color: ц(цвет), roughness: 0.6, metalness: 0 }, доп));
   const ящик = (w, h, d, м, x = 0, y = 0, z = 0) => { const о = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), м); о.position.set(x, y, z); о.castShadow = true; return о; };
   const звукВкл = () => { try { return localStorage.getItem('бороздиновский.звук') !== 'нет'; } catch (e) { return true; } };
-  function голос(т, высота = 1) { if (!звукВкл() || !window.speechSynthesis) return; try { const у = new SpeechSynthesisUtterance(т.replace(/[«»—]/g, '')); у.lang = 'ru-RU'; у.pitch = высота; у.rate = 1.05; speechSynthesis.speak(у); } catch (e) {} }
+  function голос(т, высота = 1) { if (!звукВкл()) return; if (window.__озвучка && window.__озвучка.сыграть(т)) return; if (!window.speechSynthesis) return; try { const у = new SpeechSynthesisUtterance(т.replace(/[«»—]/g, '')); у.lang = 'ru-RU'; у.pitch = высота; у.rate = 1.05; speechSynthesis.speak(у); } catch (e) {} }
   const ctx = () => { const к = Я() && Я().звук(); return к && к.state === 'running' ? к : null; };
   function бип(частоты, длит = 0.06, гр = 0.07, тип = 'square') { const к = ctx(); if (!к) return; let t = к.currentTime; for (const f of [].concat(частоты)) { const о = к.createOscillator(), g = к.createGain(); о.type = тип; о.frequency.value = f; g.gain.setValueAtTime(гр, t); g.gain.exponentialRampToValueAtTime(0.0001, t + длит); о.connect(g); g.connect(Я().выход()); о.start(t); о.stop(t + длит + 0.02); t += длит; } }
 
