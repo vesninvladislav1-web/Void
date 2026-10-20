@@ -15522,6 +15522,119 @@ window.ДЕТАЛИ.push(['фото', function (API) {
   window.__фото = { войти, выйти, вкл: () => вкл };
 }]);
 
+// ===================== ⚙ → ТЕСТ ТЕЛЕФОНА =====================
+// 30 секунд: игрок стоит в трёх местах (свой двор, улица, дальний край), камера крутится вокруг —
+// меряем настоящие кадры в секунду. В конце — карточка: телефон, видеочип, память, графика, FPS и совет.
+// «КОПИРОВАТЬ» — чтобы прислать результат разработчику одним сообщением.
+window.ДЕТАЛИ.push(['тест телефона', function (API) {
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #тестТел { position: fixed; inset: 0; z-index: 40; display: none; align-items: center; justify-content: center; background: rgba(8,5,3,0.86); padding: 12px; }
+    #тестТел.видно { display: flex; }
+    #тестТел .лист { width: min(520px, 100%); max-height: 100%; overflow: auto; background: #1A140E; border: 1px solid rgba(242,230,204,0.22); border-radius: 16px; padding: 14px; color: #F2E6CC; font: 13px/1.45 system-ui, sans-serif; box-sizing: border-box; }
+    #тестТел h2 { margin: 0 0 6px; font: 800 16px system-ui, sans-serif; letter-spacing: 2px; }
+    #тестТел .итог { font: 800 30px system-ui, sans-serif; margin: 4px 0; } #тестТел .итог small { font-size: 13px; font-weight: 600; color: #B8AC94; }
+    #тестТел pre { white-space: pre-wrap; font: 12px/1.45 ui-monospace, monospace; background: #0E0B08; border-radius: 10px; padding: 8px 10px; margin: 8px 0; color: #D8CCB4; }
+    #тестТел .низ { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+    #тестТел button { height: 36px; padding: 0 16px; border-radius: 18px; border: 1px solid rgba(242,230,204,0.3); background: #2A2018; color: #F2E6CC; font: 700 12px system-ui, sans-serif; letter-spacing: 1px; cursor: pointer; }
+    #тестТел .да { border-color: #F4C430; color: #F4C430; background: none; }
+    #тестИдёт { position: fixed; left: 50%; top: calc(14px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 40; display: none; padding: 8px 16px; border-radius: 18px; background: rgba(18,12,8,0.85); border: 1px solid #F4C430; color: #F4C430; font: 700 13px system-ui, sans-serif; }
+  `;
+  document.head.appendChild(стиль);
+  const окно = document.createElement('div'); окно.id = 'тестТел';
+  const идёт = document.createElement('div'); идёт.id = 'тестИдёт';
+  document.body.append(окно, идёт);
+  const КАЧ = ['низкая', 'средняя', 'высокая', 'ультра'];
+  let работает = false;
+
+  async function модель() {
+    try { if (navigator.userAgentData && navigator.userAgentData.getHighEntropyValues) { const д = await navigator.userAgentData.getHighEntropyValues(['model', 'platformVersion']); if (д.model) return д.model + (д.platformVersion ? ' (Android ' + д.platformVersion.split('.')[0] + ')' : ''); } } catch (e) {}
+    const м = /Android [\d.]+; ([^;)]+)/.exec(navigator.userAgent); if (м && м[1] !== 'K') return м[1];
+    if (/iPhone|iPad/.test(navigator.userAgent)) return /iPad/.test(navigator.userAgent) ? 'iPad' : 'iPhone';
+    return /Android/.test(navigator.userAgent) ? 'Android (модель скрыта)' : 'компьютер';
+  }
+  function точки() {
+    const П = window.__мир.поз, т = [];
+    const Д = API.дворИгрока; if (Д) { const [x, z] = Д.W((Д.щебень[0] + Д.щебень[1]) / 2, (Д.щебень[2] + Д.щебень[3]) / 2); т.push([x, z]); } else т.push([П.x, П.z]);
+    const ц = API.ближайшаяДорога(0, 0); if (ц) т.push([ц.px, ц.pz]);
+    const д = API.ближайшаяДорога(т[0][0] + 160, т[0][1] + 60); if (д) т.push([д.px, д.pz]);
+    return т.filter(([x, z]) => !API.вДоме(x, z, 0.5));
+  }
+  async function запустить() {
+    if (работает) return;
+    if (!document.getElementById('старт').hidden || document.body.classList.contains('кино') || window.__перемотка) { window.__подсказки && window.__подсказки.совет('Тест — во время игры, не в сцене', 2.5); return; }
+    работает = true;
+    const меню = document.getElementById('меню'); if (меню) меню.classList.remove('открыто');
+    const П = window.__мир.поз, кам = window.__мир.кам, было = { x: П.x, z: П.z, угол: П.угол, рыск: кам.рыск, тангаж: кам.тангаж, даль: кам.даль, стоп: window.__управлениеСтоп };
+    window.__управлениеСтоп = true;
+    const места = точки(), НА_МЕСТО = 10, кадры = [];
+    let t0 = performance.now(), прошлый = t0, место = -1;
+    await new Promise(готово => {
+      (function шаг() {
+        const сейчас = performance.now();                 // не время кадра из rAF: оно бывает чуть раньше t0
+        const всего = Math.max(0, (сейчас - t0) / 1000), н = Math.min(места.length - 1, Math.floor(всего / НА_МЕСТО));
+        if (н !== место) { место = н; П.x = места[н][0]; П.z = места[н][1]; кам.тангаж = 0.28; кам.даль = 6; прошлый = сейчас; }   // кадр телепорта не считаем
+        else кадры.push(сейчас - прошлый);
+        прошлый = сейчас;
+        кам.рыск = было.рыск + (всего % НА_МЕСТО) / НА_МЕСТО * Math.PI * 2;   // на каждом месте — полный круг
+        идёт.textContent = '📱 Тест телефона… ' + Math.max(0, Math.ceil(места.length * НА_МЕСТО - всего)) + ' с';
+        if (всего >= места.length * НА_МЕСТО) { готово(); return; }
+        requestAnimationFrame(шаг);
+      })();
+      идёт.style.display = 'block';
+    });
+    идёт.style.display = 'none';
+    Object.assign(П, { x: было.x, z: было.z, угол: было.угол }); Object.assign(кам, { рыск: было.рыск, тангаж: было.тангаж, даль: было.даль }); window.__управлениеСтоп = было.стоп;
+    работает = false;
+    // итоги
+    const сорт = кадры.slice().sort((a, b) => a - b), сумма = кадры.reduce((a, b) => a + b, 0) || 1;
+    const fps = кадры.length / (сумма / 1000), худ = 1000 / (сорт[Math.floor(сорт.length * 0.99)] || 1000), рывков = кадры.filter(к => к > 100).length;
+    const У = window.__устройство || {}, Р = API.рендер, гр = КАЧ[API.УР] || '?';
+    const м = await модель();
+    const цель = window.__огр30 ? 30 : 60;
+    const [оц, совет] = fps >= цель * 0.83 ? ['🟢 Отлично', гр === 'ультра' || API.УР >= 2 ? 'Всё хорошо, можно так и играть.' : 'Тянет с запасом — попробуй графику выше.']
+      : fps >= 30 ? ['🟡 Хорошо', 'Играть удобно.']
+      : fps >= 20 ? ['🟠 Играбельно', API.УР > 0 ? 'Будет плавнее на графике ' + КАЧ[API.УР - 1].toUpperCase() + ' или с «КАДРЫ 30».' : 'Уже на низкой — лучше «КАДРЫ 30».']
+      : ['🔴 Тяжело', API.УР > 0 ? 'Поставь графику ' + КАЧ[Math.max(0, API.УР - 1)].toUpperCase() + '.' : 'Телефону тяжело даже на низкой.'];
+    const текст = [
+      'Бороздиновский — тест телефона',
+      'Телефон: ' + м,
+      'Видеочип: ' + (У.gpu || '?'),
+      'Память: ' + (У.пам ? '≈' + У.пам + ' ГБ' : '?') + ', ядер: ' + (У.ядер || '?'),
+      'Экран: ' + screen.width + '×' + screen.height + ' ×' + (devicePixelRatio || 1).toFixed(2) + ', окно ' + innerWidth + '×' + innerHeight,
+      'Графика: ' + гр + ' (угадано: ' + (У.угадано || '?') + '), чёткость ' + Р.getPixelRatio().toFixed(2) + (window.__огр30 ? ', кадры 30' : ''),
+      'FPS: в среднем ' + fps.toFixed(1) + ', худшие 1% — ' + худ.toFixed(1) + ', рывков >0.1 с: ' + рывков,
+      'Итог: ' + оц + ' — ' + совет,
+      'Приложение: ' + (/BrzdApp\/(\d+)/.exec(navigator.userAgent) || [, 'нет (браузер)'])[1] + ', ' + new Date().toLocaleString('ru-RU'),
+    ].join('\n');
+    try { const с = JSON.parse(localStorage.getItem('бороздиновский.тесты') || '[]'); с.push({ когда: Date.now(), м, fps: +fps.toFixed(1), гр }); localStorage.setItem('бороздиновский.тесты', JSON.stringify(с.slice(-20))); } catch (e) {}
+    окно.innerHTML = '';
+    const лист = document.createElement('div'); лист.className = 'лист';
+    const h = document.createElement('h2'); h.textContent = '📱 ТЕСТ ТЕЛЕФОНА';
+    const ит = document.createElement('div'); ит.className = 'итог'; ит.innerHTML = Math.round(fps) + ' FPS <small>' + оц + '</small>';
+    const пре = document.createElement('pre'); пре.textContent = текст;
+    const низ = document.createElement('div'); низ.className = 'низ';
+    const коп = document.createElement('button'); коп.textContent = '📋 КОПИРОВАТЬ';
+    коп.addEventListener('click', async () => {
+      let ок = false; try { await navigator.clipboard.writeText(текст); ок = true; } catch (e) {}
+      if (!ок) { const р = document.createRange(); р.selectNodeContents(пре); const в = getSelection(); в.removeAllRanges(); в.addRange(р); try { ок = document.execCommand('copy'); } catch (e) {} }
+      коп.textContent = ок ? '✓ СКОПИРОВАНО' : 'ВЫДЕЛИ ТЕКСТ И СКОПИРУЙ';
+    });
+    const ещё = document.createElement('button'); ещё.textContent = 'ЕЩЁ РАЗ'; ещё.addEventListener('click', () => { окно.classList.remove('видно'); setTimeout(запустить, 300); });
+    const зак = document.createElement('button'); зак.className = 'да'; зак.textContent = 'ГОТОВО'; зак.addEventListener('click', () => окно.classList.remove('видно'));
+    низ.append(коп, ещё, зак); лист.append(h, ит, пре, низ); окно.appendChild(лист); окно.classList.add('видно');
+    window.__тестТелефона.последний = текст;
+  }
+  const меню = document.getElementById('меню');
+  if (меню) {
+    const с = document.createElement('div'); с.className = 'строка';
+    const п = document.createElement('span'); п.textContent = 'ТЕСТ ТЕЛЕФОНА';
+    const б = document.createElement('button'); б.className = 'кн шрифт'; б.textContent = '▶ 30 С'; б.addEventListener('click', запустить);
+    с.append(п, б); меню.insertBefore(с, меню.lastElementChild);
+  }
+  window.__тестТелефона = { запустить };
+}]);
+
 // ⚙ → УПРАВЛЕНИЕ И ЗВУК: три ползунка громкости
 window.ДЕТАЛИ.push(['громкость', function () {
   const Т = window.__тонко, А = window.__аудио; if (!Т || !А || !А.поставитьГромкость) return;
