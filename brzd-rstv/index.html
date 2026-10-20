@@ -20732,6 +20732,18 @@ window.ДЕТАЛИ.push(['мопед', function (API) {
     }
     return [П.x, П.z, курсКДороге(П.x, П.z, П.угол)];
   }
+  // на обочину ближайшей дороги, вдоль неё (а не в огород, где стоит игрок); дорога далеко — рядом с игроком
+  function уДороги(макс = 40) {
+    const П = window.__мир.поз, д = API.ближайшаяДорога && API.ближайшаяДорога(П.x, П.z);
+    if (!д || д.d > макс) return рядомСИгроком();
+    const пш = ((API.ШИРИНА && API.ШИРИНА[д.д.т]) || 5) / 2, нx = -д.uz, нz = д.ux;
+    const сторона = (П.x - д.px) * нx + (П.z - д.pz) * нz >= 0 ? 1 : -1;       // на ту обочину, что ближе к игроку
+    for (const сдвиг of [пш - 0.7, пш * 0.4, 0]) for (const вдоль of [0, 3, -3, 6, -6]) {
+      const x = д.px + нx * сдвиг * сторона + д.ux * вдоль, z = д.pz + нz * сдвиг * сторона + д.uz * вдоль;
+      if (!API.вДоме(x, z, 0.8) && !API.вВоде(x, z)) return [x, z, Math.atan2(д.ux, д.uz)];
+    }
+    return рядомСИгроком();
+  }
   function разместить(dt) {
     const fx = Math.sin(ст.курс), fz = Math.cos(ст.курс);
     const yП = В(ст.х + fx * 0.65, ст.z + fz * 0.65), yЗ = В(ст.х - fx * 0.62, ст.z - fz * 0.62);
@@ -20768,7 +20780,7 @@ window.ДЕТАЛИ.push(['мопед', function (API) {
   { const меню = document.getElementById('меню');
     if (меню) { const с = document.createElement('div'); с.className = 'строка'; const п = document.createElement('span'); п.textContent = 'МОПЕД';
       const б = document.createElement('button'); б.className = 'кн шрифт'; б.textContent = 'КО МНЕ';
-      б.addEventListener('click', () => { if (ст.едет || !document.getElementById('старт').hidden) return; поставить(...рядомСИгроком()); меню.classList.remove('открыто');
+      б.addEventListener('click', () => { if (ст.едет || !document.getElementById('старт').hidden) return; поставить(...уДороги(15)); меню.classList.remove('открыто');
         window.__подсказки && window.__подсказки.совет('🛵 Мопед рядом. Подходи и садись.', 2.5); });
       с.append(п, б); меню.appendChild(с); } }
 
@@ -20827,7 +20839,7 @@ window.ДЕТАЛИ.push(['мопед', function (API) {
   API.каждыйКадр.push((dt, ms, поз) => {
     if (!dt) return;
     const Мир = window.__мир, начато = document.getElementById('старт').hidden;
-    if (первый && начато && !window.__перемотка) { первый = false; поставить(...рядомСИгроком()); }
+    if (первый && начато && !window.__перемотка) { первый = false; поставить(...уДороги()); }
     // вечером фара горит
     фараМ.emissiveIntensity = window.__свет && window.__свет.какой() === 'вечер' ? 2.2 : 0.15;
     if (ст.едет) {
