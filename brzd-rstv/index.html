@@ -5528,13 +5528,19 @@ window.ДЕТАЛИ.push(['небо и кино', function (API) {
       сцена.fog.color.lerp(tmp.set(0.5, 0.5, 0.48).multiplyScalar(1 - 0.4 * тёмн), дм * 0.85);
       сцена.fog.near *= 1 - дм; сцена.fog.far += (55 - сцена.fog.far) * дм;
     }
+    // дождь (модуль «погода», window.__дождь 0…1): пасмурно — серый туман ближе, небо затянуто
+    const дж = Math.min(1, window.__дождь || 0);
+    if (дж > 0) {
+      сцена.fog.color.lerp(tmp.set(0.3, 0.32, 0.35).multiplyScalar(1 - 0.4 * тёмн), дж * 0.85);
+      сцена.fog.far += (Math.min(сцена.fog.far, 240) - сцена.fog.far) * дж; сцена.fog.near *= 1 - 0.5 * дж;
+    }
     // и небо — в цвет дыма (туман в линейном цвете, небо пишет цвет экрана)
     if (API.НЕБО_Ц) {
-      const Н = API.НЕБО_Ц; Н.uSmoke.value = дм * 0.92;
-      if (дм > 0) Н.uSmokeCol.value.set(Math.pow(сцена.fog.color.r, 1 / 2.2), Math.pow(сцена.fog.color.g, 1 / 2.2), Math.pow(сцена.fog.color.b, 1 / 2.2));
+      const Н = API.НЕБО_Ц; Н.uSmoke.value = Math.max(дм * 0.92, дж * 0.88);
+      if (дм > 0 || дж > 0) Н.uSmokeCol.value.set(Math.pow(сцена.fog.color.r, 1 / 2.2), Math.pow(сцена.fog.color.g, 1 / 2.2), Math.pow(сцена.fog.color.b, 1 / 2.2));
     }
-    солнце.intensity = база.солнце * (1 - 0.2 * a - 0.1 * тёмн); солнце.color.copy(база.цвСолнца).lerp(АПОК.солнце, a);
-    небоСвет.intensity = база.небо * (1 + 0.9 * a) + fl * 1.6;   // зарево подсвечивает улицы — видно, где ты
+    солнце.intensity = база.солнце * (1 - 0.2 * a - 0.1 * тёмн) * (1 - 0.6 * дж); солнце.color.copy(база.цвСолнца).lerp(АПОК.солнце, a);
+    небоСвет.intensity = база.небо * (1 + 0.9 * a) * (1 + 0.25 * дж) + fl * 1.6;   // в дождь свет рассеянный: тени бледнее, низ светлее   // зарево подсвечивает улицы — видно, где ты
     небоСвет.color.copy(база.цвНеба).lerp(АПОК.небо, a).lerp(tmp.set(1, 0.6, 0.25), Math.min(1, fl * 0.6));
     небоСвет.groundColor.copy(база.цвЗемли).lerp(АПОК.земля, a);
     // фонари: вечером горят всегда, днём — только когда небо темнеет (апокалипсис)
@@ -6678,8 +6684,24 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
   }
   const КЛЮЧ = 'бороздиновский.звук';
   let включён = true; try { включён = localStorage.getItem(КЛЮЧ) !== 'нет'; } catch (e) {}
-  const А = { ctx: null, мастер: null, фон: null };
+  const А = { ctx: null, мастер: null, фон: null, общий: null, музыка: null, голоса: null };
   window.__аудио = А;
+  // громкость по отдельности (⚙ → УПРАВЛЕНИЕ И ЗВУК): звуки, музыка, голоса. «ЗВУК» глушит всё разом
+  const КЛЮЧ_Г = 'бороздиновский.громкость';
+  const гр = { звуки: 1, музыка: 0.6, голоса: 1 };
+  try { const з = JSON.parse(localStorage.getItem(КЛЮЧ_Г)) || {}; for (const к in гр) if (typeof з[к] === 'number' && isFinite(з[к])) гр[к] = Math.max(0, Math.min(1, з[к])); } catch (e) {}
+  window.__громкость = вид => (включён ? 1 : 0) * (гр[вид] ?? 1);
+  function поставитьГромкость(вид, v) {
+    гр[вид] = Math.max(0, Math.min(1, v)); try { localStorage.setItem(КЛЮЧ_Г, JSON.stringify(гр)); } catch (e) {}
+    const узел = { звуки: А.мастер, музыка: А.музыка, голоса: А.голоса }[вид];
+    if (узел && А.ctx) узел.gain.setTargetAtTime(гр[вид], А.ctx.currentTime, 0.05);
+  }
+  А.громкость = гр; А.поставитьГромкость = поставитьГромкость;
+  // голос телефона (робот) — тоже по ползунку «голоса»
+  if (window.speechSynthesis && speechSynthesis.speak) {
+    const говорить = speechSynthesis.speak.bind(speechSynthesis);
+    try { speechSynthesis.speak = у => { try { у.volume = Math.max(0, Math.min(1, window.__громкость('голоса'))); } catch (e) {} if (у.volume > 0) говорить(у); }; } catch (e) {}
+  }
 
   // кнопка «ЗВУК» рядом с остальными
   const кн = document.createElement('button');
@@ -6689,7 +6711,7 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
   кн.addEventListener('click', () => {
     включён = !включён; кн.setAttribute('aria-pressed', String(включён));
     try { localStorage.setItem(КЛЮЧ, включён ? 'да' : 'нет'); } catch (e) {}
-    if (А.мастер) А.мастер.gain.setTargetAtTime(включён ? 1 : 0, А.ctx.currentTime, 0.05);
+    if (А.общий) А.общий.gain.setTargetAtTime(включён ? 1 : 0, А.ctx.currentTime, 0.05);
   });
 
   // звук можно завести только после касания — первое касание его и включает
@@ -6697,7 +6719,10 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
     if (А.ctx) { if (А.ctx.state === 'suspended') А.ctx.resume(); return; }
     try { А.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return; }
     const c = А.ctx;
-    А.мастер = c.createGain(); А.мастер.gain.value = включён ? 1 : 0; А.мастер.connect(c.destination);
+    А.общий = c.createGain(); А.общий.gain.value = включён ? 1 : 0; А.общий.connect(c.destination);
+    А.мастер = c.createGain(); А.мастер.gain.value = гр.звуки; А.мастер.connect(А.общий);           // звуки (и взрывы)
+    А.музыка = c.createGain(); А.музыка.gain.value = гр.музыка; А.музыка.connect(А.общий);
+    А.голоса = c.createGain(); А.голоса.gain.value = гр.голоса; А.голоса.connect(А.общий);
     А.фон = c.createGain(); А.фон.gain.value = 1; А.фон.connect(А.мастер);        // всё «природное» — чтобы приглушать после взрыва
     фоновые();
   }
@@ -6803,6 +6828,27 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
     А.фон.gain.linearRampToValueAtTime(0.15, t0 + 0.3); А.фон.gain.linearRampToValueAtTime(1, t0 + 18);
   }
 
+  function петух(гр, p) {             // «ку-ка-ре-ку»: четыре слога, последний длинный и вниз
+    const c = А.ctx, t0 = c.currentTime, о = c.createOscillator(), о2 = c.createOscillator(), ф = c.createBiquadFilter(), g = c.createGain();
+    о.type = 'sawtooth'; о2.type = 'square'; о2.detune.value = 9; ф.type = 'bandpass'; ф.frequency.value = 1500; ф.Q.value = 2.2; g.gain.value = 0;
+    const слоги = [[0, 0.11, 620, 700], [0.15, 0.1, 760, 820], [0.29, 0.13, 880, 980], [0.47, 0.75, 1020, 640]];
+    for (const [дt, дл, f0, f1] of слоги) {
+      const t = t0 + дt; for (const осц of [о, о2]) { осц.frequency.setValueAtTime(f0, t); осц.frequency.linearRampToValueAtTime(f1, t + дл); }
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.035 * гр, t + 0.02); g.gain.setValueAtTime(0.035 * гр, t + дл - 0.04); g.gain.linearRampToValueAtTime(0, t + дл);
+    }
+    о.connect(ф); о2.connect(ф); ф.connect(g); пан(g, p).connect(А.фон); о.start(t0); о2.start(t0); о.stop(t0 + 1.3); о2.stop(t0 + 1.3);
+  }
+  function трактор(гр, p) {            // проезжает вдалеке: тарахтит ~11 раз в секунду, накатывает и уходит
+    const c = А.ctx, t0 = c.currentTime, дл = 9 + Math.random() * 5, о = c.createOscillator(), ф = c.createBiquadFilter(), ам = c.createGain(), g = c.createGain();
+    о.type = 'sawtooth'; о.frequency.value = 46; ф.type = 'lowpass'; ф.frequency.value = 320;
+    const lfo = c.createOscillator(), lfoG = c.createGain(); lfo.type = 'square'; lfo.frequency.value = 11; lfoG.gain.value = 0.45; ам.gain.value = 0.55; lfo.connect(lfoG); lfoG.connect(ам.gain);
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(0.06 * гр, t0 + дл * 0.45); g.gain.exponentialRampToValueAtTime(0.0001, t0 + дл);
+    const s = c.createStereoPanner ? c.createStereoPanner() : null;
+    о.connect(ф); ф.connect(ам); ам.connect(g);
+    if (s) { s.pan.setValueAtTime(p, t0); s.pan.linearRampToValueAtTime(-p, t0 + дл); g.connect(s); s.connect(А.фон); } else g.connect(А.фон);
+    о.start(t0); lfo.start(t0); о.stop(t0 + дл + 0.1); lfo.stop(t0 + дл + 0.1);
+  }
+
   // ===================== ГДЕ ИГРОК =====================
   const ДВ = API.ДВОР;
   function покрытие(x, z) {
@@ -6820,7 +6866,7 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
   const доВоды = (x, z) => { let м = Infinity; for (const [bx, bz] of берег) м = Math.min(м, Math.hypot(bx - x, bz - z)); return м; };
 
   // ===================== КАЖДЫЙ КАДР =====================
-  let таймСверчок = 0, таймПтицы = 2, таймЛяг = 3, таймСобака = 12, прошлаяФаза = 0, пх = null, пз = null, таймВоды = 0, вода = 999;
+  let таймПетух = 20, таймТрактор = 60, таймСверчок = 0, таймПтицы = 2, таймЛяг = 3, таймСобака = 12, прошлаяФаза = 0, пх = null, пз = null, таймВоды = 0, вода = 999;
   API.каждыйКадр.push((dt, ms, поз) => {
     if (!А.ctx || !dt || А.ctx.state !== 'running') return;
     // шаги: по фазе походки, на каждом касании земли
@@ -6835,11 +6881,15 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
     // ветер сильнее вдали от домов (в поле) — грубо: чем дальше от центра посёлка
     if (ветерГ) ветерГ.gain.setTargetAtTime(0.02 + Math.min(0.05, Math.hypot(поз.x, поз.z) / 30000), А.ctx.currentTime, 1);
     // днём — птицы, сверчков почти не слышно; вечером — наоборот (свет — в настройках)
-    const день = !!window.__свет && window.__свет.какой() === 'день';
-    if (сверчкиГ) сверчкиГ.gain.setTargetAtTime(день ? 0.01 : 0.05, А.ctx.currentTime, 2);
-    if (день) { таймПтицы -= dt; if (таймПтицы <= 0) { таймПтицы = 1.2 + Math.random() * 4; птица(0.4 + Math.random() * 0.8, Math.random() * 2 - 1); } }
-    else { таймСверчок -= dt; if (таймСверчок <= 0) { таймСверчок = 0.25 + Math.random() * 0.9; чирик(0.4 + Math.random() * 0.8, Math.random() * 2 - 1); } }
-    if (вода < 160) { таймЛяг -= dt; if (таймЛяг <= 0) { таймЛяг = 1.5 + Math.random() * 4; ква(Math.max(0.1, 1 - вода / 160), Math.random() * 2 - 1); } }
+    // зимой — ни сверчков, ни лягушек, птиц мало; в дождь природа притихает
+    const день = !!window.__свет && window.__свет.какой() === 'день', зима = window.__сезон === 'зима', дождь = (window.__дождь || 0) > 0.4;
+    if (сверчкиГ) сверчкиГ.gain.setTargetAtTime(зима || дождь ? 0 : день ? 0.01 : 0.05, А.ctx.currentTime, 2);
+    if (день) { таймПтицы -= dt * (зима ? 0.25 : 1) * (дождь ? 0.15 : 1); if (таймПтицы <= 0) { таймПтицы = 1.2 + Math.random() * 4; птица(0.4 + Math.random() * 0.8, Math.random() * 2 - 1); } }
+    else if (!зима && !дождь) { таймСверчок -= dt; if (таймСверчок <= 0) { таймСверчок = 0.25 + Math.random() * 0.9; чирик(0.4 + Math.random() * 0.8, Math.random() * 2 - 1); } }
+    // петух — днём (чаще, когда день только начался), трактор — летом и осенью днём, вдалеке
+    if (день && !дождь) { таймПетух -= dt; if (таймПетух <= 0) { таймПетух = 40 + Math.random() * 80; петух(0.3 + Math.random() * 0.6, Math.random() * 2 - 1); } }
+    if (день && !зима) { таймТрактор -= dt; if (таймТрактор <= 0) { таймТрактор = 90 + Math.random() * 150; трактор(0.4 + Math.random() * 0.6, Math.random() < 0.5 ? -0.9 : 0.9); } }
+    if (вода < 160 && !зима) { таймЛяг -= dt; if (таймЛяг <= 0) { таймЛяг = 1.5 + Math.random() * 4; ква(Math.max(0.1, 1 - вода / 160), Math.random() * 2 - 1); } }
     таймСобака -= dt; if (таймСобака <= 0) { таймСобака = 18 + Math.random() * 40; гав(0.15 + Math.random() * 0.25, Math.random() * 2 - 1); }
   });
 
@@ -10278,8 +10328,8 @@ window.ДЕТАЛИ.push(['озвучка', function (API) {
     if (window.__перемотка) return true;                  // перемотка сюжета — молча, робоголос тоже не нужен
     раскодировать();
     const к = ядро(), а = буферы.get(ф); if (!к || !а || к.state !== 'running') return false;
-    const и = к.createBufferSource(), г = к.createGain(); и.buffer = а; г.gain.value = window.__громкость ? window.__громкость('голоса') : 1;
-    и.connect(г); г.connect(window.__бахЯдро.выход()); и.start(); звучит = и; и.onended = () => { if (звучит === и) звучит = null; };
+    const и = к.createBufferSource(), шина = window.__аудио && window.__аудио.голоса;
+    и.buffer = а; и.connect(шина && шина.context === к ? шина : window.__бахЯдро.выход()); и.start(); звучит = и; и.onended = () => { if (звучит === и) звучит = null; };
     try { window.speechSynthesis && speechSynthesis.cancel(); } catch (e) {}
     return true;
   }
@@ -15015,6 +15065,224 @@ window.ДЕТАЛИ.push(['обучение', function (API) {
     с.append(п, б); меню.insertBefore(с, меню.firstElementChild ? меню.firstElementChild.nextSibling : null);
   }
   window.__обучение = { открыть };
+}]);
+
+// ===================== МУЗЫКА =====================
+// Сочиняется на лету (Web Audio, без файлов): днём — спокойные переборы, вечером — тише и медленнее,
+// в апокалипсис, у босса и на войне — тревожный пульс. Между настроениями — плавный переход.
+// Громкость — ползунок «музыка» в ⚙ → УПРАВЛЕНИЕ И ЗВУК.
+window.ДЕТАЛИ.push(['музыка', function (API) {
+  const А = () => window.__аудио;
+  const НОТА = n => 440 * Math.pow(2, (n - 69) / 12);
+  // аккорды (MIDI): спокойно — C Am F G, вечер — Am F C G ниже, тревога — Dm / Bb / Gm / A
+  const ЛАДЫ = {
+    день: { темп: 76, аккорды: [[48, 55, 64, 67], [45, 52, 60, 64], [41, 48, 57, 60], [43, 50, 59, 62]], мел: [72, 74, 76, 79, 81, 84], плотность: 0.55 },
+    вечер: { темп: 60, аккорды: [[45, 52, 57, 60], [41, 48, 53, 57], [36, 43, 52, 55], [43, 50, 55, 59]], мел: [69, 72, 74, 76, 79], плотность: 0.3 },
+    тревога: { темп: 116, аккорды: [[38, 45, 50, 53], [34, 41, 46, 50], [43, 50, 55, 58], [45, 52, 57, 61]], мел: [62, 65, 67, 69, 70], плотность: 0.25 },
+  };
+  let выход = null, эхо = null, гр = {}, сейчас = 'день', след = 0, такт = 0, доля = 0;
+  function собрать() {
+    const а = А(); if (!а || !а.ctx || !а.музыка || выход) return !!выход;
+    const c = а.ctx;
+    выход = c.createGain(); выход.gain.value = 0.32; выход.connect(а.музыка);
+    // эхо для переборов — простая задержка с обратной связью
+    эхо = c.createDelay(1); эхо.delayTime.value = 0.36; const обр = c.createGain(); обр.gain.value = 0.28; const эхоВых = c.createGain(); эхоВых.gain.value = 0.35;
+    эхо.connect(обр); обр.connect(эхо); эхо.connect(эхоВых); эхоВых.connect(выход);
+    for (const к of Object.keys(ЛАДЫ)) { гр[к] = c.createGain(); гр[к].gain.value = к === сейчас ? 1 : 0; гр[к].connect(выход); }
+    след = c.currentTime + 0.3; return true;
+  }
+  function подушка(куда, ноты, t, дл, мягко) {        // аккорд-подложка: тихие треугольники с медленной атакой
+    const c = А().ctx, ф = c.createBiquadFilter(), g = c.createGain();
+    ф.type = 'lowpass'; ф.frequency.value = мягко ? 700 : 1100; g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.05, t + дл * 0.35); g.gain.exponentialRampToValueAtTime(0.0001, t + дл);
+    for (const n of ноты) { const о = c.createOscillator(); о.type = 'triangle'; о.frequency.value = НОТА(n); о.detune.value = (Math.random() - 0.5) * 8; о.connect(ф); о.start(t); о.stop(t + дл + 0.05); }
+    ф.connect(g); g.connect(куда);
+  }
+  function щипок(куда, n, t, сила, тип = 'sine', дл = 1.4) {   // перебор: как струна или колокольчик
+    const c = А().ctx, о = c.createOscillator(), о2 = c.createOscillator(), g = c.createGain();
+    о.type = тип; о.frequency.value = НОТА(n); о2.type = 'sine'; о2.frequency.value = НОТА(n) * 2.001;
+    const g2 = c.createGain(); g2.gain.value = 0.25;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.09 * сила, t + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, t + дл);
+    о.connect(g); о2.connect(g2); g2.connect(g); g.connect(куда); if (эхо) g.connect(эхо);
+    о.start(t); о2.start(t); о.stop(t + дл + 0.05); о2.stop(t + дл + 0.05);
+  }
+  function удар(куда, t, сила) {                       // глухой «там-там» для тревоги
+    const c = А().ctx, о = c.createOscillator(), g = c.createGain();
+    о.frequency.setValueAtTime(110, t); о.frequency.exponentialRampToValueAtTime(42, t + 0.3);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.22 * сила, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
+    о.connect(g); g.connect(куда); о.start(t); о.stop(t + 0.55);
+  }
+  function пульс(куда, n, t, дл) {                      // тревожная восьмая: приглушённый квадрат
+    const c = А().ctx, о = c.createOscillator(), ф = c.createBiquadFilter(), g = c.createGain();
+    о.type = 'square'; о.frequency.value = НОТА(n); ф.type = 'lowpass'; ф.frequency.value = 900;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.035, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + дл);
+    о.connect(ф); ф.connect(g); g.connect(куда); о.start(t); о.stop(t + дл + 0.02);
+  }
+  function настроение() {
+    const ап = API.небоМат && API.небоМат.uniforms.uApok.value || 0, В = window.__война;
+    if (ап > 0.6 || (В && В.идёт && В.идёт())) return 'тревога';
+    return window.__свет && window.__свет.какой() === 'вечер' ? 'вечер' : 'день';
+  }
+  // планировщик: держим запас нот на ~0.6 с вперёд по часам звука
+  function запланировать() {
+    const c = А().ctx, Л = ЛАДЫ[сейчас], четверть = 60 / Л.темп, куда = гр[сейчас];
+    while (след < c.currentTime + 0.6) {
+      const t = след, акк = Л.аккорды[такт % 4];
+      if (доля === 0) {
+        if (сейчас === 'тревога') { подушка(куда, акк.map(n => n - 12), t, четверть * 4.2, true); удар(куда, t, 1); }
+        else подушка(куда, акк, t, четверть * 4.4, сейчас === 'вечер');
+      }
+      if (сейчас === 'тревога') {
+        пульс(куда, акк[0], t, четверть * 0.4); пульс(куда, акк[0] + (доля % 2 ? 12 : 0), t + четверть / 2, четверть * 0.4);
+        if (доля === 2) удар(куда, t, 0.6);
+        if (Math.random() < Л.плотность) щипок(куда, Л.мел[(Math.random() * Л.мел.length) | 0], t + четверть / 2, 0.5, 'triangle', 0.6);
+      } else {
+        // перебор аккорда снизу вверх, мелодия иногда сверху
+        щипок(куда, акк[доля % акк.length] + 12, t, сейчас === 'вечер' ? 0.45 : 0.6, 'triangle', сейчас === 'вечер' ? 2 : 1.4);
+        if (Math.random() < Л.плотность) щипок(куда, Л.мел[(Math.random() * Л.мел.length) | 0], t + четверть * (Math.random() < 0.5 ? 0 : 0.5), 0.55, 'sine', 1.8);
+      }
+      след += четверть; доля++; if (доля >= 4) { доля = 0; такт++; }
+    }
+  }
+  let проверка = 0;
+  API.каждыйКадр.push(dt => {
+    const а = А(); if (!а || !а.ctx || а.ctx.state !== 'running') return;
+    if (!собрать()) return;
+    const c = а.ctx;
+    if (след < c.currentTime - 1) след = c.currentTime + 0.1;            // вкладка спала — не догоняем пропущенное
+    проверка -= dt;
+    if (проверка <= 0) {
+      проверка = 1;
+      const н = настроение();
+      if (н !== сейчас) {                                                  // смена настроения — с нового такта, плавно
+        гр[сейчас].gain.setTargetAtTime(0, c.currentTime, 1.2); гр[н].gain.setTargetAtTime(1, c.currentTime, н === 'тревога' ? 0.4 : 1.5);
+        сейчас = н; доля = 0;
+      }
+      // во время перемотки сюжета — тишина
+      выход.gain.setTargetAtTime(window.__перемотка ? 0 : 0.32, c.currentTime, 0.3);
+    }
+    запланировать();
+  });
+  window.__музыка = { настроение: () => сейчас };
+}]);
+
+// ===================== ПОГОДА =====================
+// Иногда идёт дождь: небо затягивает, капли, шум, иногда гром. После дождя — лужи на дорогах, потом высыхают.
+// Погода одна на всех (считается по часам): друзья в онлайне мокнут вместе. Зимой вместо дождя — снег (модуль «сезоны»).
+window.ДЕТАЛИ.push(['погода', function (API) {
+  const { THREE, сцена, камера } = API;
+  const ОКНО = 12 * 60 * 1000;                       // погода меняется кусками по 12 минут
+  const хэш = n => { let x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+  const шанс = () => window.__сезон === 'зима' ? 0 : window.__сезон === 'осень' ? 0.35 : 0.2;
+  let силой = null;                                   // ⚙ / проверка: true, false или null — как по расписанию
+  function поРасписанию() {
+    const с = Math.floor(Date.now() / ОКНО), t = (Date.now() % ОКНО) / ОКНО;
+    if (хэш(с) >= шанс()) return 0;
+    return Math.min(1, t * 8, (1 - t) * 8) * (0.6 + 0.4 * хэш(с + 0.5));   // набегает и стихает в начале и конце окна
+  }
+  // ---------- капли: отрезки, падают в коробке вокруг камеры ----------
+  const N = API.УР === 0 ? 500 : API.УР === 1 ? 900 : API.УЛЬТРА ? 2600 : 1600, Р = 26, ВЫС = 22;
+  const поз = new Float32Array(N * 6), сдв = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) { сдв[i * 3] = (Math.random() * 2 - 1) * Р; сдв[i * 3 + 1] = Math.random() * ВЫС; сдв[i * 3 + 2] = (Math.random() * 2 - 1) * Р; }
+  const гео = new THREE.BufferGeometry(); гео.setAttribute('position', new THREE.BufferAttribute(поз, 3));
+  const капМ = new THREE.LineBasicMaterial({ color: 0xC8D2DC, transparent: true, opacity: 0, depthWrite: false, fog: true });
+  const капли = new THREE.LineSegments(гео, капМ); капли.frustumCulled = false; капли.visible = false; капли.renderOrder = 4; сцена.add(капли);
+  // ---------- лужи: тёмные гладкие пятна на дорогах рядом с игроком ----------
+  const ЛУЖ = API.УР === 0 ? 8 : 16;
+  // форма лужи: неровное пятно с мягким краем (рисуем один раз на холсте)
+  const лужаТ = (() => {
+    const к = document.createElement('canvas'); к.width = к.height = 128; const с = к.getContext('2d');
+    с.fillStyle = '#000'; с.fillRect(0, 0, 128, 128); с.filter = 'blur(5px)'; с.fillStyle = '#fff'; с.beginPath();
+    for (let i = 0; i <= 24; i++) { const а = i / 24 * Math.PI * 2, r = 40 + 12 * Math.sin(а * 3 + 1) + 7 * Math.sin(а * 5 + 2); с[i ? 'lineTo' : 'moveTo'](64 + Math.cos(а) * r, 64 + Math.sin(а) * r); }
+    с.fill(); const т = new THREE.CanvasTexture(к); return т;
+  })();
+  const лужаГ = new THREE.PlaneGeometry(2, 2).rotateX(-Math.PI / 2);
+  // вода отражает небо — светлее асфальта, с голубым отливом, почти зеркальная
+  const лужаМ = new THREE.MeshStandardMaterial({ color: 0x6E7E8E, roughness: 0.04, metalness: 0.35, alphaMap: лужаТ, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  const лужи = [];
+  for (let i = 0; i < ЛУЖ; i++) { const м = new THREE.Mesh(лужаГ, лужаМ); м.visible = false; м.receiveShadow = true; м.renderOrder = 1; сцена.add(м); лужи.push(м); }
+  function поставитьЛужу(м, cx, cz) {
+    for (let k = 0; k < 8; k++) {
+      const а = Math.random() * 6.283, r = 6 + Math.random() * 38, x = cx + Math.cos(а) * r, z = cz + Math.sin(а) * r;
+      const д = API.ближайшаяДорога && API.ближайшаяДорога(x, z); if (!д) continue;
+      const px = д.px + (Math.random() - 0.5) * 2.2, pz = д.pz + (Math.random() - 0.5) * 2.2;
+      if (Math.hypot(px - cx, pz - cz) > 48 || API.вДоме(px, pz, 0.5)) continue;
+      if (лужи.some(л => л !== м && л.visible && Math.hypot(л.position.x - px, л.position.z - pz) < 3)) continue;   // не слипаются
+      const s = 0.35 + Math.random() * 0.75; м.scale.set(s * (1 + Math.random() * 0.7), 1, s); м.rotation.y = Math.random() * 3.14;
+      м.position.set(px, API.землиВысота(px, pz) + 0.03, pz); м.visible = true; return;
+    }
+    м.visible = false;
+  }
+  // ---------- звук дождя и гром ----------
+  let шумУзел = null, шумГ = null;
+  function звукДождя(сила) {
+    const а = window.__аудио; if (!а || !а.ctx || !а.фон || а.ctx.state !== 'running') return;
+    const c = а.ctx;
+    if (!шумУзел) {
+      const b = c.createBuffer(1, c.sampleRate * 3, c.sampleRate), d = b.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < 0.004 ? 3 : 1);   // редкие «щелчки» капель
+      шумУзел = c.createBufferSource(); шумУзел.buffer = b; шумУзел.loop = true;
+      const вч = c.createBiquadFilter(); вч.type = 'highpass'; вч.frequency.value = 900; const нч = c.createBiquadFilter(); нч.type = 'lowpass'; нч.frequency.value = 7000;
+      шумГ = c.createGain(); шумГ.gain.value = 0; шумУзел.connect(вч); вч.connect(нч); нч.connect(шумГ); шумГ.connect(а.мастер); шумУзел.start();
+    }
+    шумГ.gain.setTargetAtTime(0.09 * сила, c.currentTime, 1.5);
+  }
+  function гром(сила) {
+    const а = window.__аудио; if (!а || !а.ctx || а.ctx.state !== 'running') return;
+    const c = а.ctx, t0 = c.currentTime + 0.3 + Math.random() * 2, дл = 3 + Math.random() * 3;
+    const b = c.createBuffer(1, c.sampleRate * дл, c.sampleRate), d = b.getChannelData(0);
+    let v = 0; for (let i = 0; i < d.length; i++) { v += (Math.random() * 2 - 1) * 0.08; v *= 0.995; d[i] = v; }
+    const и = c.createBufferSource(), ф = c.createBiquadFilter(), g = c.createGain(); и.buffer = b; ф.type = 'lowpass'; ф.frequency.value = 160;
+    g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(1.4 * сила, t0 + 0.12); g.gain.exponentialRampToValueAtTime(0.0001, t0 + дл);
+    и.connect(ф); ф.connect(g); g.connect(а.мастер); и.start(t0); и.stop(t0 + дл);
+    window.__вспышка && window.__вспышка(0.25 * сила);
+  }
+  // ---------- каждый кадр ----------
+  let дождь = 0, мокро = 0, таймГром = 30, таймЛуж = 0;
+  const ветер = new THREE.Vector2(1.6, 0.6);
+  API.каждыйКадр.push((dt, ms, П) => {
+    if (!dt) return;
+    const цель = силой === true ? 0.9 : силой === false ? 0 : поРасписанию();
+    дождь += Math.sign(цель - дождь) * Math.min(Math.abs(цель - дождь), dt / 12);
+    window.__дождь = window.__вМеню ? 0 : дождь;
+    // лужи набираются за ~40 с дождя, сохнут ~4 минуты
+    мокро = Math.max(0, Math.min(1, мокро + (дождь > 0.3 ? dt / 40 : -dt / 240)));
+    // капли
+    капли.visible = дождь > 0.02 && !window.__вМеню && !document.body.classList.contains('кабина');
+    if (капли.visible) {
+      капМ.opacity = 0.42 * дождь;
+      const к = камера.position, n = Math.floor(N * Math.min(1, дождь * 1.3)), ск = 17 * dt, дл = 0.55;
+      for (let i = 0; i < n; i++) {
+        let y = сдв[i * 3 + 1] - ск; if (y < 0) { y += ВЫС; сдв[i * 3] = (Math.random() * 2 - 1) * Р; сдв[i * 3 + 2] = (Math.random() * 2 - 1) * Р; } сдв[i * 3 + 1] = y;
+        const x = к.x + сдв[i * 3], z = к.z + сдв[i * 3 + 2], yy = к.y - 6 + y, j = i * 6;
+        поз[j] = x; поз[j + 1] = yy; поз[j + 2] = z; поз[j + 3] = x - ветер.x * 0.04; поз[j + 4] = yy - дл; поз[j + 5] = z - ветер.y * 0.04;
+      }
+      гео.setDrawRange(0, n * 2); гео.attributes.position.needsUpdate = true;
+    }
+    // лужи: вокруг игрока, далёкие переставляем
+    лужаМ.opacity = 0.9 * мокро;
+    if (мокро > 0.01) { таймЛуж -= dt; if (таймЛуж <= 0) { таймЛуж = 1; for (const м of лужи) if (!м.visible || Math.hypot(м.position.x - П.x, м.position.z - П.z) > 55) поставитьЛужу(м, П.x, П.z); } }
+    else if (лужи[0].visible) for (const м of лужи) м.visible = false;
+    звукДождя(window.__вМеню ? 0 : дождь);
+    if (дождь > 0.6) { таймГром -= dt; if (таймГром <= 0) { таймГром = 25 + Math.random() * 60; гром(0.5 + Math.random() * 0.5); } }
+  });
+  window.__погода = { дождь: (да = true, сразу) => { силой = да === null ? null : !!да; if (сразу) дождь = силой ? 0.9 : 0; }, сила: () => дождь, мокро: () => мокро,
+    намочить: v => { мокро = Math.max(0, Math.min(1, v)); таймЛуж = 0; } };     // для проверок
+}]);
+
+// ⚙ → УПРАВЛЕНИЕ И ЗВУК: три ползунка громкости
+window.ДЕТАЛИ.push(['громкость', function () {
+  const Т = window.__тонко, А = window.__аудио; if (!Т || !А || !А.поставитьГромкость) return;
+  const блок = document.createElement('div'), строки = [];
+  for (const [вид, подпись] of [['звуки', 'Звуки'], ['музыка', 'Музыка'], ['голоса', 'Голоса героев']]) {
+    const р = document.createElement('div'); р.className = 'полз';
+    const б = document.createElement('b'); б.textContent = подпись; const в = document.createElement('input'); в.type = 'range'; в.min = 0; в.max = 1; в.step = 0.05; в.value = А.громкость[вид];
+    const зн = document.createElement('span'); const обн = () => { зн.textContent = Math.round(в.value * 100) + '%'; };
+    в.addEventListener('input', () => { А.поставитьГромкость(вид, +в.value); обн(); }); обн();
+    р.append(б, в, зн); блок.appendChild(р); строки.push({ вид, в, обн });
+  }
+  Т.секции.звук = блок;
+  Т.секции.сбросЗвука = () => { for (const с of строки) { const v = с.вид === 'музыка' ? 0.6 : 1; с.в.value = v; А.поставитьГромкость(с.вид, v); с.обн(); } };
 }]);
 // Мини-игра «Летучий Яша» (по мотивам «My Flying Pig»): Яша летит на самолёте из бочки над
 // посёлком, а по улицам бродят гигантские Никиты — тянут руки, хватают и кидаются сортирами.
