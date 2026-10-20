@@ -12047,7 +12047,7 @@ window.ДЕТАЛИ.push(['подсказки', function (API) {
   const СОВЕТЫ = [
     { к: 'идти', текст: 'Слева тяни пальцем — иди. Потянешь сильнее — побежишь.', готово: с => с.прошёл > 6 },
     { к: 'камера', текст: 'Справа води пальцем — поворачивай камеру.', готово: с => с.повернул > 1.2 },
-    { к: 'карта', текст: 'Карта в углу: тапни — откроется большая, с улицами.', готово: с => с.карта },
+    { к: 'карта', текст: 'Карта в углу: тапни — откроется большая, с улицами. На большой тап ставит метку.', готово: с => с.карта },
     { к: 'сверху', текст: 'Кнопка «С ВЫСОТЫ» — посмотреть на посёлок сверху.', готово: с => с.сверху },
   ];
   const счёт = { прошёл: 0, повернул: 0, карта: false, сверху: false };
@@ -13486,7 +13486,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     ] : р.воздух ? [
       ['✈', 'Жми «✈ ЗА КУРАМИ» — садишься на Яшолёт.'],
       ['🐔', `Куры кружат в небе. Сбей ${р.нужно} — врезайся в них.`],
-      ['🗺', 'Друзья — цветные точки на карте в углу. Тап по карте — большая.'],
+      ['🗺', 'Друзья — цветные точки на карте в углу. На большой карте поставь метку — её увидят все.'],
       ['🚀', 'Когда весь посёлок справится — Шторм запустит всех в космос.'],
     ] : [
       ['⬆', 'Сверху экрана — цветная стрелка и метры: она ведёт к ближайшему твоему предмету.'],
@@ -13593,6 +13593,8 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     if (м.k === 'h') { приветОт(п, м); return; }
     const сейчас = performance.now();
     if (м.k === 'ч') { if (typeof м.т === 'string') чатПришёл(п, м.т); return; }
+    if (м.k === 'м') { if (п.роль && window.__метки) window.__метки.сеть(п, м); return; }      // метка на карте
+    if (м.k === 'э') { if (п.роль && window.__эмоции) window.__эмоции.сеть(п, м); return; }     // эмоция
     if (м.k === 'ф') { if (Number.isInteger(м.н) && м.н >= 0 && м.н < ФРАЗЫ.length && сейчас - (п.фразаТ || 0) > 400) { п.фразаТ = сейчас; пузырь(п, ФРАЗЫ[м.н]); } return; }
     if (м.k === 'с') {
       if (typeof м.счёт !== 'number' || сейчас - (п.счётТ || 0) < 300) return; п.счётТ = сейчас;
@@ -14803,6 +14805,116 @@ window.ДЕТАЛИ.push(['управление', function (API) {
     if (звук) звук.after(с); else меню.insertBefore(с, меню.lastElementChild);
   }
   window.__тонко = { открыть, закрыть, секции };
+}]);
+
+// ===================== МЕТКА НА КАРТЕ =====================
+// На большой карте тап — ставишь метку: над местом встаёт столб света, под картой — сколько до неё метров.
+// Дошёл — метка снимается сама. В онлайне метку видят все: на карте и столбом — цветом твоей роли.
+window.ДЕТАЛИ.push(['метка', function (API) {
+  const { THREE, сцена } = API;
+  const мини = document.getElementById('миникарта');
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #меткаДо { position: fixed; top: calc(126px + env(safe-area-inset-top, 0px)); right: 12px; z-index: 5; display: none; align-items: center; gap: 6px;
+      height: 26px; padding: 0 4px 0 10px; border-radius: 13px; background: rgba(18,12,8,0.72); border: 1px solid rgba(244,196,48,0.6); color: #F4C430; font: 700 12px system-ui, sans-serif; }
+    #меткаДо button { width: 22px; height: 22px; border-radius: 11px; border: 0; background: rgba(242,230,204,0.15); color: #F2E6CC; font: 700 11px system-ui; cursor: pointer; padding: 0; }
+    @media (max-height: 460px) { #меткаДо { top: calc(112px + env(safe-area-inset-top, 0px)); } }
+    body.кино #меткаДо, body.гм #меткаДо { display: none !important; }
+  `;
+  document.head.appendChild(стиль);
+  const до = document.createElement('div'); до.id = 'меткаДо';
+  const доТ = document.createElement('span'), доХ = document.createElement('button'); доХ.textContent = '✕'; доХ.setAttribute('aria-label', 'убрать метку');
+  до.append(доТ, доХ); document.body.appendChild(до);
+  доХ.addEventListener('click', e => { e.stopPropagation(); поставить(null); });
+
+  let моя = null;                                   // { x, z }
+  // столб света: свой — жёлтый, у друзей — цвет роли
+  const столбГ = new THREE.CylinderGeometry(0.5, 0.5, 60, 12, 1, true).translate(0, 30, 0);
+  const кольцоГ = new THREE.RingGeometry(1.1, 1.5, 24).rotateX(-Math.PI / 2);
+  function столб(цв) {
+    const м = new THREE.Mesh(столбГ, new THREE.MeshBasicMaterial({ color: цв, transparent: true, opacity: 0.45, depthWrite: false, depthTest: false, side: THREE.DoubleSide, fog: false }));
+    const кольцо = new THREE.Mesh(кольцоГ, new THREE.MeshBasicMaterial({ color: цв, transparent: true, opacity: 0.7, depthWrite: false, side: THREE.DoubleSide }));
+    кольцо.position.y = 0.08; м.add(кольцо); м.frustumCulled = false; м.visible = false; м.renderOrder = 30; сцена.add(м); return м;
+  }
+  const мойСтолб = столб('#F4C430');
+  const чужие = new Map();                          // ид пира → столб
+  const О = () => window.__онлайн;
+  const вОнлайне = () => { const о = О(); return !!(о && о.я && о.я.роль); };
+  function разослать() { const о = О(); if (вОнлайне() && о.всем) о.всем({ k: 'м', x: моя ? Math.round(моя.x) : null, z: моя ? Math.round(моя.z) : null }); }
+  function поставить(т, тихо) {
+    моя = т; мойСтолб.visible = !!т;
+    if (т) мойСтолб.position.set(т.x, API.землиВысота(т.x, т.z), т.z);
+    разослать(); обновитьДо();
+    if (!тихо && т) window.__подсказки && window.__подсказки.совет('📍 Метка поставлена — иди к столбу света' + (вОнлайне() ? '. Друзья её тоже видят.' : '.'), 3);
+    window.__рисоватьМини && window.__рисоватьМини();
+  }
+  function обновитьДо() {
+    if (!моя) { до.style.display = 'none'; return; }
+    const п = window.__мир.поз, d = Math.hypot(моя.x - п.x, моя.z - п.z);
+    доТ.textContent = '📍 ' + (d >= 1000 ? (d / 1000).toFixed(1) + ' км' : Math.round(d) + ' м');
+    до.style.display = 'flex';
+  }
+  // тап по большой карте: true — обработали сами; false — крестик в углу, карту просто закрыть
+  function тап(e) {
+    const в = мини.вид; if (!в) return false;
+    const р = мини.getBoundingClientRect(), k = в.w / р.width, px = (e.clientX - р.left) * k, py = (e.clientY - р.top) * k;
+    if (px < 44 * k && py < 44 * k) return false;
+    const x = (px / в.w * в.к + в.sx - в.X0) / в.м, z = (py / в.w * в.к + в.sz - в.Z0) / в.м;
+    const вПикс = в.м / в.к * в.w;                  // метров → пикселей карты
+    const снять = моя && Math.hypot((моя.x - x) * вПикс, (моя.z - z) * вПикс) < 18 * k;
+    поставить(снять ? null : { x, z });
+    if (снять) window.__подсказки && window.__подсказки.совет('Метка убрана', 1.5);
+    setTimeout(() => { if (мини.classList.contains('большая')) { мини.classList.remove('большая'); window.__рисоватьМини && window.__рисоватьМини(); } }, 650);
+    return true;
+  }
+  function булавка(с, x, y, цв, пр, вне, подпись) {
+    с.save(); с.globalAlpha = вне ? 0.6 : 1; с.translate(x, y);
+    с.beginPath(); с.moveTo(0, 0); с.bezierCurveTo(-7 * пр, -9 * пр, -7 * пр, -17 * пр, 0, -17 * пр); с.bezierCurveTo(7 * пр, -17 * пр, 7 * пр, -9 * пр, 0, 0);
+    с.fillStyle = цв; с.fill(); с.lineWidth = 1.8 * пр; с.strokeStyle = '#1E1812'; с.stroke();
+    с.beginPath(); с.arc(0, -11.5 * пр, 2.6 * пр, 0, Math.PI * 2); с.fillStyle = '#1E1812'; с.fill();
+    if (подпись) { с.font = '700 ' + Math.round(9 * пр) + 'px system-ui, sans-serif'; с.textAlign = 'center'; с.textBaseline = 'bottom'; с.lineWidth = 2.4 * пр; с.strokeStyle = 'rgba(18,12,8,0.9)'; с.strokeText(подпись, 0, -19 * пр); с.fillStyle = цв; с.fillText(подпись, 0, -19 * пр); }
+    с.restore();
+  }
+  function рисовать(с, вX, вZ, w, пр, большая) {
+    const на = (т, цв, подпись) => { let x = вX(т.x), y = вZ(т.z); const поле = 10 * пр, верх = 18 * пр, вне = x < поле || y < верх || x > w - поле || y > w - поле;
+      x = Math.max(поле, Math.min(w - поле, x)); y = Math.max(верх, Math.min(w - поле, y)); булавка(с, x, y, цв, пр * (большая ? 1 : 0.8), вне, большая ? подпись : null); };
+    const о = О();
+    if (вОнлайне()) for (const п of о.пиры.values()) if (п.метка && п.роль) на(п.метка, (о.РОЛИ[п.роль] || {}).цвет || '#F2E6CC', о.подписьПира(п));
+    if (моя) на(моя, '#F4C430', 'моя');
+    if (большая) {                                   // крестик «закрыть» и подсказка
+      с.save(); с.fillStyle = 'rgba(18,12,8,0.75)'; с.beginPath(); с.arc(20 * пр, 20 * пр, 13 * пр, 0, Math.PI * 2); с.fill();
+      с.strokeStyle = '#F2E6CC'; с.lineWidth = 2.2 * пр; с.beginPath(); с.moveTo(15 * пр, 15 * пр); с.lineTo(25 * пр, 25 * пр); с.moveTo(25 * пр, 15 * пр); с.lineTo(15 * пр, 25 * пр); с.stroke();
+      const т = моя ? 'тап по метке — убрать' : 'тапни — поставить метку';
+      с.font = '600 ' + Math.round(10 * пр) + 'px system-ui, sans-serif'; с.textAlign = 'center'; с.textBaseline = 'top';
+      с.lineWidth = 2.4 * пр; с.strokeStyle = 'rgba(18,12,8,0.9)'; с.strokeText(т, w / 2, 8 * пр); с.fillStyle = '#F2E6CC'; с.fillText(т, w / 2, 8 * пр); с.restore();
+    }
+  }
+  function сеть(п, м) {
+    const ок = typeof м.x === 'number' && typeof м.z === 'number' && isFinite(м.x) && isFinite(м.z) && Math.abs(м.x) < 5000 && Math.abs(м.z) < 5000;
+    const было = п.метка; п.метка = ок ? { x: м.x, z: м.z } : null;
+    if (п.метка && (!было || Math.hypot(было.x - м.x, было.z - м.z) > 3)) window.__подсказки && window.__подсказки.совет('📍 ' + О().подписьПира(п) + ' поставил(а) метку на карте', 2.5);
+  }
+  let т = 0, тСеть = 0;
+  API.каждыйКадр.push(dt => {
+    т += dt; тСеть += dt;
+    if (моя) {
+      const п = window.__мир.поз;
+      if (Math.hypot(моя.x - п.x, моя.z - п.z) < 6) { поставить(null, true); window.__подсказки && window.__подсказки.совет('📍 Пришёл к метке', 2); }
+      мойСтолб.material.opacity = 0.32 + 0.1 * Math.sin(т * 3);   // виден сквозь дома — ориентир
+      const ш = Math.max(1, Math.hypot(моя.x - п.x, моя.z - п.z) / 35); мойСтолб.scale.set(ш, 1, ш);   // издалека толще — чтобы было видно
+    }
+    if (т > 0.5) { т = 0; обновитьДо(); }
+    if (тСеть > 10) { тСеть = 0; if (моя) разослать(); }          // кто зашёл позже — тоже увидит
+    const о = О(), есть = new Set();
+    if (вОнлайне()) for (const п of о.пиры.values()) if (п.метка && п.роль) {
+      есть.add(п.ид); let с = чужие.get(п.ид);
+      if (!с) { с = столб((о.РОЛИ[п.роль] || {}).цвет || '#F2E6CC'); чужие.set(п.ид, с); }
+      с.visible = true; с.position.set(п.метка.x, API.землиВысота(п.метка.x, п.метка.z), п.метка.z);
+      const ш = Math.max(1, Math.hypot(п.метка.x - window.__мир.поз.x, п.метка.z - window.__мир.поз.z) / 35); с.scale.set(ш, 1, ш);
+    }
+    for (const [ид, с] of чужие) if (!есть.has(ид)) { сцена.remove(с); с.material.dispose(); с.children[0].material.dispose(); чужие.delete(ид); }
+  });
+  window.__метки = { тап, рисовать, сеть, поставить, моя: () => моя };
 }]);
 // Мини-игра «Летучий Яша» (по мотивам «My Flying Pig»): Яша летит на самолёте из бочки над
 // посёлком, а по улицам бродят гигантские Никиты — тянут руки, хватают и кидаются сортирами.
