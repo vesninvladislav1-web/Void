@@ -15270,6 +15270,282 @@ window.ДЕТАЛИ.push(['погода', function (API) {
     намочить: v => { мокро = Math.max(0, Math.min(1, v)); таймЛуж = 0; } };     // для проверок
 }]);
 
+// ===================== ЭМОЦИИ =====================
+// Кнопка 😀 рядом с остальными: помахать, потанцевать, сесть на корточки, «класс», фейспалм.
+// Готовых анимаций таких нет — руки и корпус поворачиваем поверх обычной стойки (кости — к нужному направлению).
+// Над головой на пару секунд — смайлик. В онлайне друзья видят то же самое. Пошёл — эмоция кончилась.
+window.ДЕТАЛИ.push(['эмоции', function (API) {
+  const { THREE, сцена } = API;
+  const ЭМО = {
+    привет: { знак: '👋', имя: 'ПРИВЕТ', длит: 2.6 },
+    танец: { знак: '💃', имя: 'ТАНЕЦ', длит: 30 },
+    сесть: { знак: '🧎', имя: 'СЕСТЬ', длит: 600, поза: 'Crouch_Idle_Loop' },
+    класс: { знак: '👍', имя: 'КЛАСС', длит: 2.4 },
+    фейспалм: { знак: '🤦', имя: 'ФЕЙСПАЛМ', длит: 2.8 },
+  };
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #эмоКн { font-size: 18px; padding: 0 10px; }
+    #эмоПанель { position: fixed; right: calc(12px + env(safe-area-inset-right, 0px)); bottom: calc(66px + env(safe-area-inset-bottom, 0px)); z-index: 15; display: none;
+      gap: 6px; padding: 6px; border-radius: 14px; background: rgba(18,12,8,0.78); border: 1px solid rgba(242,230,204,0.25); }
+    #эмоПанель.видно { display: flex; flex-wrap: wrap; max-width: min(380px, 92vw); justify-content: flex-end; }
+    #эмоПанель button { width: 58px; height: 54px; border-radius: 12px; border: 1px solid rgba(242,230,204,0.2); background: #2A2018; color: #F2E6CC; cursor: pointer;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; font: 700 8.5px system-ui, sans-serif; letter-spacing: .5px; padding: 0; }
+    #эмоПанель button i { font-style: normal; font-size: 22px; line-height: 1; }
+    #эмоПанель button.идёт { border-color: #F4C430; color: #F4C430; }
+    body.левша #эмоПанель { right: auto; left: calc(12px + env(safe-area-inset-left, 0px)); }
+    body.кино #эмоКн, body.кино #эмоПанель, body.кабина #эмоКн, body.кабина #эмоПанель { display: none !important; }
+  `;
+  document.head.appendChild(стиль);
+  const кн = document.createElement('button'); кн.className = 'кн'; кн.id = 'эмоКн'; кн.textContent = '😀'; кн.setAttribute('aria-label', 'эмоции');
+  const ряд = document.getElementById('кнопки'); if (ряд) ряд.prepend(кн);
+  const панель = document.createElement('div'); панель.id = 'эмоПанель'; document.body.appendChild(панель);
+  const кнопкиЭ = {};
+  for (const [вид, э] of Object.entries(ЭМО)) {
+    const б = document.createElement('button'); б.innerHTML = '<i>' + э.знак + '</i>' + э.имя;
+    б.addEventListener('click', e => { e.stopPropagation(); if (моя && моя.вид === вид) стоп(true); else начать(вид); панель.classList.remove('видно'); });
+    панель.appendChild(б); кнопкиЭ[вид] = б;
+  }
+  const фотоБ = document.createElement('button'); фотоБ.innerHTML = '<i>📷</i>ФОТО';
+  фотоБ.addEventListener('click', e => { e.stopPropagation(); панель.classList.remove('видно'); window.__фото && window.__фото.войти(); });
+  панель.appendChild(фотоБ);
+  кн.addEventListener('click', e => { e.stopPropagation(); панель.classList.toggle('видно'); });
+  addEventListener('pointerdown', e => { if (!панель.contains(e.target) && e.target !== кн) панель.classList.remove('видно'); });
+
+  // ---------- кости: повернуть так, чтобы кость (её ось +Y — к следующей кости) смотрела в нужную сторону ----------
+  const ВВЕРХ = new THREE.Vector3(0, 1, 0), q1 = new THREE.Quaternion(), q2 = new THREE.Quaternion(), q3 = new THREE.Quaternion(), v1 = new THREE.Vector3(), v2 = new THREE.Vector3(), v3 = new THREE.Vector3();
+  function направить(к, цель, вес) {
+    if (!к || !к.parent || вес <= 0) return;
+    к.getWorldQuaternion(q1);
+    v1.copy(ВВЕРХ).applyQuaternion(q1);
+    q2.setFromUnitVectors(v1, v3.copy(цель).normalize()).multiply(q1);           // какой кость должна стать в мире
+    к.parent.getWorldQuaternion(q3).invert().multiply(q2);                          // → в координаты родителя
+    к.quaternion.slerp(q3, Math.min(1, вес)); к.updateMatrixWorld(true);
+  }
+  // оси персонажа в мире: вперёд, вверх, вправо (по плечам — так не ошибёмся со знаком)
+  const F = new THREE.Vector3(), U = new THREE.Vector3(0, 1, 0), R = new THREE.Vector3(), сумма = new THREE.Vector3();
+  const к3 = (...п) => { сумма.set(0, 0, 0); for (let i = 0; i < п.length; i += 2) сумма.addScaledVector(п[i], п[i + 1]); return сумма.clone(); };
+  function применить(м, вид, t, вес) {
+    const К = м.кости; if (!К.upperarm_r || !К.upperarm_l) return;
+    м.корень.updateMatrixWorld(true);
+    F.set(0, 0, 1).applyQuaternion(м.корень.quaternion);
+    К.upperarm_r.getWorldPosition(v1); К.upperarm_l.getWorldPosition(v2); R.subVectors(v1, v2).normalize();
+    if (вид === 'привет') {
+      направить(К.upperarm_r, к3(R, 0.55, U, 0.8, F, 0.15), вес);
+      направить(К.lowerarm_r, к3(U, 1, R, 0.5 * Math.sin(t * 11), F, 0.1), вес);
+      направить(К.head, к3(U, 1, F, 0.08, R, 0.1), вес * 0.6);
+    } else if (вид === 'класс') {
+      направить(К.upperarm_r, к3(F, 0.75, U, -0.35, R, 0.35), вес);
+      направить(К.lowerarm_r, к3(U, 0.8, F, 0.6), вес);
+      направить(К.hand_r, к3(U, 1, F, 0.25), вес);
+      направить(К.head, к3(U, 1, F, 0.06), вес * 0.5);
+    } else if (вид === 'фейспалм') {
+      // рука к лицу, голова поникла и качается «ну как так»
+      направить(К.head, к3(U, 0.8, F, 0.55, R, 0.12 * Math.sin(t * 3)), вес);
+      направить(К.spine_03, к3(U, 1, F, 0.18), вес);
+      направить(К.upperarm_r, к3(F, 0.65, U, -0.55, R, 0.15), вес);
+      К.head.getWorldPosition(v1); v1.addScaledVector(F, 0.1); К.lowerarm_r.getWorldPosition(v2);
+      направить(К.lowerarm_r, v1.sub(v2), вес);
+    } else if (вид === 'танец') {
+      const ф = t * Math.PI * 2 * 1.05, s = Math.sin(ф);
+      м.корень.position.y += 0.05 * Math.abs(Math.sin(ф));
+      м.корень.rotation.y += 0.28 * Math.sin(ф / 2) * вес;
+      направить(К.spine_01, к3(U, 1, R, 0.16 * s), вес);
+      направить(К.head, к3(U, 1, R, -0.14 * s, F, 0.08), вес);
+      направить(К.upperarm_r, к3(R, 0.6, U, 0.55 * s, F, 0.35), вес);
+      направить(К.lowerarm_r, к3(U, 0.7 + 0.3 * s, F, 0.5), вес);
+      направить(К.upperarm_l, к3(R, -0.6, U, -0.55 * s, F, 0.35), вес);
+      направить(К.lowerarm_l, к3(U, 0.7 - 0.3 * s, F, 0.5), вес);
+    }
+  }
+  // ---------- смайлик над головой ----------
+  const текстуры = {};
+  function знакТекстура(з) {
+    if (текстуры[з]) return текстуры[з];
+    const к = document.createElement('canvas'); к.width = к.height = 128; const с = к.getContext('2d');
+    с.font = '96px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.fillText(з, 64, 70);
+    return (текстуры[з] = new THREE.CanvasTexture(к));
+  }
+  const пузыри = new Set();
+  function пузырь(м, з) {
+    const сп = new THREE.Sprite(new THREE.SpriteMaterial({ map: знакТекстура(з), transparent: true, depthWrite: false }));
+    сп.scale.setScalar(0.55); сп.renderOrder = 6; сцена.add(сп); пузыри.add({ сп, м, t: 0 });
+  }
+  // ---------- своя эмоция ----------
+  let моя = null;
+  const О = () => window.__онлайн, вОнлайне = () => { const о = О(); return !!(о && о.я && о.я.роль); };
+  const занят = () => document.body.classList.contains('кино') || document.body.classList.contains('кабина') || window.__заРулём || window.__поездка || window.__управлениеСтоп || window.__летитЯша || window.__перемотка;
+  function начать(вид) {
+    if (занят()) { window.__подсказки && window.__подсказки.совет('Сейчас не до этого', 1.5); return; }
+    стоп(false);
+    const э = ЭМО[вид]; моя = { вид, t: 0, поз: [window.__мир.поз.x, window.__мир.поз.z] };
+    if (э.поза && !window.__игрокПоза) { window.__игрокПоза = э.поза; моя.поза = true; }
+    const м = window.__люди3д && window.__люди3д.игрок(); if (м) пузырь(м, э.знак);
+    кнопкиЭ[вид].classList.add('идёт');
+    if (вОнлайне()) О().всем({ k: 'э', в: вид });
+  }
+  function стоп(сказать) {
+    if (!моя) return;
+    if (моя.поза && window.__игрокПоза === ЭМО[моя.вид].поза) window.__игрокПоза = null;
+    кнопкиЭ[моя.вид].classList.remove('идёт'); моя = null;
+    if (сказать && вОнлайне()) О().всем({ k: 'э', в: null });
+  }
+  // ---------- чужие (онлайн) ----------
+  function сеть(п, м) {
+    const сейчас = performance.now(); if (сейчас - (п.эмоТ || 0) < 300) return; п.эмоТ = сейчас;
+    if (м.в === null || !Object.prototype.hasOwnProperty.call(ЭМО, м.в)) { п.эмо = null; return; }
+    п.эмо = { вид: м.в, t: 0 };
+    if (п.ав && п.ав.м) пузырь(п.ав.м, ЭМО[м.в].знак);
+  }
+  const вход = (t, длит) => Math.min(1, t / 0.3, Math.max(0, (длит - t) / 0.3));
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt) return;
+    if (моя) {
+      моя.t += dt; const э = ЭМО[моя.вид];
+      const сдвинулся = Math.hypot(поз.x - моя.поз[0], поз.z - моя.поз[1]) > 0.15;
+      if (сдвинулся || моя.t > э.длит || занят()) стоп(true);
+      else if (!э.поза) { const м = window.__люди3д && window.__люди3д.игрок(); if (м) применить(м, моя.вид, моя.t, вход(моя.t, э.длит)); }
+    }
+    const о = О();
+    if (вОнлайне()) for (const п of о.пиры.values()) {
+      if (!п.эмо) continue;
+      п.эмо.t += dt; const э = ЭМО[п.эмо.вид];
+      if (п.эмо.t > Math.min(э.длит, 60) || (п.ск || 0) > 0.5) { п.эмо = null; continue; }
+      if (п.ав && п.ав.м && !э.поза) применить(п.ав.м, п.эмо.вид, п.эмо.t, вход(п.эмо.t, Math.min(э.длит, 60)));
+    }
+    for (const б of пузыри) {
+      б.t += dt; const к = б.м.корень;
+      б.сп.position.set(к.position.x, к.position.y + 2.15 + б.t * 0.15, к.position.z);
+      б.сп.material.opacity = Math.min(1, б.t * 5, (2.2 - б.t) * 2); б.сп.visible = к.visible;
+      if (б.t > 2.2) { сцена.remove(б.сп); б.сп.material.dispose(); пузыри.delete(б); }
+    }
+  });
+  window.__эмоции = { начать, стоп: () => стоп(true), сеть, моя: () => моя && моя.вид, ЭМО };
+}]);
+
+// ===================== ФОТОРЕЖИМ =====================
+// Мир замирает, камера свободная: слева — лететь, справа — смотреть, ▲▼ — выше/ниже, ползунок — приближение.
+// Фильтры, спрятать себя, 📸 — снимок: в приложении — в галерею, в браузере — скачать файл.
+window.ДЕТАЛИ.push(['фото', function (API) {
+  const { THREE, камера, рендер } = API;
+  const ФИЛЬТРЫ = [['ОБЫЧНЫЙ', ''], ['Ч/Б', 'grayscale(1) contrast(1.1)'], ['СЕПИЯ', 'sepia(0.85) contrast(1.05)'], ['ТЁПЛЫЙ', 'saturate(1.25) sepia(0.25) brightness(1.05)'], ['ПЛЁНКА', 'contrast(1.2) saturate(0.8) brightness(0.95)']];
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    body.фото > :not(#мир):not(#фото):not(#фотоВспышка) { visibility: hidden !important; }
+    #фото { position: fixed; inset: 0; z-index: 30; display: none; pointer-events: none; }
+    body.фото #фото { display: block; }
+    #фото .верх, #фото .низ { position: absolute; left: 0; right: 0; display: flex; gap: 8px; justify-content: center; align-items: center; padding: 10px calc(12px + env(safe-area-inset-right, 0px)) 10px calc(12px + env(safe-area-inset-left, 0px)); pointer-events: none; }
+    #фото .верх { top: env(safe-area-inset-top, 0px); justify-content: space-between; }
+    #фото .низ { bottom: env(safe-area-inset-bottom, 0px); }
+    #фото button { pointer-events: auto; height: 40px; min-width: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid rgba(242,230,204,0.35); background: rgba(18,12,8,0.6); color: #F2E6CC; font: 700 12px system-ui, sans-serif; letter-spacing: 1px; cursor: pointer; }
+    #фото .снять { width: 64px; height: 64px; border-radius: 50%; background: #F2E6CC; border: 4px solid rgba(18,12,8,0.5); font-size: 26px; padding: 0; }
+    #фото .сбоку { position: absolute; right: calc(12px + env(safe-area-inset-right, 0px)); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+    #фото input[type=range] { pointer-events: auto; accent-color: #F4C430; width: 140px; }
+    #фото .зум { display: flex; align-items: center; gap: 6px; color: #F2E6CC; font: 700 11px system-ui; background: rgba(18,12,8,0.6); padding: 4px 10px; border-radius: 16px; pointer-events: auto; }
+    #фото.чисто .верх, #фото.чисто .низ, #фото.чисто .сбоку { opacity: 0; }
+    #фото .подсказка { position: absolute; left: 50%; top: 58px; transform: translateX(-50%); color: #F2E6CC; font: 12px system-ui; background: rgba(18,12,8,0.6); padding: 4px 12px; border-radius: 12px; white-space: nowrap; transition: opacity 1s; }
+    #фотоВспышка { position: fixed; inset: 0; z-index: 31; background: #fff; opacity: 0; pointer-events: none; transition: opacity .35s; }
+  `;
+  document.head.appendChild(стиль);
+  const слой = document.createElement('div'); слой.id = 'фото';
+  слой.innerHTML = `<div class="верх"><button class="выйти">✕ ВЫЙТИ</button><button class="фильтр">ФИЛЬТР: ОБЫЧНЫЙ</button><button class="себя">👤 СЕБЯ: ВИДНО</button></div>
+    <div class="сбоку"><button class="выше">▲</button><button class="ниже">▼</button></div>
+    <div class="низ"><div class="зум">🔍<input type="range" min="20" max="85" step="1" value="60"></div><button class="снять" aria-label="снять">📸</button></div>
+    <div class="подсказка">слева — лететь · справа — смотреть</div>`;
+  const вспышка = document.createElement('div'); вспышка.id = 'фотоВспышка';
+  document.body.append(слой, вспышка);
+  const $ = к => слой.querySelector(к);
+  const холст = рендер.domElement;
+  let вкл = false, рыск = 0, тангаж = 0, фильтр = 0, было = null, снять = false, выше = 0;
+  const пос = new THREE.Vector3(), упр = { ход: null, взгл: null };
+  function войти() {
+    if (вкл || document.body.classList.contains('кино') || window.__перемотка) return;
+    вкл = true;
+    было = { fov: камера.fov, пос: камера.position.clone(), кв: камера.quaternion.clone(), скрыт: window.__игрокСкрыт };
+    пос.copy(камера.position);
+    const в = new THREE.Vector3(); камера.getWorldDirection(в); рыск = Math.atan2(в.x, в.z); тангаж = Math.asin(Math.max(-1, Math.min(1, в.y)));
+    $('input').value = камера.fov; document.body.classList.add('фото'); слой.classList.remove('чисто');
+    $('.подсказка').style.opacity = 1; setTimeout(() => { $('.подсказка').style.opacity = 0; }, 3500);
+    window.__фотоРежим = кадр; window.__фотоПосле = после;
+  }
+  function выйти() {
+    if (!вкл) return; вкл = false;
+    window.__фотоРежим = null; window.__фотоПосле = null;
+    камера.fov = было.fov; камера.updateProjectionMatrix(); камера.position.copy(было.пос); камера.quaternion.copy(было.кв);
+    window.__игрокСкрыт = было.скрыт; холст.style.filter = ''; document.body.classList.remove('фото');
+    $('.себя').textContent = '👤 СЕБЯ: ВИДНО';
+  }
+  // управление: касания по холсту, пока режим включён
+  холст.addEventListener('pointerdown', e => {
+    if (!вкл) return; e.stopImmediatePropagation();          // джойстик игры в фоторежиме не нужен
+    const лев = e.clientX < innerWidth / 2;
+    if (лев && !упр.ход) упр.ход = { ид: e.pointerId, x0: e.clientX, y0: e.clientY, dx: 0, dy: 0 };
+    else if (!упр.взгл) упр.взгл = { ид: e.pointerId, x: e.clientX, y: e.clientY };
+  }, true);
+  addEventListener('pointermove', e => {
+    if (!вкл) return;
+    if (упр.ход && e.pointerId === упр.ход.ид) { упр.ход.dx = Math.max(-1, Math.min(1, (e.clientX - упр.ход.x0) / 60)); упр.ход.dy = Math.max(-1, Math.min(1, (e.clientY - упр.ход.y0) / 60)); }
+    if (упр.взгл && e.pointerId === упр.взгл.ид) {
+      const ч = (window.__упр && window.__упр.чувств) || 1;
+      рыск -= (e.clientX - упр.взгл.x) * 0.005 * ч; тангаж = Math.max(-1.45, Math.min(1.45, тангаж - (e.clientY - упр.взгл.y) * 0.004 * ч));
+      упр.взгл.x = e.clientX; упр.взгл.y = e.clientY;
+    }
+  });
+  const отпуск = e => { if (упр.ход && e.pointerId === упр.ход.ид) упр.ход = null; if (упр.взгл && e.pointerId === упр.взгл.ид) упр.взгл = null; };
+  addEventListener('pointerup', отпуск); addEventListener('pointercancel', отпуск);
+  const держать = (б, v) => { б.addEventListener('pointerdown', e => { e.stopPropagation(); выше = v; }); б.addEventListener('pointerup', () => { выше = 0; }); б.addEventListener('pointerleave', () => { выше = 0; }); };
+  держать($('.выше'), 1); держать($('.ниже'), -1);
+  $('.выйти').addEventListener('click', выйти);
+  $('.фильтр').addEventListener('click', () => { фильтр = (фильтр + 1) % ФИЛЬТРЫ.length; $('.фильтр').textContent = 'ФИЛЬТР: ' + ФИЛЬТРЫ[фильтр][0]; холст.style.filter = ФИЛЬТРЫ[фильтр][1]; });
+  $('.себя').addEventListener('click', () => { window.__игрокСкрыт = !window.__игрокСкрыт; $('.себя').textContent = window.__игрокСкрыт ? '👤 СЕБЯ: СПРЯТАН' : '👤 СЕБЯ: ВИДНО'; });
+  $('input').addEventListener('input', e => { камера.fov = +e.target.value; камера.updateProjectionMatrix(); });
+  $('.снять').addEventListener('click', () => { слой.classList.add('чисто'); снять = true; });
+  addEventListener('keydown', e => { if (вкл && e.code === 'Escape') выйти(); });
+  const вперёд = new THREE.Vector3(), вбок = new THREE.Vector3(), смотреть = new THREE.Vector3();
+  function кадр(dt) {
+    const ск = 9 * dt, х = упр.ход;
+    вперёд.set(Math.sin(рыск) * Math.cos(тангаж), Math.sin(тангаж), Math.cos(рыск) * Math.cos(тангаж));
+    вбок.set(Math.cos(рыск), 0, -Math.sin(рыск));
+    if (х) { пос.addScaledVector(вперёд, -х.dy * ск); пос.addScaledVector(вбок, -х.dx * ск); }
+    пос.y += выше * ск;
+    // не дальше 150 м от себя и не под землю
+    const П = window.__мир.поз, д = Math.hypot(пос.x - П.x, пос.z - П.z);
+    if (д > 150) { пос.x = П.x + (пос.x - П.x) * 150 / д; пос.z = П.z + (пос.z - П.z) * 150 / д; }
+    пос.y = Math.max(API.землиВысота(пос.x, пос.z) + 0.3, Math.min(API.землиВысота(П.x, П.z) + 120, пос.y));
+    камера.position.copy(пос); камера.lookAt(смотреть.copy(пос).add(вперёд));
+  }
+  function после() {
+    if (!снять) return; снять = false;
+    try {
+      const w = холст.width, h = холст.height, к = document.createElement('canvas'); к.width = w; к.height = h;
+      const с = к.getContext('2d'); с.filter = ФИЛЬТРЫ[фильтр][1] || 'none'; с.drawImage(холст, 0, 0); с.filter = 'none';
+      const р = Math.round(h * 0.035); с.font = '700 ' + р + 'px system-ui, sans-serif'; с.textAlign = 'right'; с.textBaseline = 'bottom';
+      с.fillStyle = 'rgba(0,0,0,0.35)'; с.fillText('БОРОЗДИНОВСКИЙ', w - р * 0.6 + 1, h - р * 0.5 + 1); с.fillStyle = 'rgba(244,196,48,0.85)'; с.fillText('БОРОЗДИНОВСКИЙ', w - р * 0.6, h - р * 0.5);
+      const данные = к.toDataURL('image/jpeg', 0.92);
+      сохранить(данные);
+    } catch (e) { window.__подсказки && window.__подсказки.совет('Не вышло снять: ' + (e && e.message || e), 3); }
+    вспышка.style.transition = 'none'; вспышка.style.opacity = 0.85; requestAnimationFrame(() => { вспышка.style.transition = 'opacity .35s'; вспышка.style.opacity = 0; });
+    setTimeout(() => слой.classList.remove('чисто'), 400);
+  }
+  function сохранить(данные) {
+    const мост = window.BrzdApp;
+    if (мост && typeof мост.savePhoto === 'function') { мост.savePhoto(данные.split(',')[1]); return; }
+    const д = new Date(), имя = 'borozdinovsky_' + д.getFullYear() + String(д.getMonth() + 1).padStart(2, '0') + String(д.getDate()).padStart(2, '0') + '_' + String(д.getHours()).padStart(2, '0') + String(д.getMinutes()).padStart(2, '0') + String(д.getSeconds()).padStart(2, '0') + '.jpg';
+    const а = document.createElement('a'); а.href = данные; а.download = имя; document.body.appendChild(а); а.click(); а.remove();
+    setTimeout(() => window.__подсказки && window.__подсказки.совет('📸 Снимок сохранён: ' + имя, 3), 50);
+    window.__фото.последний = данные;
+  }
+  const меню = document.getElementById('меню');
+  if (меню) {
+    const с = document.createElement('div'); с.className = 'строка';
+    const п = document.createElement('span'); п.textContent = 'ФОТОРЕЖИМ';
+    const б = document.createElement('button'); б.className = 'кн шрифт'; б.textContent = '📷 ВКЛЮЧИТЬ';
+    б.addEventListener('click', () => { меню.classList.remove('открыто'); войти(); });
+    с.append(п, б); меню.insertBefore(с, меню.lastElementChild);
+  }
+  window.__фото = { войти, выйти, вкл: () => вкл };
+}]);
+
 // ⚙ → УПРАВЛЕНИЕ И ЗВУК: три ползунка громкости
 window.ДЕТАЛИ.push(['громкость', function () {
   const Т = window.__тонко, А = window.__аудио; if (!Т || !А || !А.поставитьГромкость) return;
@@ -23149,6 +23425,8 @@ function кадр(ms) {
   requestAnimationFrame(кадр);
   if (window.__огр30 && прошлый && ms - прошлый < 30 && !window.__перемотка) return;   // «30 кадров»: телефон меньше греется
   const dt = прошлый ? Math.min(0.05, (ms - прошлый) / 1000) : 0; прошлый = ms;
+  // фоторежим: мир замер, камерой водит модуль «фото»; кадр рисуется, и его можно снять
+  if (window.__фотоРежим && !window.__перемотка) { window.__фотоРежим(dt); нарисовать(); if (window.__фотоПосле) window.__фотоПосле(); return; }
   // перемотка (продолжить сохранение): за шторкой гоним сюжет ровными шагами по 50 мс, много за кадр, без отрисовки
   const П = window.__перемотка, шагов = П ? П.шагов : 1;
   for (let i = 0; i < шагов; i++) {

@@ -1,8 +1,19 @@
 package site.voidm.borozdinovsky;
 
+import android.Manifest;
 import android.app.Activity;
+import android.content.ContentValues;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.util.Base64;
+import android.webkit.JavascriptInterface;
+import android.widget.Toast;
+import java.io.OutputStream;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
@@ -36,7 +47,8 @@ public class MainActivity extends Activity {
         н.setDatabaseEnabled(true);
         н.setMediaPlaybackRequiresUserGesture(false);
         н.setCacheMode(WebSettings.LOAD_DEFAULT);
-        н.setUserAgentString(н.getUserAgentString() + " BrzdApp/2");   // игра знает, что она в приложении
+        н.setUserAgentString(н.getUserAgentString() + " BrzdApp/3");   // игра знает, что она в приложении
+        веб.addJavascriptInterface(new PhotoBridge(), "BrzdApp");                 // фоторежим: сохранить снимок в галерею
 
         веб.setWebChromeClient(new WebChromeClient());
         веб.setWebViewClient(new WebViewClient() {
@@ -56,6 +68,41 @@ public class MainActivity extends Activity {
         if (сохранено != null) веб.restoreState(сохранено);
         else веб.loadUrl(адрес(getIntent()));
     }
+
+    // Для игры: window.BrzdApp.savePhoto(base64 JPEG) — кладёт снимок в галерею, в альбом «Бороздиновский».
+    // Страницы с других сайтов в приложении не открываются (уходят в браузер), так что мост видит только игра.
+    private class PhotoBridge {   // имя класса — латиницей: оно становится именем .class-файла
+        @JavascriptInterface
+        public boolean savePhoto(String base64) {
+            if (base64 == null || base64.length() > 20_000_000) return false;
+            try {
+                byte[] байты = Base64.decode(base64, Base64.DEFAULT);
+                String имя = "brzd_" + System.currentTimeMillis() + ".jpg";
+                boolean ок;
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentValues зн = new ContentValues();
+                    зн.put(MediaStore.Images.Media.DISPLAY_NAME, имя);
+                    зн.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
+                    зн.put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/Бороздиновский");
+                    Uri u = getContentResolver().insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, зн);
+                    if (u == null) return false;
+                    try (OutputStream о = getContentResolver().openOutputStream(u)) { о.write(байты); }
+                    ок = true;
+                } else {
+                    if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+                        runOnUiThread(() -> requestPermissions(new String[] { Manifest.permission.WRITE_EXTERNAL_STORAGE }, 1));
+                        сказать("Разреши доступ к фото и сними ещё раз");
+                        return false;
+                    }
+                    Bitmap к = BitmapFactory.decodeByteArray(байты, 0, байты.length);
+                    ок = к != null && MediaStore.Images.Media.insertImage(getContentResolver(), к, имя, "Бороздиновский") != null;
+                }
+                if (ок) сказать("📸 Фото в галерее");
+                return ок;
+            } catch (Exception e) { сказать("Не вышло сохранить фото"); return false; }
+        }
+    }
+    private void сказать(String т) { runOnUiThread(() -> Toast.makeText(this, т, Toast.LENGTH_SHORT).show()); }
 
     private String адрес(Intent и) {
         Uri u = и != null ? и.getData() : null;
