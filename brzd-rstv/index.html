@@ -12037,16 +12037,16 @@ window.ДЕТАЛИ.push(['подсказки', function (API) {
     цельЭл.innerHTML = '<small>ЦЕЛЬ</small>' + текст; цельЭл.hidden = false; цельЭл.classList.remove('свёрнута');
     clearTimeout(таймЦели); таймЦели = setTimeout(() => цельЭл.classList.add('свёрнута'), 6000);
   }
-  let таймСовета = 0;
-  function совет(текст, сек = 5) { советЭл.textContent = текст; советЭл.classList.add('видно'); таймСовета = сек; }
+  let таймСовета = 0, сейчасСовет = null;            // сейчасСовет — какой совет по управлению на экране (обучение рисует к нему палец)
+  function совет(текст, сек = 5) { советЭл.textContent = текст; советЭл.classList.add('видно'); таймСовета = сек; сейчасСовет = null; }
 
   // ---------- советы по управлению (запоминаются) ----------
   const КЛЮЧ = 'бороздиновский.советы';
   let пройдено = {}; try { пройдено = JSON.parse(localStorage.getItem(КЛЮЧ) || '{}'); } catch (e) {}
   const запомнить = к => { пройдено[к] = 1; try { localStorage.setItem(КЛЮЧ, JSON.stringify(пройдено)); } catch (e) {} };
   const СОВЕТЫ = [
-    { к: 'идти', текст: 'Слева тяни пальцем — иди. Потянешь сильнее — побежишь.', готово: с => с.прошёл > 6 },
-    { к: 'камера', текст: 'Справа води пальцем — поворачивай камеру.', готово: с => с.повернул > 1.2 },
+    { к: 'идти', текст: () => (window.__упр && window.__упр.левша ? 'Справа' : 'Слева') + ' тяни пальцем — иди. Потянешь сильнее — побежишь.', готово: с => с.прошёл > 6 },
+    { к: 'камера', текст: () => (window.__упр && window.__упр.левша ? 'Слева' : 'Справа') + ' води пальцем — поворачивай камеру.', готово: с => с.повернул > 1.2 },
     { к: 'карта', текст: 'Карта в углу: тапни — откроется большая, с улицами. На большой тап ставит метку.', готово: с => с.карта },
     { к: 'сверху', текст: 'Кнопка «С ВЫСОТЫ» — посмотреть на посёлок сверху.', готово: с => с.сверху },
   ];
@@ -12110,7 +12110,7 @@ window.ДЕТАЛИ.push(['подсказки', function (API) {
     if (таймСовета > 0) { таймСовета -= dt; if (таймСовета <= 0) советЭл.classList.remove('видно'); }
     else if (этап === 'гуляй' || этап === 'дальше') {
       const с = СОВЕТЫ.find(с => !пройдено[с.к]);
-      if (с) { if (с.готово(счёт)) запомнить(с.к); else совет(с.текст, 6); }
+      if (с) { if (с.готово(счёт)) запомнить(с.к); else { совет(typeof с.текст === 'function' ? с.текст() : с.текст, 6); сейчасСовет = с.к; } }
     }
     for (const с of СОВЕТЫ) if (!пройдено[с.к] && с.готово(счёт)) запомнить(с.к);
     // после взрыва — сходить посмотреть
@@ -12126,7 +12126,9 @@ window.ДЕТАЛИ.push(['подсказки', function (API) {
     }
     обновитьМетку(поз);
   });
-  window.__подсказки = { цель, совет, показатьМетку, убратьМетку: () => { меткаЦель = null; } };
+  window.__подсказки = { цель, совет, показатьМетку, убратьМетку: () => { меткаЦель = null; },
+    обучение: () => (таймСовета > 0 && сейчасСовет && !пройдено[сейчасСовет] ? сейчасСовет : null),
+    заново: () => { пройдено = {}; try { localStorage.removeItem(КЛЮЧ); } catch (e) {} Object.assign(счёт, { прошёл: 0, повернул: 0, карта: false, сверху: false }); таймСовета = 0; if (этап !== 'гуляй') этап = 'дальше'; } };
 }]);
 
 </script>
@@ -14915,6 +14917,104 @@ window.ДЕТАЛИ.push(['метка', function (API) {
     for (const [ид, с] of чужие) if (!есть.has(ид)) { сцена.remove(с); с.material.dispose(); с.children[0].material.dispose(); чужие.delete(ид); }
   });
   window.__метки = { тап, рисовать, сеть, поставить, моя: () => моя };
+}]);
+
+// ===================== ОБУЧЕНИЕ =====================
+// Пока на экране совет по управлению — рядом показываем, что делать: полупрозрачный палец
+// тянет джойстик, водит по экрану, жмёт на карту. Левше — зеркально.
+// ⚙ → КАК ИГРАТЬ: короткая шпаргалка и «показать подсказки заново».
+window.ДЕТАЛИ.push(['обучение', function (API) {
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #учПалец { position: fixed; left: 0; top: 0; z-index: 7; pointer-events: none; display: none; width: 0; height: 0; }
+    #учПалец .круг { position: absolute; width: 116px; height: 116px; margin: -58px 0 0 -58px; border-radius: 50%; border: 2px dashed rgba(244,196,48,0.75); background: rgba(244,196,48,0.08); }
+    #учПалец .палец { position: absolute; font-size: 40px; margin: -6px 0 0 -14px; filter: drop-shadow(0 2px 4px rgba(0,0,0,.7)); }
+    #учПалец .след { position: absolute; height: 4px; margin-top: -2px; border-radius: 2px; background: linear-gradient(90deg, rgba(244,196,48,0), rgba(244,196,48,0.8)); transform-origin: 0 50%; }
+    #учПалец .кольцо { position: absolute; border-radius: 50%; border: 3px solid #F4C430; box-shadow: 0 0 14px rgba(244,196,48,0.8); animation: учПульс 1.2s ease-out infinite; }
+    @keyframes учПульс { 0% { transform: scale(0.9); opacity: 1; } 100% { transform: scale(1.35); opacity: 0; } }
+    body.кино #учПалец, body.гм #учПалец { display: none !important; }
+    #какИграть { position: fixed; inset: 0; z-index: 17; display: none; background: rgba(8,5,3,0.86); padding: max(10px, env(safe-area-inset-top)) 12px max(10px, env(safe-area-inset-bottom)); overflow-y: auto; }
+    #какИграть.видно { display: flex; }
+    #какИграть .лист { margin: auto; width: min(640px, 100%); background: #1A140E; border: 1px solid rgba(242,230,204,0.22); border-radius: 16px; padding: 14px; color: #F2E6CC; font: 13px/1.4 system-ui, sans-serif; box-sizing: border-box; }
+    #какИграть h2 { margin: 0 0 8px; font: 800 16px system-ui, sans-serif; letter-spacing: 2px; }
+    #какИграть .сетка { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px 14px; }
+    #какИграть .п { display: flex; gap: 10px; align-items: flex-start; padding: 6px 0; border-bottom: 1px solid rgba(242,230,204,0.08); }
+    #какИграть .п i { font-style: normal; font-size: 20px; width: 26px; text-align: center; flex: none; } #какИграть .п b { color: #F4C430; }
+    #какИграть .низ { display: flex; justify-content: space-between; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    #какИграть .низ button { height: 36px; padding: 0 16px; border-radius: 18px; border: 1px solid rgba(242,230,204,0.3); background: #2A2018; color: #F2E6CC; font: 700 12px system-ui, sans-serif; letter-spacing: 1px; cursor: pointer; }
+    #какИграть .низ .да { border-color: #F4C430; color: #F4C430; background: none; }
+  `;
+  document.head.appendChild(стиль);
+  const слой = document.createElement('div'); слой.id = 'учПалец';
+  слой.innerHTML = '<div class="круг"></div><div class="след"></div><div class="палец">👆</div><div class="кольцо"></div>';
+  document.body.appendChild(слой);
+  const круг = слой.querySelector('.круг'), палец = слой.querySelector('.палец'), след = слой.querySelector('.след'), кольцо = слой.querySelector('.кольцо');
+  const показ = (эл, да) => { эл.style.display = да ? 'block' : 'none'; };
+  const поставить = (эл, x, y) => { эл.style.left = x + 'px'; эл.style.top = y + 'px'; };
+  function вокруг(id) {                                // кольцо вокруг кнопки или карты
+    const э = document.getElementById(id); if (!э || !э.offsetParent) return false;
+    const р = э.getBoundingClientRect(), d = Math.max(р.width, р.height) + 16;
+    кольцо.style.width = кольцо.style.height = d + 'px'; поставить(кольцо, р.left + р.width / 2 - d / 2, р.top + р.height / 2 - d / 2);
+    поставить(палец, р.left + р.width / 2, р.top + р.height * 0.75); return true;
+  }
+  let т = 0;
+  API.каждыйКадр.push(dt => {
+    const П = window.__подсказки, что = П && П.обучение && П.обучение();
+    if (!что || window.__вМеню || document.getElementById('миникарта').classList.contains('большая')) { слой.style.display = 'none'; return; }
+    слой.style.display = 'block'; т += dt;
+    const W = innerWidth, H = innerHeight, левша = !!(window.__упр && window.__упр.левша);
+    if (что === 'идти') {                              // круг джойстика, палец тянет вверх и обратно
+      const x = левша ? W * 0.78 : W * 0.22, y = H * 0.68, ф = (т % 1.6) / 1.6, k = Math.sin(Math.min(1, ф * 1.6) * Math.PI) * 42;
+      показ(круг, true); показ(след, false); показ(кольцо, false); поставить(круг, x, y); поставить(палец, x, y - k);
+    } else if (что === 'камера') {                     // палец ездит вбок, за ним след
+      const x0 = левша ? W * 0.18 : W * 0.62, y = H * 0.5, ф = (т % 1.8) / 1.8, сдвиг = Math.sin(ф * Math.PI * 2) * W * 0.12;
+      показ(круг, false); показ(кольцо, false); показ(след, true); поставить(палец, x0 + W * 0.1 + сдвиг, y);
+      след.style.width = W * 0.24 + 'px'; поставить(след, x0 - W * 0.02, y + 4); след.style.transform = Math.cos(ф * Math.PI * 2) < 0 ? 'scaleX(-1) translateX(-' + W * 0.24 + 'px)' : '';
+    } else if (что === 'карта' || что === 'сверху') {
+      показ(круг, false); показ(след, false); показ(кольцо, true);
+      if (!вокруг(что === 'карта' ? 'миникарта' : 'сверху')) слой.style.display = 'none';
+    } else слой.style.display = 'none';
+  });
+
+  // ---------- ⚙ → КАК ИГРАТЬ ----------
+  const окно = document.createElement('div'); окно.id = 'какИграть'; document.body.appendChild(окно);
+  окно.addEventListener('pointerdown', e => { if (e.target === окно) окно.classList.remove('видно'); });
+  const ПУНКТЫ = () => {
+    const л = !!(window.__упр && window.__упр.левша);
+    return [
+      ['🕹', `<b>Ходить</b> — тяни пальцем по ${л ? 'правой' : 'левой'} половине экрана. Сильнее — бегом.`],
+      ['👀', `<b>Камера</b> — води пальцем по ${л ? 'левой' : 'правой'} половине.`],
+      ['🎯', '<b>Цель</b> — строчка сверху: что делать дальше. Жёлтый знак на экране — куда идти.'],
+      ['🗺', '<b>Карта</b> в углу: тап — большая. На большой тап — <b>метка</b> со столбом света.'],
+      ['🛵', '<b>Мопед</b> — подойди и «СЕСТЬ». Потерял — ⚙ → МОПЕД КО МНЕ.'],
+      ['🎣', '<b>Рыбалка</b> — у воды появится кнопка. Клюёт — жми ПОДСЕЧЬ.'],
+      ['🃏', '<b>Дурак</b> — подсядь к бабушке на лавочке.'],
+      ['👥', '<b>Онлайн</b> — играй с друзьями: роли, чат, метки, война за времянку.'],
+      ['🏆', '<b>Ачивки</b> открывают одёжку в <b>гардеробе</b>.'],
+      ['💾', '<b>Сохранение</b> само: главы и место, где стоишь. «ПРОДОЛЖИТЬ» вернёт туда.'],
+      ['⚙', '<b>Настройки</b>: графика, звук, управление под себя, левша.'],
+    ];
+  };
+  function открыть() {
+    окно.innerHTML = '';
+    const лист = document.createElement('div'); лист.className = 'лист';
+    const h = document.createElement('h2'); h.textContent = '❓ КАК ИГРАТЬ';
+    const сетка = document.createElement('div'); сетка.className = 'сетка';
+    for (const [и, т2] of ПУНКТЫ()) { const п = document.createElement('div'); п.className = 'п'; п.innerHTML = '<i>' + и + '</i><span>' + т2 + '</span>'; сетка.appendChild(п); }
+    const низ = document.createElement('div'); низ.className = 'низ';
+    const заново = document.createElement('button'); заново.textContent = 'ПОКАЗАТЬ ПОДСКАЗКИ ЗАНОВО';
+    заново.addEventListener('click', () => { window.__подсказки && window.__подсказки.заново && window.__подсказки.заново(); окно.classList.remove('видно'); const м = document.getElementById('меню'); if (м) м.classList.remove('открыто'); });
+    const ок = document.createElement('button'); ок.className = 'да'; ок.textContent = 'ПОНЯТНО'; ок.addEventListener('click', () => окно.classList.remove('видно'));
+    низ.append(заново, ок); лист.append(h, сетка, низ); окно.appendChild(лист); окно.classList.add('видно');
+  }
+  const меню = document.getElementById('меню');
+  if (меню) {
+    const с = document.createElement('div'); с.className = 'строка';
+    const п = document.createElement('span'); п.textContent = 'КАК ИГРАТЬ';
+    const б = document.createElement('button'); б.className = 'кн шрифт'; б.textContent = 'ПОКАЗАТЬ'; б.addEventListener('click', открыть);
+    с.append(п, б); меню.insertBefore(с, меню.firstElementChild ? меню.firstElementChild.nextSibling : null);
+  }
+  window.__обучение = { открыть };
 }]);
 // Мини-игра «Летучий Яша» (по мотивам «My Flying Pig»): Яша летит на самолёте из бочки над
 // посёлком, а по улицам бродят гигантские Никиты — тянут руки, хватают и кидаются сортирами.
