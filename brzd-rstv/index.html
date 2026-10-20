@@ -15605,7 +15605,7 @@ window.ДЕТАЛИ.push(['тест телефона', function (API) {
       'Графика: ' + гр + ' (угадано: ' + (У.угадано || '?') + '), чёткость ' + Р.getPixelRatio().toFixed(2) + (window.__огр30 ? ', кадры 30' : ''),
       'FPS: в среднем ' + fps.toFixed(1) + ', худшие 1% — ' + худ.toFixed(1) + ', рывков >0.1 с: ' + рывков,
       'Итог: ' + оц + ' — ' + совет,
-      'Приложение: ' + (/BrzdApp\/(\d+)/.exec(navigator.userAgent) || [, 'нет (браузер)'])[1] + ', ' + new Date().toLocaleString('ru-RU'),
+      'Приложение: ' + ((/BrzdApp\/(\d+)/.exec(navigator.userAgent) || [])[1] || 'нет (браузер)') + ', ' + new Date().toLocaleString('ru-RU'),
     ].join('\n');
     try { const с = JSON.parse(localStorage.getItem('бороздиновский.тесты') || '[]'); с.push({ когда: Date.now(), м, fps: +fps.toFixed(1), гр }); localStorage.setItem('бороздиновский.тесты', JSON.stringify(с.slice(-20))); } catch (e) {}
     окно.innerHTML = '';
