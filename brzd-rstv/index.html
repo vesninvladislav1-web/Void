@@ -15691,6 +15691,7 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
 window.ДЕТАЛИ.push(['школьный туалет', function (API) {
   const { THREE, сцена } = API;
   const ШИР = 1.66 / 2, ДЛ = 2.94 / 2, ВЫС = 2.68, ЗАПАС = 0.32, НАД = 320;
+  const УНИТАЗ = { x: -0.09, z: 0.99, r: 0.33 };          // нашли в скане по белому фаянсу у окна — сквозь него не пройти
   const стиль = document.createElement('style');
   стиль.textContent = `
     #туалетКн { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
@@ -15729,7 +15730,7 @@ window.ДЕТАЛИ.push(['школьный туалет', function (API) {
           const заплатка = (w, d, цв, y, вниз) => { const п = new THREE.Mesh(new THREE.PlaneGeometry(w, d).rotateX(вниз ? Math.PI / 2 : -Math.PI / 2), new THREE.MeshBasicMaterial({ color: цв, fog: false, toneMapped: false })); п.position.y = y; гр.add(п); };
           заплатка(ШИР * 2 + 0.2, ДЛ * 2 + 0.2, '#6E5A4E', -0.01, false);
           заплатка(ШИР * 2 + 0.2, ДЛ * 2 + 0.2, '#E8E8E4', ВЫС, true);
-          const короб = new THREE.Mesh(new THREE.BoxGeometry(ШИР * 2 + 0.25, ВЫС + 0.1, ДЛ * 2 + 0.25), new THREE.MeshBasicMaterial({ color: '#A8B0B4', side: THREE.BackSide, fog: false, toneMapped: false }));
+          const короб = new THREE.Mesh(new THREE.BoxGeometry(ШИР * 2 + 0.25, ВЫС + 0.1, ДЛ * 2 + 0.25), new THREE.MeshBasicMaterial({ color: '#E2E2DE', side: THREE.BackSide, fog: false, toneMapped: false }));   // в тон белому верху стен — прорехи не бросаются в глаза
           короб.position.y = ВЫС / 2; гр.add(короб);
           гр.visible = false; сцена.add(гр); модель = гр; ок(гр);
         }, () => ок(null));
@@ -15750,7 +15751,8 @@ window.ДЕТАЛИ.push(['школьный туалет', function (API) {
     м.position.set(место.x, место.y, место.z); м.visible = true;
     window.__полКомнаты = место.y;
     П.x = место.x; П.z = место.z - ДЛ + 0.6; П.угол = 0;                              // у двери (сторона −z), лицом к окну
-    К.даль = 0.05; К.высота = 1.5; К.тангаж = 0.12; К.рыск = Math.PI; window.__игрокСкрыт = true;   // тангаж 0.12 — взгляд ровно, не задран вверх   // в тесной кабинке — от первого лица
+    К.даль = 0.05; К.высота = 1.5; К.тангаж = 0.12; К.рыск = Math.PI; window.__игрокСкрыт = true;
+    API.камера.position.set(П.x, место.y + 1.5, П.z - 0.05);                         // сразу внутри — без перелёта от школы   // тангаж 0.12 — взгляд ровно, не задран вверх   // в тесной кабинке — от первого лица
     window.__подсказки && window.__подсказки.совет('🚽 Школьный туалет. Настоящий — отсканирован телефоном.', 4);
   }
   function выйти() {
@@ -15768,6 +15770,8 @@ window.ДЕТАЛИ.push(['школьный туалет', function (API) {
       // стены: не дальше, чем пускает комната
       П.x = Math.max(место.x - ШИР + ЗАПАС, Math.min(место.x + ШИР - ЗАПАС, П.x));
       П.z = Math.max(место.z - ДЛ + ЗАПАС, Math.min(место.z + ДЛ - ЗАПАС, П.z));
+      { const ux = место.x + УНИТАЗ.x, uz = место.z + УНИТАЗ.z, d = Math.hypot(П.x - ux, П.z - uz);
+        if (d < УНИТАЗ.r) { if (d < 1e-3) { П.z = uz - УНИТАЗ.r; } else { const k = УНИТАЗ.r / d; П.x = ux + (П.x - ux) * k; П.z = uz + (П.z - uz) * k; } } }   // ровно в центре — к двери
       кн.textContent = '🚪 ВЫЙТИ'; кн.style.display = 'block';
       return;
     }
