@@ -12307,7 +12307,7 @@ window.ДЕТАЛИ.push(['настройки', function (API) {
   }
   // авторы ассетов (часть одежды людей — CC-BY, указывать обязательно)
   { const т = document.createElement('div'); т.style.cssText = 'font-size:9px;line-height:1.4;color:var(--тусклый);letter-spacing:0;max-width:230px';
-    т.textContent = 'Карта © участники OpenStreetMap (ODbL); рельеф: Terrain Tiles (AWS). Люди: MakeHuman (CC0); одежда и волосы — Elvaerwyn, Mindfront, janexx, punkduck (CC-BY 4.0), MakeHuman community (CC0). Анимации и сортир: Quaternius, System G6 (CC0). Текстуры: Poly Haven (CC0). Техника: вертолёт — Geibu3D (CC-BY 4.0); F-117 — Eric Buisson, Ан-2 — Mehozavr, грузовик — rgsdev, УАЗ — artie31 (CC0).';
+    т.textContent = 'Карта © участники OpenStreetMap (ODbL); рельеф: Terrain Tiles (AWS). Люди: MakeHuman (CC0); одежда и волосы — Elvaerwyn, Mindfront, janexx, punkduck (CC-BY 4.0), MakeHuman community (CC0). Анимации и сортир: Quaternius, System G6 (CC0). Текстуры: Poly Haven (CC0). Техника: вертолёт — Geibu3D (CC-BY 4.0); F-117 — Eric Buisson, Ан-2 — Mehozavr, грузовик — rgsdev, УАЗ — artie31 (CC0). ВАЗ-2114 — DR1KING100K (CC-BY 4.0, Sketchfab).';
     меню.appendChild(т); }
   кн.addEventListener('click', e => { e.stopPropagation(); меню.classList.toggle('открыто'); });
   addEventListener('pointerdown', e => { if (!меню.contains(e.target) && e.target !== кн) меню.classList.remove('открыто'); });
@@ -15633,6 +15633,54 @@ window.ДЕТАЛИ.push(['тест телефона', function (API) {
     с.append(п, б); меню.insertBefore(с, меню.lastElementChild);
   }
   window.__тестТелефона = { запустить };
+}]);
+
+// ===================== ВАЗ-2114 У ДОМА =====================
+// Белая «четырнадцатая» стоит у дороги перед домом игрока, вдоль улицы. Пока просто стоит (не ездит).
+// Модель: «Lada Vaz 2114» — DR1KING100K (Sketchfab, CC BY 4.0), упрощена; файл tehnika/vaz2114.js догружается после старта.
+window.ДЕТАЛИ.push(['ваз 2114', function (API) {
+  const { THREE, сцена } = API;
+  const Д = API.КАРТА.дом_игрока; if (!Д) return;
+  const ДЛИНА = 4.12;                                  // настоящая 2114 — 4,12 м
+  function место() {
+    const [ox, oz] = Д.о, [ux, uz] = Д.u, nx = uz, nz = -ux;
+    const пx = ox + ux * 6 - nx * 4, пz = oz + uz * 6 - nz * 4;          // перед домом, к улице
+    const д = API.ближайшаяДорога(пx, пz); if (!д) return null;
+    const пш = API.ШИРИНА[д.д.т] / 2, кДому = (ox - д.px) * -д.uz + (oz - д.pz) * д.ux >= 0 ? 1 : -1;
+    for (const вдоль of [0, 5, -5, 10, -10]) {
+      const x = д.px - д.uz * (пш - 1.0) * кДому + д.ux * вдоль, z = д.pz + д.ux * (пш - 1.0) * кДому + д.uz * вдоль;
+      if (!API.вДоме(x, z, 2.4)) return { x, z, курс: Math.atan2(д.ux, д.uz) };
+    }
+    return null;
+  }
+  let начато = false;
+  API.каждыйКадр.push(() => {
+    if (начато || !document.getElementById('старт').hidden) return;
+    начато = true;
+    const м = место(); if (!м) return;
+    const с = document.createElement('script'); с.src = 'tehnika/vaz2114.js';
+    с.onload = () => {
+      const д = window.__glb && window.__glb.vaz2114; if (!д || !THREE.GLTFLoader) return;
+      const с2 = atob(д.b), б = new Uint8Array(с2.length); for (let i = 0; i < с2.length; i++) б[i] = с2.charCodeAt(i);
+      delete window.__glb.vaz2114;
+      new THREE.GLTFLoader().parse(б.buffer, '', г => {
+        const модель = г.scene, рамка = new THREE.Box3().setFromObject(модель), р = рамка.getSize(new THREE.Vector3());
+        const к = ДЛИНА / Math.max(р.x, р.z), ц = рамка.getCenter(new THREE.Vector3());
+        модель.position.set(-ц.x, -рамка.min.y, -ц.z);
+        модель.traverse(о => { if (о.isMesh) { о.castShadow = true; о.receiveShadow = true; if (о.material.transparent) о.castShadow = false; } });
+        const гр = new THREE.Group(); гр.add(модель); гр.scale.setScalar(к);
+        if (р.x > р.z) гр.rotation.y = Math.PI / 2;                       // длиной — вдоль улицы
+        const обёртка = new THREE.Group(); обёртка.add(гр); обёртка.rotation.y = м.курс;
+        обёртка.position.set(м.x, API.землиВысота(м.x, м.z), м.z); сцена.add(обёртка);
+        // твёрдая: сквозь машину не пройти
+        const fx = Math.sin(м.курс), fz = Math.cos(м.курс), ш = 0.85, дл = ДЛИНА / 2;
+        API.добавитьПрепятствие([[м.x + fx * дл + fz * ш, м.z + fz * дл - fx * ш], [м.x + fx * дл - fz * ш, м.z + fz * дл + fx * ш],
+          [м.x - fx * дл - fz * ш, м.z - fz * дл + fx * ш], [м.x - fx * дл + fz * ш, м.z - fz * дл - fx * ш]], 'машина');
+        window.__ваз = { обёртка, м };
+      }, e => console.warn('ваз 2114:', e && e.message));
+    };
+    setTimeout(() => document.head.appendChild(с), 3000);
+  });
 }]);
 
 // ⚙ → УПРАВЛЕНИЕ И ЗВУК: три ползунка громкости
