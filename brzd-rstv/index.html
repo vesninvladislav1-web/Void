@@ -13647,6 +13647,7 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     if (м.k === 'ч') { if (typeof м.т === 'string') чатПришёл(п, м.т); return; }
     if (м.k === 'м') { if (п.роль && window.__метки) window.__метки.сеть(п, м); return; }      // метка на карте
     if (м.k === 'э') { if (п.роль && window.__эмоции) window.__эмоции.сеть(п, м); return; }     // эмоция
+    if (м.k === 'гф') { if (п.роль && window.__гонки && performance.now() - (п.гфТ || 0) > 3000) { п.гфТ = performance.now(); window.__гонки.сеть(п, м); } return; }   // финиш гонки
     if (м.k === 'ф') { if (Number.isInteger(м.н) && м.н >= 0 && м.н < ФРАЗЫ.length && сейчас - (п.фразаТ || 0) > 400) { п.фразаТ = сейчас; пузырь(п, ФРАЗЫ[м.н]); } return; }
     if (м.k === 'с') {
       if (typeof м.счёт !== 'number' || сейчас - (п.счётТ || 0) < 300) return; п.счётТ = сейчас;
@@ -14367,6 +14368,7 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     ['водила', 'Права не нужны', 'Проехать на Фениксе 150 метров.'],
     ['мопед', 'Альфач', 'Проехать на мопеде «Альфа» километр.'],
     ['ваз', 'Пацанская четырка', 'Накатать на ВАЗ-2114 два километра.'],
+    ['гонка', 'Шумахер из Бороздиновки', 'Доехать гонку до финиша.'],
     ['рыбак', 'Рыбак', 'Поймать на пруду 10 рыб.'],
     ['дурак', 'Сам не дурак', 'Обыграть бабушку в дурака.'],
     ['футбол', 'Месси из Бороздиновки', 'Обыграть Марка в футбол до трёх голов.'],
@@ -16051,7 +16053,7 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
         машина = { обёртка, x: м.x, z: м.z, курс: м.курс, преп: null }; поставить(); разместить();
         шаблон = гр.clone(true);                // для чужих ВАЗов в онлайне — до наших вмятин и фар
         try { готовитьКузов(модель); готовитьСвет(модель, обёртка); } catch (e) { console.warn('ваз: кузов/свет', e); }
-        window.__ваз = { обёртка, м, сесть, выйти, машина, переставить, вмятина, починить, урон: () => урон };
+        window.__ваз = { обёртка, м, сесть, выйти, машина, переставить, вмятина, починить, урон: () => урон, шаблон, ез };
         if (window.__вазЖдёт) { переставить(...window.__вазЖдёт); window.__вазЖдёт = null; }
       }, e => console.warn('ваз 2114:', e && e.message));
     };
@@ -16246,6 +16248,218 @@ window.ДЕТАЛИ.push(['машины на дорогах', function (API) {
     return null;
   }
   window.__машины = { машины, занято, узлы, рёбра };
+}]);
+
+// ===================== ГОНКИ =====================
+// ⚙ → ГОНКИ: три трассы по настоящим улицам — «Короткая», «Через посёлок», «Марафон». Едешь на ВАЗе или
+// мопеде: ставит на старт, 3-2-1, дальше — через светящиеся кольца, следующее подписано на экране.
+// Рекорд — отдельно для ВАЗа и мопеда; лучший заезд едет рядом «призраком». Трассы строятся из графа
+// улиц одинаково у всех, поэтому в онлайне финиш объявляется всей комнате и время честно сравнимо.
+window.ДЕТАЛИ.push(['гонки', function (API) {
+  const { THREE, сцена } = API, В = API.землиВысота;
+  const Мш = window.__машины; if (!Мш || !Мш.рёбра || !Мш.рёбра.length) return;
+  const КЛЮЧ = 'бороздиновский.гонки';
+  const ТРАССЫ = [
+    { ид: 'к', имя: 'Короткая', длина: 900, семя: 11 },
+    { ид: 'п', имя: 'Через посёлок', длина: 1800, семя: 23 },
+    { ид: 'м', имя: 'Марафон', длина: 3200, семя: 37 },
+  ];
+  const ДИ = API.КАРТА.дом_игрока;
+  const подск = () => window.__подсказки;
+  const время = t => { const м = Math.floor(t / 60), с = t - м * 60; return м + ':' + (с < 10 ? '0' : '') + с.toFixed(1); };
+
+  // ---- трассы: от узла у дома игрока — случайный (но одинаковый у всех) путь по улицам без повторов ----
+  const узлы = [...Мш.узлы.values()];
+  const старт = (() => { const [ox, oz] = ДИ ? ДИ.о : [0, 0]; let л = узлы[0], лд = Infinity; for (const у of узлы) { const d = Math.hypot(у.x - ox, у.z - oz); if (у.к.length && d < лд) { лд = d; л = у; } } return л; })();
+  function путь(т) {
+    let лучш = null;
+    for (let попытка = 0; попытка < 60; попытка++) {
+      let s = т.семя * 7919 + попытка * 104729; const сл = () => { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; };
+      const точки = [[старт.x, старт.z]], было = new Set(); let у = старт, пред = null, L = 0;
+      while (L < т.длина) {
+        const в = у.к.filter(р => р.у !== пред && !было.has(у.x + ',' + у.z + '>' + р.у.x + ',' + р.у.z));
+        if (!в.length) break;
+        const р = в[Math.floor(сл() * в.length)];
+        было.add(у.x + ',' + у.z + '>' + р.у.x + ',' + р.у.z); было.add(р.у.x + ',' + р.у.z + '>' + у.x + ',' + у.z);
+        L += Math.hypot(р.у.x - у.x, р.у.z - у.z); точки.push([р.у.x, р.у.z]); пред = у; у = р.у;
+      }
+      if (!лучш || Math.abs(L - т.длина) < Math.abs(лучш.L - т.длина)) лучш = { точки, L };
+      if (L >= т.длина && L < т.длина * 1.45) break;
+    }
+    // кольца — через каждые ~110 м по пути и на финише
+    const кольца = []; let пройдено = 0, след = 110;
+    for (let i = 1; i < лучш.точки.length; i++) {
+      const [ax, az] = лучш.точки[i - 1], [bx, bz] = лучш.точки[i], d = Math.hypot(bx - ax, bz - az);
+      while (пройдено + d >= след) { const k = (след - пройдено) / d; кольца.push([ax + (bx - ax) * k, az + (bz - az) * k, Math.atan2(bx - ax, bz - az)]); след += 110; }
+      пройдено += d;
+    }
+    const [fx, fz] = лучш.точки[лучш.точки.length - 1], [px, pz] = лучш.точки[лучш.точки.length - 2];
+    if (!кольца.length || Math.hypot(кольца[кольца.length - 1][0] - fx, кольца[кольца.length - 1][1] - fz) > 40) кольца.push([fx, fz, Math.atan2(fx - px, fz - pz)]);
+    else кольца[кольца.length - 1] = [fx, fz, Math.atan2(fx - px, fz - pz)];
+    return { точки: лучш.точки, L: пройдено, кольца, курс0: Math.atan2(лучш.точки[1][0] - старт.x, лучш.точки[1][1] - старт.z) };
+  }
+  for (const т of ТРАССЫ) Object.assign(т, путь(т));
+
+  // ---- старт: клетчатая арка над дорогой ----
+  const клетка = (() => { const к = document.createElement('canvas'); к.width = 128; к.height = 32; const с = к.getContext('2d'); for (let i = 0; i < 16; i++) for (let j = 0; j < 4; j++) { с.fillStyle = (i + j) % 2 ? '#111' : '#F4F4F0'; с.fillRect(i * 8, j * 8, 8, 8); } const т = new THREE.CanvasTexture(к); return т; })();
+  {
+    const гр = new THREE.Group(), м = new THREE.MeshStandardMaterial({ color: 0xB8B8B8, roughness: 0.6 }), ш = 4.2;
+    for (const s of [-1, 1]) { const с = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.6, 8), м); с.position.set(s * ш, 2.3, 0); с.castShadow = true; гр.add(с); }
+    const п = new THREE.Mesh(new THREE.BoxGeometry(ш * 2 + 0.3, 0.7, 0.06), new THREE.MeshStandardMaterial({ map: клетка, roughness: 0.7 })); п.position.y = 4.3; гр.add(п);
+    гр.position.set(старт.x, В(старт.x, старт.z), старт.z); гр.rotation.y = ТРАССЫ[0].курс0; сцена.add(гр);
+  }
+
+  // ---- кольца ----
+  const кольцоГ = new THREE.TorusGeometry(4.2, 0.22, 8, 36);
+  const мСлед = new THREE.MeshBasicMaterial({ color: 0xF4C430, transparent: true, opacity: 0.9, toneMapped: false }), мДалее = new THREE.MeshBasicMaterial({ color: 0xF4C430, transparent: true, opacity: 0.3, toneMapped: false }), мФиниш = new THREE.MeshBasicMaterial({ map: клетка, transparent: true, opacity: 0.95 });
+  const кольцаМ = [0, 1].map(() => { const к = new THREE.Mesh(кольцоГ, мСлед); к.visible = false; сцена.add(к); return к; });
+  function поставитьКольцо(м, к, финиш, далее) {
+    if (!к) { м.visible = false; return; }
+    м.visible = true; м.material = финиш ? мФиниш : далее ? мДалее : мСлед; м.position.set(к[0], В(к[0], к[1]) + 3.9, к[1]); м.rotation.set(0, к[2], 0);
+  }
+
+  // ---- интерфейс ----
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #гонкиОкно { position: fixed; inset: 0; z-index: 30; display: none; background: rgba(8,6,4,0.72); align-items: center; justify-content: center; padding: 12px; }
+    #гонкиОкно.видно { display: flex; }
+    #гонкиОкно .лист { width: min(440px, 100%); background: #1A140E; border: 1px solid rgba(242,230,204,0.25); border-radius: 16px; padding: 14px; color: #F2E6CC; font: 13px system-ui, sans-serif; }
+    #гонкиОкно h2 { margin: 0 0 4px; font: 800 16px system-ui, sans-serif; letter-spacing: 2px; }
+    #гонкиОкно .мел { color: #B8AC94; font-size: 12px; margin-bottom: 10px; }
+    #гонкиОкно button.тр { display: flex; width: 100%; justify-content: space-between; align-items: center; gap: 10px; margin: 6px 0; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(242,230,204,0.25); background: #2A2018; color: #F2E6CC; font: 700 14px system-ui, sans-serif; cursor: pointer; text-align: left; }
+    #гонкиОкно button.тр small { color: #B8AC94; font-weight: 500; font-size: 11px; display: block; }
+    #гонкиОкно button.тр span:last-child { color: #F4C430; font: 700 12px ui-monospace, monospace; text-align: right; white-space: nowrap; }
+    #гонкиОкно .закрыть { margin-top: 8px; height: 36px; padding: 0 16px; border-radius: 18px; border: 1px solid rgba(242,230,204,0.3); background: none; color: #F2E6CC; font: 700 12px system-ui, sans-serif; cursor: pointer; }
+    #гонкаТаймер { position: fixed; left: 50%; top: calc(80px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 9; display: none; padding: 4px 14px; border-radius: 12px; background: rgba(18,12,8,0.78); color: #F4E0A0; font: 800 20px ui-monospace, monospace; pointer-events: none; text-align: center; }
+    #гонкаТаймер small { display: block; font: 600 11px system-ui, sans-serif; color: #B8AC94; letter-spacing: 1px; }
+    #гонкаОтсчёт { position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%); z-index: 9; display: none; color: #F4C430; font: 900 96px system-ui, sans-serif; text-shadow: 0 4px 24px rgba(0,0,0,.6); pointer-events: none; }
+    #гонкаСойти { position: fixed; left: calc(14px + env(safe-area-inset-left, 0px)); top: calc(96px + env(safe-area-inset-top, 0px)); z-index: 9; display: none; height: 38px; padding: 0 14px; border-radius: 19px; border: 1px solid rgba(242,230,204,0.3); background: rgba(18,12,8,0.7); color: #F2E6CC; font: 700 12px system-ui, sans-serif; }
+    body.кино #гонкаТаймер, body.кино #гонкаСойти { opacity: 0; pointer-events: none; }
+  `;
+  document.head.appendChild(стиль);
+  const эл = (т, атр = {}, ...дети) => { const е = document.createElement(т); for (const [к, в] of Object.entries(атр)) if (к === 'onclick') е.addEventListener('click', в); else е.setAttribute(к, в); е.append(...дети); return е; };
+  const окно = эл('div', { id: 'гонкиОкно' }), таймер = эл('div', { id: 'гонкаТаймер' }), отсчёт = эл('div', { id: 'гонкаОтсчёт' }), кнСойти = эл('button', { id: 'гонкаСойти', onclick: () => сойти('Сошёл с трассы.') }, '✕ СОЙТИ');
+  document.body.append(окно, таймер, отсчёт, кнСойти);
+  const рекорды = () => { try { return JSON.parse(localStorage.getItem(КЛЮЧ)) || {}; } catch (e) { return {}; } };
+  const записать = р => { try { localStorage.setItem(КЛЮЧ, JSON.stringify(р)); } catch (e) {} };
+  function открыть() {
+    const р = рекорды(); окно.textContent = '';
+    const лист = эл('div', { class: 'лист' }, эл('h2', {}, '🏁 ГОНКИ'), эл('div', { class: 'мел' }, 'Сядь в ВАЗ или на мопед и выбери трассу. Старт — у твоего дома.'));
+    for (const т of ТРАССЫ) {
+      const рв = р[т.ид] || {}, з = [рв.ваз && '🚗 ' + время(рв.ваз.t), рв.мопед && '🛵 ' + время(рв.мопед.t)].filter(Boolean).join('  ') || 'рекорда нет';
+      лист.append(эл('button', { class: 'тр', onclick: () => { окно.classList.remove('видно'); начать(т); } }, эл('span', {}, т.имя, эл('small', {}, (т.L / 1000).toFixed(1) + ' км · колец: ' + т.кольца.length)), эл('span', {}, з)));
+    }
+    лист.append(эл('button', { class: 'закрыть', onclick: () => окно.classList.remove('видно') }, 'ЗАКРЫТЬ'));
+    окно.append(лист); окно.classList.add('видно');
+  }
+  { const меню = document.getElementById('меню');
+    if (меню) { const с = эл('div', { class: 'строка' }, эл('span', {}, 'ГОНКИ'), эл('button', { class: 'кн шрифт', onclick: () => { if (!document.getElementById('старт').hidden) return; меню.classList.remove('открыто'); открыть(); } }, 'ТРАССЫ')); меню.appendChild(с); } }
+
+  // ---- звук ----
+  function пик(f, дл = 0.12, гр = 0.08) {
+    const Я = window.__бахЯдро, к = Я && Я.звук && Я.звук(); if (!к) return;
+    const о = к.createOscillator(), g = к.createGain(), t = к.currentTime; о.type = 'square'; о.frequency.value = f;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(гр, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + дл);
+    о.connect(g); g.connect(Я.выход()); о.start(t); о.stop(t + дл + 0.05);
+  }
+
+  // ---- на чём едем ----
+  function транспорт() {
+    const В2 = window.__ваз, М = window.__мопед;
+    if (window.__вазЕдет && В2) return { вид: 'ваз', где: () => [В2.машина.x, В2.машина.z, В2.машина.курс], стоп: () => { В2.ез && (В2.ез.v = 0); }, на: (x, z, к) => { Object.assign(В2.машина, { x, z, курс: к }); } };
+    if (window.__мопедЕдет && М) return { вид: 'мопед', где: () => [М.ст.х, М.ст.z, М.ст.курс], стоп: () => { М.ст.v = 0; }, на: (x, z, к) => { М.ст.х = x; М.ст.z = z; М.ст.курс = к; } };
+    return null;
+  }
+  // ---- призрак лучшего заезда: прозрачная копия машины или мопеда ----
+  function сделатьПризрак(вид) {
+    const В2 = window.__ваз, М = window.__мопед;
+    const ориг = вид === 'ваз' ? В2 && В2.шаблон : М && М.гр; if (!ориг) return null;
+    const гр = new THREE.Group(), к = ориг.clone(true); if (вид === 'мопед') { к.position.set(0, 0, 0); к.rotation.set(0, 0, 0); }   // мопед стоит в мире — снять его место; у ВАЗа свой поворот модели
+    к.visible = true;
+    const стекло = new THREE.MeshBasicMaterial({ color: 0x9FD8FF, transparent: true, opacity: 0.28, depthWrite: false });
+    к.traverse(о => { if (о.isMesh) { о.material = стекло; о.castShadow = false; } о.visible = true; });
+    гр.add(к); гр.visible = false; сцена.add(гр); return гр;
+  }
+
+  // ---- заезд ----
+  let г = null;      // { т, тр, этап: 'отсчёт'|'едем', t, i, путь: [], призрак, лучш }
+  function начать(т) {
+    if (г) return;
+    const тр = транспорт();
+    if (!тр) { подск() && подск().совет('🏁 Сначала сядь в ВАЗ или на мопед — потом ⚙ → ГОНКИ.', 4); return; }
+    const рв = (рекорды()[т.ид] || {})[тр.вид];
+    тр.на(старт.x, старт.z, т.курс0);
+    г = { т, тр, этап: 'отсчёт', t: 3.2, i: 0, путь: [], запись: 0, лучш: рв || null, призрак: рв && рв.п && рв.п.length > 2 ? сделатьПризрак(тр.вид) : null };
+    отсчёт.style.display = 'block'; таймер.style.display = 'block'; кнСойти.style.display = 'block';
+    поставитьКольцо(кольцаМ[0], т.кольца[0], т.кольца.length === 1, false); поставитьКольцо(кольцаМ[1], т.кольца[1], т.кольца.length === 2, true);
+  }
+  function убрать() {
+    if (!г) return;
+    if (г.призрак) сцена.remove(г.призрак);
+    for (const м of кольцаМ) м.visible = false;
+    отсчёт.style.display = 'none'; таймер.style.display = 'none'; кнСойти.style.display = 'none';
+    подск() && подск().убратьМетку && подск().убратьМетку();
+    г = null;
+  }
+  function сойти(почему) { if (!г) return; убрать(); подск() && подск().совет('🏁 ' + почему, 2.5); }
+  function финиш() {
+    const { т, тр, t, путь: п } = г, р = рекорды(), рв = (р[т.ид] = р[т.ид] || {}), было = рв[тр.вид];
+    const рекорд = !было || t < было.t;
+    if (рекорд) { рв[тр.вид] = { t: +t.toFixed(2), п }; записать(р); }
+    убрать();
+    пик(880, 0.15); setTimeout(() => пик(1175, 0.3), 160);
+    window.__кино && window.__кино.подпись && window.__кино.подпись(`🏁 ${т.имя}: ${время(t)}` + (рекорд ? (было ? ` — НОВЫЙ РЕКОРД! (было ${время(было.t)})` : ' — первый рекорд!') : ` · рекорд ${время(было.t)}`), 5);
+    window.__итоги && window.__итоги.дать('гонка');
+    const О = window.__онлайн; if (О && О.я && О.я.роль && О.всем) О.всем({ k: 'гф', т: т.ид, в: тр.вид, t: +t.toFixed(2) });
+  }
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt || !г) return;
+    const тр = транспорт();
+    if (!тр || тр.вид !== г.тр.вид) { сойти('Вышел из машины — гонка не засчитана.'); return; }
+    if (document.body.classList.contains('кино')) { if (г.призрак) г.призрак.visible = false; return; }      // сюжетная сцена — гонка на паузе
+    if (г.этап === 'отсчёт') {
+      тр.на(старт.x, старт.z, г.т.курс0); тр.стоп();
+      const было = Math.ceil(г.t); г.t -= dt; const стало = Math.ceil(г.t);
+      if (стало !== было && стало > 0) пик(440, 0.15);
+      отсчёт.textContent = г.t > 0.2 ? String(Math.max(1, стало)) : 'ПОЕХАЛИ!';
+      таймер.innerHTML = '0:00.0<small>' + г.т.имя.toUpperCase() + '</small>';
+      if (г.t <= 0) { г.этап = 'едем'; г.t = 0; пик(880, 0.35); setTimeout(() => { if (отсчёт.textContent === 'ПОЕХАЛИ!') отсчёт.style.display = 'none'; }, 700); }
+      return;
+    }
+    г.t += dt;
+    const [x, z, к] = тр.где();
+    // запись пути для призрака — 4 раза в секунду
+    г.запись -= dt; if (г.запись <= 0) { г.запись = 0.25; г.путь.push([+x.toFixed(1), +z.toFixed(1), +к.toFixed(2)]); }
+    // призрак: где был лучший заезд в это же время
+    if (г.призрак && г.лучш) {
+      const п = г.лучш.п, f = г.t / 0.25, i = Math.min(п.length - 2, Math.floor(f)), k = Math.min(1, f - i);
+      if (f < п.length - 1) {
+        const [ax, az, ак] = п[i], [bx, bz, бк] = п[i + 1], gx = ax + (bx - ax) * k, gz = az + (bz - az) * k;
+        г.призрак.visible = true; г.призрак.position.set(gx, В(gx, gz), gz); г.призрак.rotation.y = ак + Math.atan2(Math.sin(бк - ак), Math.cos(бк - ак)) * k;
+      } else г.призрак.visible = false;
+    }
+    // кольцо взято?
+    const кц = г.т.кольца[г.i];
+    if (Math.hypot(x - кц[0], z - кц[1]) < 7) {
+      г.i++;
+      if (г.i >= г.т.кольца.length) { финиш(); return; }
+      пик(660 + г.i * 10, 0.1);
+      const послед = г.т.кольца.length - 1;
+      поставитьКольцо(кольцаМ[0], г.т.кольца[г.i], г.i === послед, false); поставитьКольцо(кольцаМ[1], г.т.кольца[г.i + 1], г.i + 1 === послед, true);
+    }
+    const сл = г.т.кольца[г.i]; подск() && подск().показатьМетку(сл[0], сл[1], г.i === г.т.кольца.length - 1 ? 'Финиш' : 'Кольцо ' + (г.i + 1) + '/' + г.т.кольца.length);
+    const отст = г.лучш ? г.t - г.лучш.t * (г.i / г.т.кольца.length) : null;
+    таймер.innerHTML = время(г.t) + '<small>' + г.т.имя.toUpperCase() + ' · КОЛЬЦО ' + (г.i + 1) + '/' + г.т.кольца.length + (г.лучш ? ' · РЕКОРД ' + время(г.лучш.t) : '') + '</small>';
+    if (г.t > 900) сойти('Время вышло.');
+  });
+  // онлайн: чужой финиш
+  function сеть(п, м) {
+    const т = ТРАССЫ.find(т => т.ид === м.т); if (!т || (м.в !== 'ваз' && м.в !== 'мопед') || typeof м.t !== 'number' || !isFinite(м.t) || м.t < 5 || м.t > 900) return;
+    const кто = window.__онлайн && window.__онлайн.подписьПира ? window.__онлайн.подписьПира(п) : 'Кто-то';
+    const мой = (рекорды()[т.ид] || {})[м.в];
+    подск() && подск().совет(`🏁 ${кто}: «${т.имя}» на ${м.в === 'ваз' ? 'ВАЗе' : 'мопеде'} — ${время(м.t)}` + (мой ? (мой.t < м.t ? ' (ты быстрее!)' : ` (твой рекорд ${время(мой.t)})`) : ''), 5);
+  }
+  window.__гонки = { ТРАССЫ, старт, начать, сойти, открыть, сеть, г: () => г, рекорды };
 }]);
 
 // ===================== ШКОЛЬНЫЙ ТУАЛЕТ (3D-скан) =====================
@@ -22498,7 +22712,7 @@ window.ДЕТАЛИ.push(['сезоны', function (API) {
 // радар Шторма и руль Феникса не трогаем: там важны точные координаты пальца.
 window.ДЕТАЛИ.push(['размер интерфейса', function () {
   const ЧТО = ['#кнопки', '#шестерня', '#онлКн', '#компас', '#миникарта:not(.большая)', '#улица', '#цель', '#совет', '#меню',
-    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#курыПульт', '#вазСесть', '#вазЧинить', '#вазПассажир', '#вазПасВыйти', '#вазПульт', '#вазСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#дуракКн', '#футболКн', '#футболПульт', '#футболСчёт', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
+    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#курыПульт', '#вазСесть', '#вазЧинить', '#вазПассажир', '#вазПасВыйти', '#гонкаТаймер', '#гонкаСойти', '#вазПульт', '#вазСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#дуракКн', '#футболКн', '#футболПульт', '#футболСчёт', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
     '#войнаПанель', '#войнаНаВойну', '#войнаКинуть', '#войнаДрон', '#войнаЖизни', '#войнаТревога',
     '#полигонВерх', '#полигонКн1', '#полигонКн2', '#полигонСесть', '#полигонЛёт', '#полигонСвин', '#полётВВ', '#полётВН',
     '#яшолёт', '#яшолётСесть', '#яшолётКуры', '#фениксСесть', '#выход-каб', '#кн-сюжет', '#кн-халупа', '#кн-шторм', '#озон-окно',
