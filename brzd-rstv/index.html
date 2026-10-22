@@ -8830,7 +8830,7 @@ window.ДЕТАЛИ.push(['второстепенные', function (API) {
     const голова = { y: 0 };
     (window.__герои3д = window.__герои3д || []).push(Object.assign({ ...вид, имя, группа: г, кожа: '#E6BC9E',
       аним: доп.аним || (() => сидит ? 'Sitting_Idle_Loop' : 'Idle_Loop'), голова: () => голова.y }, сидит ? { y: 0.02, z: 0.28 } : {}));
-    API.добавитьПрепятствие([[x - 0.45, z - 0.45], [x + 0.45, z - 0.45], [x + 0.45, z + 0.45], [x - 0.45, z + 0.45]], имя);
+    г.userData.преп = API.добавитьПрепятствие([[x - 0.45, z - 0.45], [x + 0.45, z - 0.45], [x + 0.45, z + 0.45], [x - 0.45, z + 0.45]], имя);
     let фраза = 0, рядом = false, t = Math.random() * 10;
     API.каждыйКадр.push((dt, ms, поз) => {
       if (!dt) return; t += dt;
@@ -8871,15 +8871,16 @@ window.ДЕТАЛИ.push(['второстепенные', function (API) {
     мяч.castShadow = true; сцена.add(мяч);
     const угол = Math.atan2(cx - x, cz - z) + 0.6;
     let выс = 0, скор = 0;
-    герой('Марк', window.__маркВид, x, z, угол, false, [
+    const маркГ = герой('Марк', window.__маркВид, x, z, угол, false, [
       '— Сыграем? Я на воротах не стою, сразу говорю.',
       '— Сто раз набил. Ну, почти. Девяносто… семь.',
       '— Школа рядом, а мне хоть бы что. Каникулы!',
       '— Мяч не трогай, он счастливый.',
       '— Футболка белая. Была.',
     ], {
-      аним: () => 'Idle_Loop',
+      аним: ск => !window.__футболИдёт ? 'Idle_Loop' : ск > 3.2 ? 'Sprint_Loop' : ск > 0.4 ? 'Jog_Fwd_Loop' : 'Idle_Loop',   // в матче (модуль «футбол») — бегает
       кадр: (dt, t, d) => {
+        if (window.__футболИдёт) return;                    // мячом командует матч
         // набивает: мяч подлетает с ноги, иногда выше
         скор -= 9.8 * dt; выс += скор * dt;
         if (выс <= 0.15) { выс = 0.15; скор = 3.2 + (Math.random() < 0.15 ? 1.6 : 0); }
@@ -8887,6 +8888,7 @@ window.ДЕТАЛИ.push(['второстепенные', function (API) {
         мяч.position.set(x + fx * 0.35, В(x, z) + выс, z + fz * 0.35); мяч.rotation.x += dt * 6;
       },
     });
+    window.__марк = { группа: маркГ, мяч };
   }
 }]);
 
@@ -14361,6 +14363,7 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     ['мопед', 'Альфач', 'Проехать на мопеде «Альфа» километр.'],
     ['рыбак', 'Рыбак', 'Поймать на пруду 10 рыб.'],
     ['дурак', 'Сам не дурак', 'Обыграть бабушку в дурака.'],
+    ['футбол', 'Месси из Бороздиновки', 'Обыграть Марка в футбол до трёх голов.'],
     ['вертолёт', 'Почти вертолёт', 'Раскрутить стрелу Феникса так, что он оторвался от земли.'],
     ['дымка', 'Ёжик в тумане', 'Дождаться, пока Денис задымит весь посёлок.'],
     ['минздрав', 'Минздрав предупреждал', 'Отобрать у Дениса сигарету.'],
@@ -15858,6 +15861,186 @@ window.ДЕТАЛИ.push(['сканы голов', function (API) {
       голова.position.copy(p).add(вниз); голова.scale.copy(s);
     }
   });
+}]);
+
+// ===================== ФУТБОЛ С МАРКОМ =====================
+// На стадионе у школы. Подойди к Марку — «⚽ СЫГРАТЬ». Один на один до трёх голов.
+// Мяч ведёшь, просто набегая на него; «УДАР» — сильно пнуть туда, куда смотришь.
+// Твои ворота — у калитки (северный торец), Марка — напротив. Марк бегает за мячом, а когда мяч
+// у его ворот — встаёт между мячом и воротами («на воротах не стою» — стоит, куда денется).
+window.ДЕТАЛИ.push(['футбол', function (API) {
+  const { THREE, сцена } = API;
+  const ДО = 3, ШИР_В = 1.45, R_МЯЧ = 0.11;
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #футболКн { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
+      height: 48px; padding: 0 22px; border: 0; border-radius: 14px; background: #F2F2EE; color: #14161A; font: 800 14px system-ui, sans-serif; letter-spacing: 1px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+    #футболПульт { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 8; display: none; gap: 10px; align-items: center; }
+    #футболПульт.видно { display: flex; }
+    #футболПульт button { height: 56px; padding: 0 18px; border-radius: 28px; border: 1px solid rgba(242,242,238,.6); background: rgba(14,16,20,0.82); color: #F2F2EE; font: 800 13px system-ui, sans-serif; letter-spacing: 1px; touch-action: manipulation; }
+    #футболПульт .удар { min-width: 110px; height: 72px; border-radius: 36px; font-size: 16px; background: #F2F2EE; color: #14161A; }
+    #футболПульт .удар.близко { box-shadow: 0 0 0 3px #F4C430, 0 0 18px rgba(244,196,48,.7); }
+    #футболСчёт { position: fixed; left: 50%; top: calc(10px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 9; display: none;
+      padding: 6px 18px; border-radius: 16px; background: rgba(14,16,20,0.85); color: #F2F2EE; font: 800 18px system-ui, sans-serif; letter-spacing: 1px; white-space: nowrap; }
+    #футболСчёт small { font-size: 11px; font-weight: 600; color: #B8BCC2; margin: 0 6px; }
+    #футболГол { position: fixed; left: 50%; top: 30%; transform: translate(-50%, -50%) scale(.6); z-index: 12; opacity: 0; pointer-events: none; transition: all .25s;
+      color: #F4C430; font: 900 64px system-ui, sans-serif; letter-spacing: 4px; text-shadow: 0 4px 20px rgba(0,0,0,.7); }
+    #футболГол.видно { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+    body.кино #футболКн, body.кино #футболПульт, body.кино #футболСчёт { opacity: 0; pointer-events: none; }
+    body.футбол #сверху, body.футбол #эмоКн { display: none !important; }
+    body.левша #футболПульт { right: auto; left: calc(14px + env(safe-area-inset-left, 0px)); }
+  `;
+  document.head.appendChild(стиль);
+  const эл = (тег, id, html) => { const е = document.createElement(тег); if (id) е.id = id; if (html) е.innerHTML = html; document.body.appendChild(е); return е; };
+  const кн = эл('button', 'футболКн'); кн.textContent = '⚽ СЫГРАТЬ С МАРКОМ';
+  const пульт = эл('div', 'футболПульт', '<button class="выйти">✕</button><button class="удар">УДАР</button>');
+  const счётЭл = эл('div', 'футболСчёт'), голЭл = эл('div', 'футболГол');
+  const кнУдар = пульт.querySelector('.удар');
+  const совет = (т, с = 2.5) => window.__подсказки && window.__подсказки.совет(т, с);
+
+  // ---------- звуки: удар по мячу и свисток ----------
+  function звук(вид) {
+    const а = window.__аудио; if (!а || !а.ctx || а.ctx.state !== 'running') return;
+    const c = а.ctx, t = c.currentTime;
+    if (вид === 'удар') {
+      const о = c.createOscillator(), g = c.createGain(); о.frequency.setValueAtTime(160, t); о.frequency.exponentialRampToValueAtTime(60, t + 0.12);
+      g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14); о.connect(g); g.connect(а.мастер); о.start(t); о.stop(t + 0.16);
+    } else {
+      const о = c.createOscillator(), ам = c.createOscillator(), гам = c.createGain(), g = c.createGain();
+      о.frequency.value = 2900; ам.frequency.value = 38; гам.gain.value = 260; ам.connect(гам); гам.connect(о.frequency);
+      const дл = вид === 'конец' ? 1.4 : 0.55;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.09, t + 0.03); g.gain.setValueAtTime(0.09, t + дл - 0.08); g.gain.exponentialRampToValueAtTime(0.0001, t + дл);
+      о.connect(g); g.connect(а.мастер); о.start(t); ам.start(t); о.stop(t + дл); ам.stop(t + дл);
+    }
+  }
+
+  // ---------- состояние матча (координаты поля: a — вдоль, b — поперёк) ----------
+  let игра = null;
+  const С = () => window.__стадион, М = () => window.__марк;
+  const вПоле = (x, z) => { const с = С(); const dx = x - с.cx, dz = z - с.cz; const [ux, uz] = [(с.W(1, 0)[0] - с.cx), (с.W(1, 0)[1] - с.cz)];
+    return [dx * ux + dz * uz, dx * -uz + dz * ux]; };
+  const занят = () => document.body.classList.contains('кино') || document.body.classList.contains('кабина') || window.__заРулём || window.__поездка || window.__перемотка || window.__летитЯша || window.__полёт || window.__управлениеСтоп;
+
+  function начать() {
+    const с = С(), м = М(); if (!с || !м || игра || занят()) return;
+    const ГОЛ = с.A - 1.3;
+    игра = { ты: 0, счётМ: 0, ГОЛ, мяч: { a: 0, b: 0, y: R_МЯЧ, va: 0, vb: 0, vy: 0 }, марк: { a: -8, b: 0, угол: 0, отдых: 0 }, пауза: 1.2, отдыхТы: 0, конец: 0,
+      было: { x: м.группа.position.x, z: м.группа.position.z, угол: м.группа.rotation.y } };
+    window.__футболИдёт = true; document.body.classList.add('футбол');
+    const пр = м.группа.userData.преп; if (пр) { игра.преп = пр.п; пр.п = [[1e6, 1e6], [1e6 + 1, 1e6], [1e6, 1e6 + 1]]; }   // его «столб» на месте, где стоял, — на время матча убрать
+    расставить();
+    счётЭл.style.display = 'block'; пульт.classList.add('видно'); кн.style.display = 'none';
+    обновитьСчёт(); звук('свисток');
+    совет('⚽ До трёх голов. Беги на мяч — поведёшь. «УДАР» — пнуть, куда смотришь. Твои ворота — сзади, у калитки.', 5);
+  }
+  function расставить() {
+    const с = С(), П = window.__мир.поз, г = игра;
+    [П.x, П.z] = с.W(8, 0); П.угол = Math.atan2(с.W(-1, 0)[0] - с.W(0, 0)[0], с.W(-1, 0)[1] - с.W(0, 0)[1]);
+    const К = window.__мир.кам; К.рыск = П.угол + Math.PI;
+    Object.assign(г.мяч, { a: 0, b: 0, y: R_МЯЧ, va: 0, vb: 0, vy: 0 });
+    Object.assign(г.марк, { a: -8, b: 0, отдых: 0.8 });
+    г.пауза = 1.2;
+  }
+  function закончить(почему) {
+    if (!игра) return;
+    const м = М(), г = игра;
+    if (м) { м.группа.position.set(г.было.x, API.землиВысота(г.было.x, г.было.z), г.было.z); м.группа.rotation.y = г.было.угол; }
+    if (м && г.преп && м.группа.userData.преп) м.группа.userData.преп.п = г.преп;
+    игра = null; window.__футболИдёт = false; document.body.classList.remove('футбол');
+    счётЭл.style.display = 'none'; пульт.classList.remove('видно'); голЭл.classList.remove('видно');
+    if (почему) совет(почему, 4);
+  }
+  function обновитьСчёт() { счётЭл.innerHTML = 'ТЫ ' + игра.ты + '<small>:</small>' + игра.счётМ + ' МАРК'; }
+  function гол(чей) {
+    const г = игра; if (чей === 'ты') г.ты++; else г.счётМ++;
+    обновитьСчёт(); звук('свисток');
+    const фразыТы = ['— Ну это я поскользнулся.', '— Мяч кривой!', '— Случайно. Случайно же?', '— Ладно-ладно. Последний раз поддался.'];
+    const фразыМ = ['— Гооол! Я ж говорил — счастливый мяч.', '— Не стою на воротах, но забиваю.', '— Кто на воротах? А, никто.'];
+    голЭл.textContent = чей === 'ты' ? 'ГОЛ!' : 'ГОЛ МАРКА'; голЭл.classList.add('видно'); setTimeout(() => голЭл.classList.remove('видно'), 1600);
+    const ф = чей === 'ты' ? фразыТы : фразыМ; совет('МАРК: ' + ф[Math.floor(Math.random() * ф.length)], 3);
+    г.пауза = 99;                                          // до расстановки мяч «в сетке» — второй раз не считаем
+    if (г.ты >= ДО || г.счётМ >= ДО) {
+      звук('конец');
+      if (г.ты > г.счётМ) { window.__итоги && window.__итоги.дать('футбол'); г.потом = { через: 2.2, ф: () => закончить('🏆 Победа ' + г.ты + ':' + г.счётМ + '! МАРК: — Реванш. Завтра. После уроков.') }; }
+      else г.потом = { через: 2.2, ф: () => закончить('Марк выиграл ' + г.счётМ + ':' + г.ты + '. МАРК: — Приходи ещё, тренируйся.') };
+      return;
+    }
+    г.потом = { через: 1.6, ф: расставить };
+  }
+  function пнуть(кто, ka, kb, сила, вверх) {
+    const м = игра.мяч, d = Math.hypot(ka, kb) || 1;
+    м.va = ka / d * сила; м.vb = kb / d * сила; м.vy = вверх; звук('удар');
+  }
+  кн.addEventListener('click', начать);
+  пульт.querySelector('.выйти').addEventListener('click', () => закончить('Матч прерван. МАРК: — Сдался? Ну ладно.'));
+  кнУдар.addEventListener('pointerdown', e => {
+    e.preventDefault(); if (!игра || игра.пауза > 0) return;
+    const П = window.__мир.поз, [pa, pb] = вПоле(П.x, П.z), м = игра.мяч;
+    if (Math.hypot(м.a - pa, м.b - pb) > 1.4) { совет('Подбеги к мячу поближе', 1.2); return; }
+    const [fa, fb] = вПоле(П.x + Math.sin(П.угол), П.z + Math.cos(П.угол)), [oa, ob] = вПоле(П.x, П.z);
+    пнуть('ты', fa - oa, fb - ob, 15, 2.6);
+  });
+
+  // ---------- кадр ----------
+  const вр = new THREE.Vector3();
+  let прошлое = null;
+  API.каждыйКадр.push((dt, ms, П) => {
+    const с = С(), м = М(); if (!с || !м) return;
+    if (!игра) {
+      // кнопка рядом с Марком
+      м.группа.getWorldPosition(вр);
+      const рядом = Math.hypot(П.x - вр.x, П.z - вр.z) < 3.5 && !занят() && document.getElementById('старт').hidden;
+      кн.style.display = рядом ? 'block' : 'none';
+      прошлое = null; return;
+    }
+    if (!dt) return;
+    const г = игра, мяч = г.мяч, A = с.A - 0.35, Б = с.Б - 0.35;
+    if (занят()) { закончить(); return; }
+    // игрок не выходит за поле
+    let [pa, pb] = вПоле(П.x, П.z);
+    if (Math.abs(pa) > A - 0.2 || Math.abs(pb) > Б - 0.2) { pa = Math.max(-A + 0.2, Math.min(A - 0.2, pa)); pb = Math.max(-Б + 0.2, Math.min(Б - 0.2, pb)); [П.x, П.z] = с.W(pa, pb); }
+    const ск = прошлое ? Math.hypot(pa - прошлое[0], pb - прошлое[1]) / dt : 0, напрA = прошлое ? pa - прошлое[0] : 0, напрB = прошлое ? pb - прошлое[1] : 0; прошлое = [pa, pb];
+    if (г.потом && (г.потом.через -= dt) <= 0) { const ф = г.потом.ф; г.потом = null; ф(); if (!игра) return; }
+    if (г.пауза > 0) { г.пауза -= dt; }
+    else {
+      // ведение: набежал на мяч — толкает вперёд
+      const dп = Math.hypot(мяч.a - pa, мяч.b - pb);
+      if (dп < 0.55 && мяч.y < 0.4 && ск > 0.5) { const d = Math.hypot(напрA, напрB) || 1; мяч.va = напрA / d * (ск + 1.6); мяч.vb = напрB / d * (ск + 1.6); }
+      кнУдар.classList.toggle('близко', dп < 1.4);
+      // Марк
+      const мк = г.марк, свои = -г.ГОЛ;                                 // его ворота — на a = −ГОЛ
+      let ца, цб;
+      const мячУСвоих = мяч.a < мк.a + 1 || мяч.a < -г.ГОЛ * 0.45;
+      if (мячУСвоих && мяч.a < -2) { ца = Math.max(свои + 1.2, (мяч.a + свои) / 2); цб = мяч.b * 0.6; }   // встал между мячом и воротами
+      else { ца = мяч.a - 0.45; цб = мяч.b; }                                                           // за мячом, чуть с его стороны
+      const da = ца - мк.a, db = цб - мк.b, dd = Math.hypot(da, db), скМ = 4.6 + Math.min(1.2, Math.abs(г.ты - г.счётМ) * 0.4 * (г.ты > г.счётМ ? 1 : -1));
+      if (dd > 0.05) { const шаг = Math.min(dd, скМ * dt); мк.a += da / dd * шаг; мк.b += db / dd * шаг; мк.угол = Math.atan2(db, da); }
+      мк.a = Math.max(-A + 0.3, Math.min(A - 0.3, мк.a)); мк.b = Math.max(-Б + 0.3, Math.min(Б - 0.3, мк.b));
+      мк.отдых -= dt;
+      const dм = Math.hypot(мяч.a - мк.a, мяч.b - мк.b);
+      if (dм < 0.7 && мк.отдых <= 0 && мяч.y < 0.6) {
+        // бьёт к твоим воротам (a = +ГОЛ), целится в угол, промахивается иногда
+        const цельБ = (Math.random() < 0.5 ? -1 : 1) * ШИР_В * (0.3 + Math.random() * 0.9);
+        const далеко = г.ГОЛ - мяч.a > 14;
+        пнуть('марк', г.ГОЛ - мяч.a, цельБ - мяч.b, далеко ? 11 + Math.random() * 3 : 13 + Math.random() * 4, далеко ? 1.5 : 2.2 + Math.random() * 2);
+        мк.отдых = 0.9;
+      }
+    }
+    // мяч: трение, прыжки, отскок от бортов, гол
+    мяч.vy -= 9.8 * dt; мяч.y += мяч.vy * dt;
+    if (мяч.y < R_МЯЧ) { мяч.y = R_МЯЧ; мяч.vy = Math.abs(мяч.vy) > 1.2 ? -мяч.vy * 0.45 : 0; }
+    const трение = Math.exp(-(мяч.y > R_МЯЧ + 0.02 ? 0.25 : 1.1) * dt); мяч.va *= трение; мяч.vb *= трение;
+    мяч.a += мяч.va * dt; мяч.b += мяч.vb * dt;
+    if (Math.abs(мяч.b) > Б) { мяч.b = Math.sign(мяч.b) * Б; мяч.vb *= -0.6; }
+    if (г.пауза <= 0 && Math.abs(мяч.a) > г.ГОЛ && Math.abs(мяч.b) < ШИР_В && мяч.y < 2) { гол(мяч.a < 0 ? 'ты' : 'марк'); мяч.va = мяч.vb = 0; мяч.a = Math.sign(мяч.a) * (г.ГОЛ + 0.6); }
+    else if (Math.abs(мяч.a) > A) { мяч.a = Math.sign(мяч.a) * A; мяч.va *= -0.6; }
+    // в мир
+    const [mx, mz] = с.W(мяч.a, мяч.b); м.мяч.position.set(mx, с.Y + 0.12 + мяч.y, mz);
+    м.мяч.rotation.x += мяч.va * dt / R_МЯЧ; м.мяч.rotation.z -= мяч.vb * dt / R_МЯЧ;
+    const [kx, kz] = с.W(г.марк.a, г.марк.b); м.группа.position.set(kx, с.Y + 0.12, kz);
+    const [qx, qz] = с.W(г.марк.a + Math.cos(г.марк.угол), г.марк.b + Math.sin(г.марк.угол)); м.группа.rotation.y = Math.atan2(qx - kx, qz - kz);
+  });
+  window.__футбол = { начать, закончить, игра: () => игра };
 }]);
 
 // ⚙ → УПРАВЛЕНИЕ И ЗВУК: три ползунка громкости
@@ -21358,7 +21541,7 @@ window.ДЕТАЛИ.push(['сезоны', function (API) {
 // радар Шторма и руль Феникса не трогаем: там важны точные координаты пальца.
 window.ДЕТАЛИ.push(['размер интерфейса', function () {
   const ЧТО = ['#кнопки', '#шестерня', '#онлКн', '#компас', '#миникарта:not(.большая)', '#улица', '#цель', '#совет', '#меню',
-    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#дуракКн', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
+    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#дуракКн', '#футболКн', '#футболПульт', '#футболСчёт', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
     '#войнаПанель', '#войнаНаВойну', '#войнаКинуть', '#войнаДрон', '#войнаЖизни', '#войнаТревога',
     '#полигонВерх', '#полигонКн1', '#полигонКн2', '#полигонСесть', '#полигонЛёт', '#полигонСвин', '#полётВВ', '#полётВН',
     '#яшолёт', '#яшолётСесть', '#яшолётКуры', '#фениксСесть', '#выход-каб', '#кн-сюжет', '#кн-халупа', '#кн-шторм', '#озон-окно',
