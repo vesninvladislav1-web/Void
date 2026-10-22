@@ -15790,7 +15790,7 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
   function упёрся(x, z, fx, fz) {
     for (const a of [ДЛИНА / 2, 0, -ДЛИНА / 2]) for (const b2 of [-ШИР_М, ШИР_М]) {
       const px = x + fx * a + fz * b2, pz = z + fz * a - fx * b2;
-      if (API.вДоме(px, pz, 0.05) || API.вВоде(px, pz)) return true;
+      if (API.вДоме(px, pz, 0.05) || API.вВоде(px, pz) || (window.__машины && window.__машины.занято(px, pz))) return true;
     }
     return false;
   }
@@ -15870,6 +15870,195 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
     };
     setTimeout(() => document.head.appendChild(с), 3000);
   });
+}]);
+
+// ===================== МАШИНЫ НА ДОРОГАХ =====================
+// По улицам катаются местные: «Нива», «буханка», «семёрка», «Газель». Едут по правой полосе, на развилках
+// сворачивают куда придётся, в тупике разворачиваются. Перед игроком, мопедом, ВАЗом и друг другом
+// тормозят, постоят — сигналят. Каждая машина — один меш (детали слиты, цвет в вершинах) плюс фары,
+// которые вечером горят. Дальше 260 м не рисуются.
+window.ДЕТАЛИ.push(['машины на дорогах', function (API) {
+  const { THREE, сцена } = API, В = API.землиВысота, сл = Math.random;
+  const цв = h => API.цвет ? API.цвет(h) : new THREE.Color(h);
+
+  // ---- граф дорог: узлы — точки ломаных (на перекрёстках общие), рёбра — отрезки ----
+  const СКОРОСТЬ = { tertiary: 15, unclassified: 12.5, residential: 9.5, service: 7 };
+  const узлы = new Map(), ключ = (x, z) => Math.round(x * 2) + ',' + Math.round(z * 2);
+  const узел = (x, z) => { const k = ключ(x, z); let у = узлы.get(k); if (!у) узлы.set(k, у = { x, z, к: [] }); return у; };
+  for (const д of API.дороги || []) {
+    if (!СКОРОСТЬ[д.т] || !д.п || д.п.length < 2) continue;
+    for (let i = 1; i < д.п.length; i++) {
+      const а = узел(...д.п[i - 1]), б = узел(...д.п[i]); if (а === б) continue;
+      а.к.push({ у: б, т: д.т }); б.к.push({ у: а, т: д.т });
+    }
+  }
+  const рёбра = []; for (const у of узлы.values()) for (const р of у.к) рёбра.push([у, р.у, р.т]);
+  if (рёбра.length < 4) return;
+  const полоса = т => Math.max(1.1, (API.ШИРИНА[т] || 4) / 4);
+
+  // ---- модели: детали сливаем в одну геометрию с цветом в вершинах ----
+  const кузовМ = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.15 });
+  const фарыМ = new THREE.MeshStandardMaterial({ color: цв('#FFF4D0'), emissive: цв('#FFE7A0'), emissiveIntensity: 0.1, roughness: 0.3 });
+  const м4 = new THREE.Matrix4(), кв = new THREE.Quaternion(), е = new THREE.Euler(), в1 = new THREE.Vector3(), в2 = new THREE.Vector3();
+  function слить(детали) {
+    const поз = [], нор = [], цвета = [];
+    for (const [г0, цвет, x, y, z, rx = 0, ry = 0, rz = 0] of детали) {
+      const г = г0.index ? г0.toNonIndexed() : г0.clone();
+      м4.compose(в1.set(x, y, z), кв.setFromEuler(е.set(rx, ry, rz)), в2.set(1, 1, 1)); г.applyMatrix4(м4);
+      const c = цв(цвет), p = г.attributes.position, n = г.attributes.normal;
+      for (let i = 0; i < p.count; i++) { поз.push(p.getX(i), p.getY(i), p.getZ(i)); нор.push(n.getX(i), n.getY(i), n.getZ(i)); цвета.push(c.r, c.g, c.b); }
+      г.dispose();
+    }
+    const г = new THREE.BufferGeometry();
+    г.setAttribute('position', new THREE.Float32BufferAttribute(поз, 3)); г.setAttribute('normal', new THREE.Float32BufferAttribute(нор, 3)); г.setAttribute('color', new THREE.Float32BufferAttribute(цвета, 3));
+    г.computeBoundingSphere(); return г;
+  }
+  const Я = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+  const колесо = new THREE.CylinderGeometry(0.33, 0.33, 0.24, 14).rotateZ(Math.PI / 2);
+  const колёса = (ш, база, перед = 0) => [[1, 1], [-1, 1], [1, -1], [-1, -1]].map(([s, f]) => [колесо, '#1B1B1B', s * ш, 0.33, f > 0 ? база / 2 + перед : -база / 2 + перед]);
+  const СТЕКЛО = '#26323A', ЧЁРН = '#1E1E1E', ХРОМ = '#B8BCC0';
+  // все: вперёд +z, низ колёс на 0
+  const ВИДЫ = {
+    нива: { д: 3.74, ш: 0.84, цвета: ['#C9B48A', '#3E5A3A', '#E8E6DE', '#7A1F1F'], сделать: к => [
+      [Я(1.68, 0.72, 3.7), к, 0, 0.78, 0], [Я(1.6, 0.62, 2.1), к, 0, 1.45, -0.45],
+      [Я(1.5, 0.5, 0.06), СТЕКЛО, 0, 1.45, 0.62, -0.35], [Я(1.62, 0.44, 1.8), СТЕКЛО, 0, 1.47, -0.5], [Я(1.5, 0.45, 0.04), СТЕКЛО, 0, 1.47, -1.51],
+      [Я(1.7, 0.2, 0.1), ХРОМ, 0, 0.5, 1.86], [Я(1.7, 0.2, 0.1), ХРОМ, 0, 0.5, -1.86], [Я(1.2, 0.25, 0.04), ЧЁРН, 0, 0.88, 1.86],
+      [new THREE.CylinderGeometry(0.33, 0.33, 0.24, 12).rotateX(Math.PI / 2), ЧЁРН, 0, 1.2, -1.93], ...колёса(0.72, 2.2)] },
+    буханка: { д: 4.36, ш: 0.97, цвета: ['#6B7046', '#D8D8D0', '#2F5A78'], сделать: к => [
+      [Я(1.94, 1.55, 4.3), к, 0, 1.3, 0], [Я(1.86, 0.2, 4.2), к, 0, 2.12, 0],
+      [Я(1.7, 0.6, 0.06), СТЕКЛО, 0, 1.7, 2.16], [Я(1.96, 0.5, 2.9), СТЕКЛО, 0, 1.72, -0.35], [Я(1.96, 0.5, 0.5), СТЕКЛО, 0, 1.72, 1.6],
+      [Я(1.9, 0.18, 0.12), '#2A2A2A', 0, 0.55, 2.16], [Я(1.9, 0.18, 0.12), '#2A2A2A', 0, 0.55, -2.16], [Я(1.0, 0.3, 0.04), к === '#D8D8D0' ? '#2F5A78' : '#3A3A30', 0, 1.0, 2.17],
+      ...колёса(0.78, 2.3, 0.15)] },
+    семёрка: { д: 4.12, ш: 0.83, цвета: ['#B33030', '#E9E4D8', '#2C4E7A', '#3F6B4A', '#C9C9C9'], сделать: к => [
+      [Я(1.62, 0.62, 4.1), к, 0, 0.7, 0], [Я(1.48, 0.52, 2.0), к, 0, 1.27, -0.3],
+      [Я(1.36, 0.46, 0.06), СТЕКЛО, 0, 1.25, 0.75, -0.5], [Я(1.5, 0.4, 1.7), СТЕКЛО, 0, 1.28, -0.3], [Я(1.36, 0.42, 0.06), СТЕКЛО, 0, 1.24, -1.35, 0.5],
+      [Я(1.66, 0.16, 0.1), ХРОМ, 0, 0.46, 2.08], [Я(1.66, 0.16, 0.1), ХРОМ, 0, 0.46, -2.08], [Я(1.3, 0.22, 0.04), ЧЁРН, 0, 0.78, 2.06],
+      [Я(0.4, 0.14, 0.04), '#8A1010', 0.6, 0.82, -2.06], [Я(0.4, 0.14, 0.04), '#8A1010', -0.6, 0.82, -2.06], ...колёса(0.7, 2.42)] },
+    газель: { д: 5.5, ш: 1.0, цвета: ['#EDEDEA', '#EDEDEA', '#D8C53A'], сделать: к => [
+      [Я(2.0, 1.45, 1.9), к, 0, 1.15, 1.75], [Я(2.06, 2.0, 3.5), к === '#D8C53A' ? '#EDEDEA' : '#C9CDD2', 0, 1.65, -0.95],
+      [Я(1.8, 0.65, 0.06), СТЕКЛО, 0, 1.55, 2.71, -0.25], [Я(2.02, 0.5, 1.0), СТЕКЛО, 0, 1.55, 1.9],
+      [Я(2.0, 0.22, 0.12), '#2A2A2A', 0, 0.5, 2.72], [Я(1.3, 0.3, 0.04), ЧЁРН, 0, 0.85, 2.72], ...колёса(0.82, 3.1, -0.2)] },
+  };
+  const кэш = {};
+  function модель(вид, цвет) {
+    const В2 = ВИДЫ[вид], к = вид + цвет;
+    if (!кэш[к]) кэш[к] = слить(В2.сделать(цвет));
+    const гр = new THREE.Group();
+    const тело = new THREE.Mesh(кэш[к], кузовМ); тело.castShadow = true; гр.add(тело);
+    if (!кэш['ф' + вид]) { const z = В2.д / 2 + 0.01, x = В2.ш - 0.22, y = вид === 'буханка' ? 1.05 : вид === 'газель' ? 1.0 : 0.8; кэш['ф' + вид] = слить([[Я(0.26, 0.16, 0.04), '#FFFFFF', x, y, z], [Я(0.26, 0.16, 0.04), '#FFFFFF', -x, y, z]]); }
+    гр.add(new THREE.Mesh(кэш['ф' + вид], фарыМ));
+    гр.visible = false; сцена.add(гр);
+    return гр;
+  }
+
+  // ---- машины ----
+  const СКОЛЬКО = 7, машины = [];
+  const виды = ['нива', 'семёрка', 'буханка', 'семёрка', 'газель', 'нива', 'семёрка'];
+  function поставить(м, р) {
+    const [а, б, т] = р; м.а = а; м.б = б; м.т = т; м.s = сл() * Math.hypot(б.x - а.x, б.z - а.z);
+  }
+  for (let i = 0; i < СКОЛЬКО; i++) {
+    const вид = виды[i % виды.length], цвета = ВИДЫ[вид].цвета;
+    const м = { вид, д: ВИДЫ[вид].д, гр: модель(вид, цвета[Math.floor(сл() * цвета.length)]), v: 0, а: null, б: null, т: 'residential', s: 0, x: 0, z: 0, курс: 0, кx: null, кz: 0, ккурс: 0, стоит: 0, гудокТ: 0 };
+    поставить(м, рёбра[Math.floor(сл() * рёбра.length)]); машины.push(м);
+  }
+  // следующий отрезок: на развилке — любой, кроме обратного; в тупике — разворот
+  function дальше(м) {
+    const в = м.б.к.filter(р => р.у !== м.а);
+    const р = в.length ? в[Math.floor(сл() * в.length)] : м.б.к.find(р => р.у === м.а);
+    м.а = м.б; м.б = р.у; м.т = р.т; м.s = 0;
+  }
+  // где машина: на отрезке + сдвиг на правую полосу
+  function место(м) {
+    const dx = м.б.x - м.а.x, dz = м.б.z - м.а.z, L = Math.hypot(dx, dz) || 1, ux = dx / L, uz = dz / L, п = полоса(м.т);
+    м.x = м.а.x + ux * м.s - uz * п; м.z = м.а.z + uz * м.s + ux * п; м.курс = Math.atan2(ux, uz);
+    return L;
+  }
+  // кто впереди: расстояние вдоль машины до ближайшей помехи на её полосе
+  function помехи(поз) {
+    const п = [[поз.x, поз.z]];
+    const В2 = window.__ваз && window.__ваз.машина; if (В2) п.push([В2.x, В2.z]);
+    const М = window.__мопед && window.__мопед.ст; if (М && М.стоит) п.push([М.х, М.z]);
+    for (const м of машины) п.push([м.x, м.z, м]);
+    return п;
+  }
+  function впереди(м, п) {
+    const fx = Math.sin(м.курс), fz = Math.cos(м.курс); let мин = Infinity;
+    for (const [x, z, кто] of п) {
+      if (кто === м || (кто && Math.cos(кто.курс - м.курс) < 0.3)) continue;      // встречные — на своей полосе, не ждём
+      const dx = x - м.x, dz = z - м.z, f = dx * fx + dz * fz, l = Math.abs(dx * fz - dz * fx);
+      if (f > 0 && f < 14 && l < (кто ? 2.2 : 1.7)) мин = Math.min(мин, f - (кто ? (м.д + кто.д) / 2 : м.д / 2));
+    }
+    return мин;
+  }
+  // ---- звук: гул ближайшей машины и сигнал ----
+  const ядро = () => window.__бахЯдро;
+  let гул = null;
+  function гулВкл() {
+    const Я2 = ядро(), к = Я2 && Я2.звук && Я2.звук(); if (!к || гул) return;
+    const о = к.createOscillator(), ф = к.createBiquadFilter(), g = к.createGain();
+    о.type = 'sawtooth'; о.frequency.value = 40; ф.type = 'lowpass'; ф.frequency.value = 260; g.gain.value = 0.0001;
+    о.connect(ф); ф.connect(g); g.connect(Я2.выход()); о.start(); гул = { к, о, g };
+  }
+  function сигнал(м, d) {
+    const Я2 = ядро(), к = Я2 && Я2.звук && Я2.звук(); if (!к) return;
+    const t = к.currentTime, гр = Math.max(0.01, 0.07 * (1 - d / 60)), f0 = м.вид === 'газель' ? 330 : м.вид === 'буханка' ? 290 : 400;
+    for (const [нач, дл] of [[0, 0.22], [0.3, 0.35]]) for (const f of [f0, f0 * 1.26]) {
+      const о = к.createOscillator(), g = к.createGain(); о.type = 'square'; о.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + нач); g.gain.exponentialRampToValueAtTime(гр, t + нач + 0.02); g.gain.setValueAtTime(гр, t + нач + дл - 0.05); g.gain.exponentialRampToValueAtTime(0.0001, t + нач + дл);
+      о.connect(g); g.connect(Я2.выход()); о.start(t + нач); о.stop(t + нач + дл + 0.05);
+    }
+    window.__курыПосёлка && window.__курыПосёлка.пугнуть(м.x, м.z, 10);
+  }
+
+  // ---- кадр ----
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt || !поз || window.__перемотка) return;
+    dt = Math.min(dt, 0.1);
+    const п = помехи(поз), вечер = window.__свет && window.__свет.какой && window.__свет.какой() === 'вечер';
+    фарыМ.emissiveIntensity = вечер ? 2.4 : 0.1;
+    let ближ = Infinity, ближV = 0;
+    for (const м of машины) {
+      let L = место(м);
+      // скорость: по типу дороги, у развилки и разворота — тише, перед помехой — стоп
+      let цель = СКОРОСТЬ[м.т] || 9;
+      const доКонца = L - м.s; if (доКонца < 14 && м.б.к.length !== 2) цель = Math.min(цель, 4 + доКонца * 0.4);
+      const впер = впереди(м, п);
+      if (впер < 9) цель = Math.min(цель, Math.max(0, (впер - 1.2) * 1.4));
+      м.v += (цель - м.v) * Math.min(1, dt * (цель < м.v ? 3 : 0.8));
+      if (м.v < 0.05) м.v = 0;
+      м.s += м.v * dt;
+      while (м.s > L) { const лишнее = м.s - L; дальше(м); м.s = лишнее; L = место(м); }
+      место(м);
+      // встала из-за игрока — посигналит
+      м.стоит = м.v < 0.3 && впер < 9 ? м.стоит + dt : 0; м.гудокТ -= dt;
+      const d = Math.hypot(м.x - поз.x, м.z - поз.z);
+      if (м.стоит > 1.4 && м.гудокТ <= 0 && d < 40) { м.гудокТ = 3.5 + сл() * 2; сигнал(м, d); }
+      // на экране — плавно (на поворотах не дёргается)
+      if (м.кx === null || Math.hypot(м.кx - м.x, м.кz - м.z) > 8) { м.кx = м.x; м.кz = м.z; м.ккурс = м.курс; }
+      const k = Math.min(1, dt * 6); м.кx += (м.x - м.кx) * k; м.кz += (м.z - м.кz) * k;
+      м.ккурс += Math.atan2(Math.sin(м.курс - м.ккурс), Math.cos(м.курс - м.ккурс)) * Math.min(1, dt * 4);
+      const видна = d < 260; м.гр.visible = видна;
+      if (видна) {
+        const fx = Math.sin(м.ккурс), fz = Math.cos(м.ккурс), h = м.д * 0.35, yП = В(м.кx + fx * h, м.кz + fz * h), yЗ = В(м.кx - fx * h, м.кz - fz * h);
+        м.гр.position.set(м.кx, (yП + yЗ) / 2, м.кz); м.гр.rotation.set(0, 0, 0); м.гр.rotateY(м.ккурс); м.гр.rotateX(-Math.atan2(yП - yЗ, h * 2));
+      }
+      if (d < ближ) { ближ = d; ближV = м.v; }
+    }
+    // гул ближайшей
+    if (ближ < 35) гулВкл();
+    if (гул) { const t = гул.к.currentTime, к = Math.max(0, 1 - ближ / 35); гул.g.gain.setTargetAtTime(0.0001 + к * к * 0.05, t, 0.15); гул.о.frequency.setTargetAtTime(32 + ближV * 3.2, t, 0.2); }
+  });
+
+  // для ВАЗа, мопеда и кур: занято ли место машиной
+  function занято(x, z, запас = 0) {
+    for (const м of машины) {
+      const dx = x - м.x, dz = z - м.z, fx = Math.sin(м.курс), fz = Math.cos(м.курс);
+      if (Math.abs(dx * fx + dz * fz) < м.д / 2 + запас && Math.abs(dx * fz - dz * fx) < ВИДЫ[м.вид].ш + запас) return м;
+    }
+    return null;
+  }
+  window.__машины = { машины, занято, узлы, рёбра };
 }]);
 
 // ===================== ШКОЛЬНЫЙ ТУАЛЕТ (3D-скан) =====================
@@ -18031,6 +18220,7 @@ window.ДЕТАЛИ.push(['куры по посёлку', function (API) {
     const В2 = window.__ваз && window.__ваз.машина; if (В2) п.push([В2.x, В2.z, window.__вазЕдет ? 6 : 3]);
     const М = window.__мопед && window.__мопед.ст; if (М && М.стоит) п.push([М.х, М.z, М.едет ? 4.5 : 0]);
     const я = window.__яша && window.__яша.я; if (я) п.push([я.x, я.z, 1.6]);
+    const Мш = window.__машины; if (Мш) for (const м of Мш.машины) if (м.v > 1) п.push([м.x, м.z, 4]);
     return п;
   }
   let звукТ = 3;
@@ -21916,7 +22106,7 @@ window.ДЕТАЛИ.push(['мопед', function (API) {
     разместить(0);
   }
   function упёрся(x, z, fx, fz) {
-    for (const a of [0.95, -0.9]) for (const b of [-0.25, 0.25]) { const px = x + fx * a + fz * b, pz = z + fz * a - fx * b; if (API.вДоме(px, pz, 0.1) || API.вВоде(px, pz)) return true; }
+    for (const a of [0.95, -0.9]) for (const b of [-0.25, 0.25]) { const px = x + fx * a + fz * b, pz = z + fz * a - fx * b; if (API.вДоме(px, pz, 0.1) || API.вВоде(px, pz) || (window.__машины && window.__машины.занято(px, pz))) return true; }
     return false;
   }
 
