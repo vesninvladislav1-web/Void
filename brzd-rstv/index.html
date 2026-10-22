@@ -14361,6 +14361,7 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     ['яша', 'Мяу', 'Сыграть за Яшу.'],
     ['водила', 'Права не нужны', 'Проехать на Фениксе 150 метров.'],
     ['мопед', 'Альфач', 'Проехать на мопеде «Альфа» километр.'],
+    ['ваз', 'Пацанская четырка', 'Накатать на ВАЗ-2114 два километра.'],
     ['рыбак', 'Рыбак', 'Поймать на пруду 10 рыб.'],
     ['дурак', 'Сам не дурак', 'Обыграть бабушку в дурака.'],
     ['футбол', 'Месси из Бороздиновки', 'Обыграть Марка в футбол до трёх голов.'],
@@ -15678,6 +15679,152 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
     }
     return null;
   }
+  // ---- езда: подходишь — «СЕСТЬ В ВАЗ», джойстик — газ и руль, «БИП», «ВЫЙТИ» ----
+  const В = API.землиВысота, ШИР_М = 0.85, БАЗА = 2.46;      // полуширина кузова; колёсная база 2114
+  let машина = null;
+  const ез = { едет: false, v: 0, руль: 0, было: null, звук: null, пробег: 0, знает: false, приглашён: false };
+  // твёрдая, пока стоит: сквозь машину не пройти. Препятствие в сетке не сдвинуть — старое глушим, ставим новое
+  function поставить() {
+    const { x, z, курс } = машина, fx = Math.sin(курс), fz = Math.cos(курс), дл = ДЛИНА / 2;
+    машина.преп = API.добавитьПрепятствие([[x + fx * дл + fz * ШИР_М, z + fz * дл - fx * ШИР_М], [x + fx * дл - fz * ШИР_М, z + fz * дл + fx * ШИР_М],
+      [x - fx * дл - fz * ШИР_М, z - fz * дл + fx * ШИР_М], [x - fx * дл + fz * ШИР_М, z - fz * дл - fx * ШИР_М]], 'машина');
+  }
+  function разместить() {
+    const { x, z, курс, обёртка } = машина, fx = Math.sin(курс), fz = Math.cos(курс);
+    const yП = В(x + fx * БАЗА / 2, z + fz * БАЗА / 2), yЗ = В(x - fx * БАЗА / 2, z - fz * БАЗА / 2);
+    обёртка.position.set(x, (yП + yЗ) / 2, z); обёртка.rotation.set(0, 0, 0);
+    обёртка.rotateY(курс); обёртка.rotateX(-Math.atan2(yП - yЗ, БАЗА));
+  }
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #вазСесть { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
+                height: 48px; padding: 0 22px; border: 0; border-radius: 14px; background: #F2E6C8; color: #1A1A1A; font: 800 14px system-ui, sans-serif; letter-spacing: 1px; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+    #вазПульт { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 8; display: none; gap: 10px; align-items: center; }
+    #вазПульт.видно { display: flex; }
+    #вазПульт button { height: 52px; min-width: 52px; padding: 0 14px; border-radius: 26px; border: 1px solid #F4C430; background: rgba(30,22,6,0.82); color: #F4E0A0; font: 800 13px system-ui, sans-serif; letter-spacing: 1px; touch-action: manipulation; }
+    #вазСкорость { position: fixed; left: 50%; top: calc(48px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 8; display: none; padding: 2px 12px; border-radius: 10px;
+                   background: rgba(18,12,8,0.7); color: #F4E0A0; font: 700 15px ui-monospace, monospace; pointer-events: none; }
+    body.ваз #вазСкорость { display: block; } body.ваз #сверху { display: none !important; }
+    body.кино #вазСесть, body.кино #вазПульт, body.кино #вазСкорость { opacity: 0; pointer-events: none; }
+  `;
+  document.head.appendChild(стиль);
+  const кнСесть = document.createElement('button'); кнСесть.id = 'вазСесть'; кнСесть.textContent = '🚗 СЕСТЬ В ВАЗ';
+  const пульт = document.createElement('div'); пульт.id = 'вазПульт';
+  const кнБип = document.createElement('button'); кнБип.textContent = 'БИП'; кнБип.setAttribute('aria-label', 'Сигнал');
+  const кнВыйти = document.createElement('button'); кнВыйти.textContent = 'ВЫЙТИ';
+  пульт.append(кнБип, кнВыйти);
+  const спидометр = document.createElement('div'); спидометр.id = 'вазСкорость';
+  document.body.append(кнСесть, пульт, спидометр);
+  кнСесть.addEventListener('click', () => сесть());
+  кнВыйти.addEventListener('click', () => выйти());
+  кнБип.addEventListener('pointerdown', e => { e.preventDefault(); бип(); });
+
+  // звук: четырёхцилиндровый гул (две пилы через фильтр) и двухтональный сигнал
+  const ядро = () => window.__бахЯдро;
+  function моторВкл() {
+    const Я = ядро(), к = Я && Я.звук && Я.звук(); if (!к || ез.звук) return;
+    const о = к.createOscillator(), о2 = к.createOscillator(), ф = к.createBiquadFilter(), g = к.createGain();
+    о.type = 'sawtooth'; о.frequency.value = 28; о2.type = 'sawtooth'; о2.frequency.value = 56.5; ф.type = 'lowpass'; ф.frequency.value = 380; g.gain.value = 0.0001;
+    о.connect(ф); о2.connect(ф); ф.connect(g); g.connect(Я.выход()); о.start(); о2.start();
+    g.gain.setTargetAtTime(0.05, к.currentTime, 0.2);
+    ез.звук = { к, о, о2, ф, g };
+  }
+  function моторВыкл() { const з = ез.звук; if (!з) return; try { з.g.gain.setTargetAtTime(0.0001, з.к.currentTime, 0.12); з.о.stop(з.к.currentTime + 0.5); з.о2.stop(з.к.currentTime + 0.5); } catch (e) {} ез.звук = null; }
+  function бип() {
+    const Я = ядро(), к = Я && Я.звук && Я.звук(); if (!к) return;
+    const t = к.currentTime;
+    for (const f of [370, 466]) {
+      const о = к.createOscillator(), g = к.createGain(); о.type = 'square'; о.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.07, t + 0.02); g.gain.setValueAtTime(0.07, t + 0.38); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+      о.connect(g); g.connect(Я.выход()); о.start(t); о.stop(t + 0.5);
+    }
+    window.__люди && window.__люди.паника && Math.random() < 0.3 && window.__люди.паника();
+  }
+
+  const занят = () => window.__заРулём || window.__поездка || window.__летитЯша || window.__перемотка || window.__футболИдёт || document.body.classList.contains('кино') || document.body.classList.contains('кабина') || window.__управлениеСтоп;
+  function сесть() {
+    const Мир = window.__мир; if (!машина || ез.едет || занят() || !Мир) return;
+    Object.assign(ез, { едет: true, v: 0, руль: 0 });
+    ез.было = { высота: Мир.кам.высота, даль: Мир.кам.даль, скрыт: window.__игрокСкрыт };
+    if (машина.преп) машина.преп.п = [[1e6, 1e6], [1e6 + 1, 1e6], [1e6, 1e6 + 1]];      // своё же препятствие — не мешает ехать
+    window.__заРулём = true; window.__игрокСкрыт = true; window.__вазЕдет = true;
+    Мир.кам.высота = 2.4; Мир.кам.даль = 8.5;
+    document.body.classList.add('ваз'); кнСесть.style.display = 'none'; пульт.classList.add('видно');
+    моторВкл();
+    if (!ез.знает) { ез.знает = true; window.__подсказки && window.__подсказки.совет('🚗 Завелась! Джойстик — газ и руль, назад — задний ход. БИП — сигнал.', 4); }
+  }
+  function выйти() {
+    if (!ез.едет) return;
+    const Мир = window.__мир, б = ез.было;
+    ез.едет = false; ез.v = 0; window.__заРулём = false; window.__игрокСкрыт = б.скрыт; window.__вазЕдет = false;
+    Мир.кам.высота = б.высота; Мир.кам.даль = б.даль;
+    document.body.classList.remove('ваз'); пульт.classList.remove('видно'); моторВыкл();
+    // вылезаем у двери водителя (слева), если там стена — справа, сзади, спереди
+    const fx = Math.sin(машина.курс), fz = Math.cos(машина.курс);
+    for (const [a, b2] of [[0.3, 1.5], [0.3, -1.5], [-3, 0], [3, 0]]) {
+      const x = машина.x + fx * a + fz * b2, z = машина.z + fz * a - fx * b2;
+      if (!API.вДоме(x, z, 0.3) && !API.вВоде(x, z)) { Мир.поз.x = x; Мир.поз.z = z; break; }
+    }
+    поставить();
+  }
+  // углы кузова: дома, заборы и пруд не пускают
+  function упёрся(x, z, fx, fz) {
+    for (const a of [ДЛИНА / 2, 0, -ДЛИНА / 2]) for (const b2 of [-ШИР_М, ШИР_М]) {
+      const px = x + fx * a + fz * b2, pz = z + fz * a - fx * b2;
+      if (API.вДоме(px, pz, 0.05) || API.вВоде(px, pz)) return true;
+    }
+    return false;
+  }
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt || !машина) return;
+    const Мир = window.__мир;
+    if (ез.едет) {
+      if (window.__поездка || window.__летитЯша || document.body.classList.contains('кабина')) { выйти(); return; }
+      const д = Мир.джойстик, кл = Мир.клавиши || new Set();
+      let газ = -д.dy, руль = д.dx;
+      if (кл.has('KeyW') || кл.has('ArrowUp')) газ = 1; if (кл.has('KeyS') || кл.has('ArrowDown')) газ = -1;
+      if (кл.has('KeyA') || кл.has('ArrowLeft')) руль = -1; if (кл.has('KeyD') || кл.has('ArrowRight')) руль = 1;
+      if (Math.abs(газ) < 0.12) газ = 0; if (Math.abs(руль) < 0.12) руль = 0;
+      if (document.body.classList.contains('кино')) { газ = 0; руль = 0; }
+      // едет вперёд, а тянешь назад — сначала тормоз, потом задний ход
+      const тормоз = газ * ез.v < 0;
+      const цель = газ >= 0 ? газ * 22 : газ * 5;
+      ез.v += (цель - ез.v) * Math.min(1, dt * (тормоз ? 2.5 : газ ? 0.45 : 0.6));
+      if (Math.abs(ез.v) < 0.05 && !газ) ез.v = 0;
+      ез.руль += (руль - ез.руль) * Math.min(1, dt * 6);
+      // руль как у машины: угол колёс до ~32°, на скорости — меньше; на месте не крутится
+      const угол = ез.руль * 0.56 / (1 + Math.abs(ез.v) / 14);
+      const курсБыл = машина.курс;
+      машина.курс -= ез.v * Math.tan(угол) / БАЗА * dt;
+      const fx = Math.sin(машина.курс), fz = Math.cos(машина.курс), nx = машина.x + fx * ез.v * dt, nz = машина.z + fz * ез.v * dt;
+      if (упёрся(nx, nz, fx, fz)) {
+        машина.курс = курсБыл;
+        if (Math.abs(ез.v) > 5) { const Я = ядро(); Я && Я.удар && Я.удар(0.15, 0.5, 0); Я && Я.тряхнуть && Я.тряхнуть(0.25); }
+        ез.v *= -0.15;
+      } else {
+        ез.пробег += Math.hypot(nx - машина.x, nz - машина.z);
+        машина.x = Math.max(-API.ШИР / 2 + 25, Math.min(API.ШИР / 2 - 25, nx)); машина.z = Math.max(-API.ГЛУБ / 2 + 25, Math.min(API.ГЛУБ / 2 - 25, nz));
+      }
+      разместить();
+      // игрок — на месте водителя (слева, чуть впереди центра)
+      поз.x = машина.x + fx * 0.2 + fz * 0.35; поз.z = машина.z + fz * 0.2 - fx * 0.35; поз.угол = машина.курс;
+      if (Math.abs(ез.v) > 1 && (!Мир.взгляд || Мир.взгляд.ид === null)) { let dк = машина.курс + (ез.v < 0 ? 0 : Math.PI) - Мир.кам.рыск; dк = Math.atan2(Math.sin(dк), Math.cos(dк)); Мир.кам.рыск += dк * Math.min(1, dt * 2); }
+      спидометр.textContent = Math.round(Math.abs(ез.v) * 3.6) + ' км/ч';
+      const з = ез.звук; if (з) {
+        // «передачи»: обороты растут и падают на каждой
+        const v = Math.abs(ез.v), пер = v < 5 ? v / 5 : v < 11 ? (v - 5) / 6 : (v - 11) / 11, об = 28 + пер * 38 + (газ > 0 ? 4 : 0);
+        з.о.frequency.setTargetAtTime(об, з.к.currentTime, 0.1); з.о2.frequency.setTargetAtTime(об * 2.02, з.к.currentTime, 0.1);
+        з.ф.frequency.setTargetAtTime(300 + пер * 500 + (газ > 0 ? 150 : 0), з.к.currentTime, 0.1); з.g.gain.setTargetAtTime(0.045 + пер * 0.035, з.к.currentTime, 0.1);
+      }
+      if (ез.пробег >= 2000 && !ез.ачивка) { ез.ачивка = true; window.__итоги && window.__итоги.дать('ваз'); }
+    } else {
+      const d = Math.hypot(поз.x - машина.x, поз.z - машина.z);
+      const мопедКн = document.getElementById('мопедСесть');     // мопед рядом — его кнопка на том же месте
+      const можно = d < 3.4 && document.getElementById('старт').hidden && !занят() && !(мопедКн && мопедКн.style.display === 'block');
+      кнСесть.style.display = можно ? 'block' : 'none';
+      if (можно && !ез.приглашён) { ез.приглашён = true; window.__подсказки && window.__подсказки.совет('🚗 Четырнадцатая. Ключи в замке — садись.', 3); }
+    }
+  });
   let начато = false;
   API.каждыйКадр.push(() => {
     if (начато || !document.getElementById('старт').hidden) return;
@@ -15697,11 +15844,8 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
         if (р.x > р.z) гр.rotation.y = Math.PI / 2;                       // длиной — вдоль улицы
         const обёртка = new THREE.Group(); обёртка.add(гр); обёртка.rotation.y = м.курс;
         обёртка.position.set(м.x, API.землиВысота(м.x, м.z), м.z); сцена.add(обёртка);
-        // твёрдая: сквозь машину не пройти
-        const fx = Math.sin(м.курс), fz = Math.cos(м.курс), ш = 0.85, дл = ДЛИНА / 2;
-        API.добавитьПрепятствие([[м.x + fx * дл + fz * ш, м.z + fz * дл - fx * ш], [м.x + fx * дл - fz * ш, м.z + fz * дл + fx * ш],
-          [м.x - fx * дл - fz * ш, м.z - fz * дл + fx * ш], [м.x - fx * дл + fz * ш, м.z - fz * дл - fx * ш]], 'машина');
-        window.__ваз = { обёртка, м };
+        машина = { обёртка, x: м.x, z: м.z, курс: м.курс, преп: null }; поставить();
+        window.__ваз = { обёртка, м, сесть, выйти, машина };
       }, e => console.warn('ваз 2114:', e && e.message));
     };
     setTimeout(() => document.head.appendChild(с), 3000);
@@ -21713,7 +21857,7 @@ window.ДЕТАЛИ.push(['сезоны', function (API) {
 // радар Шторма и руль Феникса не трогаем: там важны точные координаты пальца.
 window.ДЕТАЛИ.push(['размер интерфейса', function () {
   const ЧТО = ['#кнопки', '#шестерня', '#онлКн', '#компас', '#миникарта:not(.большая)', '#улица', '#цель', '#совет', '#меню',
-    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#дуракКн', '#футболКн', '#футболПульт', '#футболСчёт', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
+    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#вазСесть', '#вазПульт', '#вазСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#дуракКн', '#футболКн', '#футболПульт', '#футболСчёт', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
     '#войнаПанель', '#войнаНаВойну', '#войнаКинуть', '#войнаДрон', '#войнаЖизни', '#войнаТревога',
     '#полигонВерх', '#полигонКн1', '#полигонКн2', '#полигонСесть', '#полигонЛёт', '#полигонСвин', '#полётВВ', '#полётВН',
     '#яшолёт', '#яшолётСесть', '#яшолётКуры', '#фениксСесть', '#выход-каб', '#кн-сюжет', '#кн-халупа', '#кн-шторм', '#озон-окно',
