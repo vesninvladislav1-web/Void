@@ -5538,14 +5538,23 @@ window.ДЕТАЛИ.push(['небо и кино', function (API) {
       сцена.fog.color.lerp(tmp.set(0.3, 0.32, 0.35).multiplyScalar(1 - 0.4 * тёмн), дж * 0.85);
       сцена.fog.far += (Math.min(сцена.fog.far, 240) - сцена.fog.far) * дж; сцена.fog.near *= 1 - 0.5 * дж;
     }
+    // гроза — тучи тёмные, свет тусклый; метель (зима) — белая мгла, видно метров на сто
+    const грз = Math.min(1, window.__гроза || 0), мт = Math.min(1, window.__метель || 0);
+    if (грз > 0) сцена.fog.color.multiplyScalar(1 - 0.45 * грз);
+    if (мт > 0) {
+      сцена.fog.color.lerp(tmp.set(0.74, 0.77, 0.82).multiplyScalar(1 - 0.4 * тёмн), мт * 0.92);
+      сцена.fog.far += (Math.min(сцена.fog.far, 90) - сцена.fog.far) * мт; сцена.fog.near *= 1 - 0.9 * мт;
+    }
     // и небо — в цвет дыма (туман в линейном цвете, небо пишет цвет экрана)
     if (API.НЕБО_Ц) {
-      const Н = API.НЕБО_Ц; Н.uSmoke.value = Math.max(дм * 0.92, дж * 0.88);
-      if (дм > 0 || дж > 0) Н.uSmokeCol.value.set(Math.pow(сцена.fog.color.r, 1 / 2.2), Math.pow(сцена.fog.color.g, 1 / 2.2), Math.pow(сцена.fog.color.b, 1 / 2.2));
+      const Н = API.НЕБО_Ц; Н.uSmoke.value = Math.max(дм * 0.92, дж * 0.88, мт * 0.9);
+      if (дм > 0 || дж > 0 || мт > 0) Н.uSmokeCol.value.set(Math.pow(сцена.fog.color.r, 1 / 2.2), Math.pow(сцена.fog.color.g, 1 / 2.2), Math.pow(сцена.fog.color.b, 1 / 2.2));
     }
-    солнце.intensity = база.солнце * (1 - 0.2 * a - 0.1 * тёмн) * (1 - 0.6 * дж); солнце.color.copy(база.цвСолнца).lerp(АПОК.солнце, a);
+    солнце.intensity = база.солнце * (1 - 0.2 * a - 0.1 * тёмн) * (1 - 0.6 * дж) * (1 - 0.5 * грз) * (1 - 0.6 * мт); солнце.color.copy(база.цвСолнца).lerp(АПОК.солнце, a);
     небоСвет.intensity = база.небо * (1 + 0.9 * a) * (1 + 0.25 * дж) + fl * 1.6;   // в дождь свет рассеянный: тени бледнее, низ светлее   // зарево подсвечивает улицы — видно, где ты
     небоСвет.color.copy(база.цвНеба).lerp(АПОК.небо, a).lerp(tmp.set(1, 0.6, 0.25), Math.min(1, fl * 0.6));
+    const мл = window.__молнияУр || 0;                                      // молния: на миг всё белое
+    if (мл > 0) { небоСвет.intensity += мл * 2.4; небоСвет.color.lerp(tmp.set(0.82, 0.88, 1), Math.min(1, мл)); }
     небоСвет.groundColor.copy(база.цвЗемли).lerp(АПОК.земля, a);
     // фонари: вечером горят всегда, днём — только когда небо темнеет (апокалипсис)
     if (API.НЕБО_Ц) API.НЕБО_Ц.uLamps.value = Math.max(база.лампы, Math.min(1, a * 1.5));
@@ -15286,16 +15295,56 @@ window.ДЕТАЛИ.push(['погода', function (API) {
     }
     шумГ.gain.setTargetAtTime(0.09 * сила, c.currentTime, 1.5);
   }
-  function гром(сила) {
-    const а = window.__аудио; if (!а || !а.ctx || а.ctx.state !== 'running') return;
-    const c = а.ctx, t0 = c.currentTime + 0.3 + Math.random() * 2, дл = 3 + Math.random() * 3;
+  function гром(сила, задержка) {
+    const а = window.__аудио; if (!а || !а.ctx || а.ctx.state !== 'running') { if (задержка === undefined) window.__вспышка && window.__вспышка(0.25 * сила); return; }
+    const c = а.ctx, t0 = c.currentTime + (задержка === undefined ? 0.3 + Math.random() * 2 : задержка), дл = 3 + Math.random() * 3;
     const b = c.createBuffer(1, c.sampleRate * дл, c.sampleRate), d = b.getChannelData(0);
     let v = 0; for (let i = 0; i < d.length; i++) { v += (Math.random() * 2 - 1) * 0.08; v *= 0.995; d[i] = v; }
     const и = c.createBufferSource(), ф = c.createBiquadFilter(), g = c.createGain(); и.buffer = b; ф.type = 'lowpass'; ф.frequency.value = 160;
     g.gain.setValueAtTime(0.0001, t0); g.gain.exponentialRampToValueAtTime(1.4 * сила, t0 + 0.12); g.gain.exponentialRampToValueAtTime(0.0001, t0 + дл);
     и.connect(ф); ф.connect(g); g.connect(а.мастер); и.start(t0); и.stop(t0 + дл);
-    window.__вспышка && window.__вспышка(0.25 * сила);
+    if (задержка === undefined) window.__вспышка && window.__вспышка(0.25 * сила);       // гром без молнии — зарево за облаками
   }
+  // ---------- молния: зигзаг от тучи до земли с ветками, лентой к камере; два-три раза мигает, белая вспышка,
+  // гром — с задержкой по расстоянию (звук идёт 343 м/с) ----------
+  const молМ = new THREE.MeshBasicMaterial({ color: 0xEEF3FF, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false, side: THREE.DoubleSide });
+  const молОреолМ = new THREE.MeshBasicMaterial({ color: 0x8FA8FF, transparent: true, opacity: 0.2, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, toneMapped: false, side: THREE.DoubleSide });
+  const молнии = [];
+  let молнияУр = 0;
+  function ленты(линии, ширины, к) {
+    const P = [], I = [], a = new THREE.Vector3(), b = new THREE.Vector3(), с = new THREE.Vector3(), в = new THREE.Vector3();
+    линии.forEach((л, j) => { for (let i = 1; i < л.length; i++) {
+      a.set(...л[i - 1]); b.set(...л[i]); с.subVectors(b, a); в.subVectors(a, к); с.cross(в).normalize().multiplyScalar(ширины[j] * (1 - i / л.length * 0.5) / 2);
+      const n = P.length / 3; P.push(a.x - с.x, a.y - с.y, a.z - с.z, a.x + с.x, a.y + с.y, a.z + с.z, b.x + с.x, b.y + с.y, b.z + с.z, b.x - с.x, b.y - с.y, b.z - с.z);
+      I.push(n, n + 1, n + 2, n, n + 2, n + 3);
+    } });
+    const г = new THREE.BufferGeometry(); г.setAttribute('position', new THREE.Float32BufferAttribute(P, 3)); г.setIndex(I); return г;
+  }
+  function молния() {
+    const к = камера.position, а = Math.random() * 6.283, d = 180 + Math.random() * 620;
+    const x0 = к.x + Math.cos(а) * d, z0 = к.z + Math.sin(а) * d, y0 = API.землиВысота(x0, z0), H = 240 + Math.random() * 60;
+    const путь = (x, y, z, дл, n, разброс) => { const т = [[x, y, z]]; for (let i = 0; i < n; i++) { x += (Math.random() - 0.5) * разброс; z += (Math.random() - 0.5) * разброс; y -= дл / n; т.push([x, y, z]); } return т; };
+    const ствол = путь(x0, y0 + H, z0, H, 38, 16), ветки = [];
+    for (let i = 0; i < 4; i++) { const т = ствол[4 + (Math.random() * 20 | 0)]; ветки.push(путь(т[0], т[1], т[2], 30 + Math.random() * 70, 10, 18)); }
+    const все = [ствол, ...ветки], шир = [1.5, 0.7, 0.7, 0.6, 0.6];
+    const м = new THREE.Mesh(ленты(все, шир, к), молМ), о = new THREE.Mesh(ленты(все, шир.map(w => w * 9), к), молОреолМ);
+    м.frustumCulled = о.frustumCulled = false; м.renderOrder = о.renderOrder = 7; сцена.add(м, о);
+    молнии.push({ м, о, t: 0 });
+    гром(0.7 + Math.random() * 0.3 * (1 - d / 800), d / 343);
+  }
+  // ---------- ветер: направление медленно гуляет, сила — от погоды и порывов (window.__ветер: x, z — куда дует, м/с при силе 1) ----------
+  const ВЕТ = window.__ветер = { x: 1.1, z: 0.45, сила: 1 };
+  let порыв = 0, порывТ = 3;
+  // ---------- метель (зимой, по расписанию, как дождь) и гроза (часть ливней) ----------
+  const шансМетели = () => (window.__сезон && window.__сезон.какой) === 'зима' ? 0.3 : 0;
+  function метельПоРасписанию() {
+    const с = Math.floor(Date.now() / ОКНО), t = (Date.now() % ОКНО) / ОКНО;
+    return хэш(с + 0.31) < шансМетели() ? Math.min(1, t * 6, (1 - t) * 6) : 0;
+  }
+  const грозаПоРасписанию = () => { const с = Math.floor(Date.now() / ОКНО); return хэш(с) < шанс() && хэш(с + 0.77) < 0.45 ? 1 : 0; };
+  let метель = 0, метельСилой = null, гроза = 0, грозаСилой = null, молнияТ = 4;
+  // ---------- радуга: после дождя, днём, пару минут ----------
+  let радуга = 0, радугаТ = 0, послеДождя = 0;
   // ---------- каждый кадр ----------
   let дождь = 0, мокро = 0, таймГром = 30, таймЛуж = 0;
   const ветер = new THREE.Vector2(1.6, 0.6);
@@ -15304,34 +15353,159 @@ window.ДЕТАЛИ.push(['погода', function (API) {
     const цель = силой === true ? 0.9 : силой === false ? 0 : поРасписанию();
     дождь += Math.sign(цель - дождь) * Math.min(Math.abs(цель - дождь), dt / 12);
     window.__дождь = window.__вМеню ? 0 : дождь;
+    // гроза — только в сильный дождь; метель — только зимой
+    const цГр = дождь < 0.5 ? 0 : грозаСилой !== null ? (грозаСилой ? 1 : 0) : силой === false ? 0 : грозаПоРасписанию();
+    гроза += Math.sign(цГр - гроза) * Math.min(Math.abs(цГр - гроза), dt / 8);
+    const цМт = метельСилой !== null ? (метельСилой ? 1 : 0) : метельПоРасписанию();
+    метель += Math.sign(цМт - метель) * Math.min(Math.abs(цМт - метель), dt / 10);
+    window.__гроза = window.__вМеню ? 0 : гроза; window.__метель = window.__вМеню ? 0 : метель;
+    // ветер: медленно меняет направление; сила — спокойная волна, порывы, дождь, гроза, метель
+    {
+      const t = ms / 1000, а = 0.39 + 0.5 * Math.sin(t / 700) + 0.2 * Math.sin(t / 173);
+      const база = 0.55 + 0.5 * (0.5 + 0.5 * Math.sin(t / 97 + 1.3)) * (0.5 + 0.5 * Math.sin(t / 41));
+      порывТ -= dt; if (порывТ <= 0) { порывТ = 4 + Math.random() * 9; порыв = 0.35 + Math.random() * 0.6; }
+      порыв = Math.max(0, порыв - dt * 0.3);
+      const цВ = база + порыв * (0.6 + дождь + метель) + дождь * 0.7 + гроза * 1.2 + метель * 1.8;
+      ВЕТ.сила += (цВ - ВЕТ.сила) * Math.min(1, dt * 0.8);
+      ВЕТ.x = Math.cos(а) * 1.2; ВЕТ.z = Math.sin(а) * 1.2;
+      if (API.ВЕТЕР_К) API.ВЕТЕР_К.value = 0.35 + 0.65 * ВЕТ.сила;
+      ветер.set(ВЕТ.x * ВЕТ.сила * 1.3, ВЕТ.z * ВЕТ.сила * 1.3);
+    }
+    // молнии: мигают и гаснут; белая вспышка на всё
+    for (let i = молнии.length - 1; i >= 0; i--) {
+      const м = молнии[i]; м.t += dt;
+      const вид = м.t < 0.07 || (м.t > 0.13 && м.t < 0.2) || (м.t > 0.27 && м.t < 0.36);
+      м.м.visible = м.о.visible = вид; if (вид) молнияУр = Math.max(молнияУр, м.t < 0.07 ? 1 : 0.7);
+      if (м.t > 0.4) { сцена.remove(м.м, м.о); м.м.geometry.dispose(); м.о.geometry.dispose(); молнии.splice(i, 1); }
+    }
+    молнияУр = Math.max(0, молнияУр - dt * 5); window.__молнияУр = молнияУр;
+    if (API.небоМат) API.небоМат.uniforms.uMoln.value = молнияУр * 0.55;
+    if (гроза > 0.5 && !window.__вМеню) { молнияТ -= dt; if (молнияТ <= 0) { молнияТ = 5 + Math.random() * 15; молния(); } }
+    // мокро — дорогам (темнеют и блестят)
+    if (API.МОКРО) API.МОКРО.value = мокро;
+    // радуга: дождь (сильный) кончился, а день — минуты на две-три
+    if (дождь > 0.45) послеДождя = 90; else послеДождя = Math.max(0, послеДождя - dt);
+    const светло = !window.__свет || !window.__свет.темно();
+    if (послеДождя > 0 && дождь < 0.12 && радугаТ <= 0 && светло && API.СОЛНЦЕ && API.СОЛНЦЕ.y > 0.05) { радугаТ = 150; послеДождя = 0; }
+    радугаТ -= dt;
+    радуга += ((радугаТ > 0 && светло ? 1 : 0) - радуга) * Math.min(1, dt * 0.2);
+    if (API.небоМат) API.небоМат.uniforms.uRainbow.value = радуга * (1 - дождь);
     // лужи набираются за ~40 с дождя, сохнут ~4 минуты
     мокро = Math.max(0, Math.min(1, мокро + (дождь > 0.3 ? dt / 40 : -dt / 240)));
     // капли
-    капли.visible = дождь > 0.02 && !window.__вМеню && !document.body.classList.contains('кабина') && typeof window.__полКомнаты !== 'number';
+    // те же штрихи в метель — белые, летят почти вбок
+    const пурга = метель > 0.05 && дождь < 0.05;
+    капли.visible = (дождь > 0.02 || пурга) && !window.__вМеню && !document.body.classList.contains('кабина') && typeof window.__полКомнаты !== 'number';
     if (капли.visible) {
-      капМ.opacity = 0.42 * дождь;
-      const к = камера.position, n = Math.floor(N * Math.min(1, дождь * 1.3)), ск = 17 * dt, дл = 0.55;
+      if (пурга) { капМ.color.setHex(0xF4F7FB); капМ.opacity = 0.42 * метель; } else { капМ.color.setHex(0xC8D2DC); капМ.opacity = 0.42 * дождь + 0.12 * гроза; }
+      const сила = пурга ? метель : дождь, kСн = пурга ? 2.4 : 0.7, kНаклон = пурга ? 0.16 : 0.04;
+      const к = камера.position, n = Math.floor(N * Math.min(1, сила * 1.3)), ск = (пурга ? 4.5 : 17 + 6 * гроза) * dt, дл = пурга ? 0.3 : 0.55 + 0.25 * гроза, сн = ветер.x * dt * kСн, снz = ветер.y * dt * kСн;
       for (let i = 0; i < n; i++) {
         let y = сдв[i * 3 + 1] - ск; if (y < 0) { y += ВЫС; сдв[i * 3] = (Math.random() * 2 - 1) * Р; сдв[i * 3 + 2] = (Math.random() * 2 - 1) * Р; } сдв[i * 3 + 1] = y;
+        сдв[i * 3] += сн; сдв[i * 3 + 2] += снz;                                   // косой дождь: ветер сносит капли
+        if (сдв[i * 3] > Р) сдв[i * 3] -= 2 * Р; else if (сдв[i * 3] < -Р) сдв[i * 3] += 2 * Р;
+        if (сдв[i * 3 + 2] > Р) сдв[i * 3 + 2] -= 2 * Р; else if (сдв[i * 3 + 2] < -Р) сдв[i * 3 + 2] += 2 * Р;
         const x = к.x + сдв[i * 3], z = к.z + сдв[i * 3 + 2], yy = к.y - 6 + y, j = i * 6;
-        поз[j] = x; поз[j + 1] = yy; поз[j + 2] = z; поз[j + 3] = x - ветер.x * 0.04; поз[j + 4] = yy - дл; поз[j + 5] = z - ветер.y * 0.04;
+        поз[j] = x; поз[j + 1] = yy; поз[j + 2] = z; поз[j + 3] = x - ветер.x * kНаклон; поз[j + 4] = yy - дл; поз[j + 5] = z - ветер.y * kНаклон;
       }
       гео.setDrawRange(0, n * 2); гео.attributes.position.needsUpdate = true;
+      // брызги от капель на земле рядом
+      const Кл = window.__клубы;
+      if (Кл && !пурга) for (let m = дождь * (25 + 20 * гроза) * dt + Math.random(); m >= 1; m--) {
+        const x = к.x + (Math.random() - 0.5) * 16, z = к.z + (Math.random() - 0.5) * 16, y = API.землиВысота(x, z) + 0.03;
+        for (let j = 0; j < 3; j++) Кл.пуск({ p: [x, y, z], v: [(Math.random() - 0.5) * 0.8, 0.5 + Math.random() * 0.6, (Math.random() - 0.5) * 0.8], жизнь: 0.25, р0: 0.05, р1: 0.03, ц0: [0.8, 0.84, 0.88, 0.55], ц1: [0.8, 0.84, 0.88, 0.1], тормоз: 0.5, тяг: 9.8 });
+      }
     }
     // лужи: вокруг игрока, далёкие переставляем
     лужаМ.opacity = 0.9 * мокро;
     if (мокро > 0.01) { таймЛуж -= dt; if (таймЛуж <= 0) { таймЛуж = 1; for (const м of лужи) if (!м.visible || Math.hypot(м.position.x - П.x, м.position.z - П.z) > 55) поставитьЛужу(м, П.x, П.z); } }
     else if (лужи[0].visible) for (const м of лужи) м.visible = false;
     звукДождя(window.__вМеню ? 0 : дождь);
-    if (дождь > 0.6) { таймГром -= dt; if (таймГром <= 0) { таймГром = 25 + Math.random() * 60; гром(0.5 + Math.random() * 0.5); } }
+    if (дождь > 0.6 && гроза < 0.5) { таймГром -= dt; if (таймГром <= 0) { таймГром = 25 + Math.random() * 60; гром(0.5 + Math.random() * 0.5); } }
   });
   // дождь(true) — пошёл, дождь(false) — перестал, дождь(null) — снова по расписанию; туман — по заказу Шторма (сгущает небо модуль «небо и кино»)
   window.__погода = { дождь: (да = true, сразу) => { силой = да === null ? null : !!да; if (сразу) дождь = силой ? 0.9 : 0; }, сила: () => дождь, мокро: () => мокро,
     туман: вкл => { window.__туманВкл = !!вкл; },
     намочить: v => { мокро = Math.max(0, Math.min(1, v)); таймЛуж = 0; },     // для проверок
+    гроза: (да = true) => { грозаСилой = да === null ? null : !!да; }, метель: (да = true) => { метельСилой = да === null ? null : !!да; if (да) метель = Math.max(метель, 0.6); },
+    радуга: (сек = 150) => { радугаТ = сек; }, молния, силаГрозы: () => гроза, силаМетели: () => метель,
     // стоит ли точка в луже (для брызг и шлепков): пятно — эллипс внутри квадрата 2×2 с поворотом
     вЛуже: (x, z) => { if (мокро < 0.05) return false; for (const м of лужи) { if (!м.visible) continue; const dx = x - м.position.x, dz = z - м.position.z, c = Math.cos(м.rotation.y), s = Math.sin(м.rotation.y);
       const lx = (dx * c - dz * s) / (0.62 * м.scale.x), lz = (dx * s + dz * c) / (0.62 * м.scale.z); if (lx * lx + lz * lz < 1) return true; } return false; } };
+}]);
+
+// ===================== ТУМАН НАД ВОДОЙ =====================
+// Утром над прудами лежит туман: несколько прозрачных слоёв над водой (до ~2 м), рваных, медленно ползущих
+// по ветру; к краю пятна тают. Гуще всего на рассвете, слабее вечером и ночью, после дождя — сильнее;
+// зимой пруд подо льдом — тумана почти нет. Днём не рисуется вовсе.
+window.ДЕТАЛИ.push(['туман над водой', function (API) {
+  const { THREE, сцена, камера } = API;
+  const тек = API.ОБЛАКА && API.ОБЛАКА.uCloudTex && API.ОБЛАКА.uCloudTex.value; if (!тек || !API.воды || !API.воды.length) return;
+  const СЛОИ = API.телефон || API.УР <= 1 ? [0.35, 1.1] : [0.25, 0.75, 1.4, 2.1];
+  const мат = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, fog: true, side: THREE.DoubleSide,
+    uniforms: THREE.UniformsUtils.merge([THREE.UniformsLib.fog, { uT: { value: 0 }, uDens: { value: 0 }, uCol: { value: new THREE.Color(1, 1, 1) }, uC: { value: new THREE.Vector2() }, uR: { value: 50 }, uW: { value: new THREE.Vector2(1, 0.4) }, uL: { value: 0 } }]),
+    vertexShader: `varying vec3 vW;
+      #include <fog_pars_vertex>
+      void main(){ vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; vec4 mvPosition = viewMatrix * w; gl_Position = projectionMatrix * mvPosition;
+        #include <fog_vertex>
+      }`,
+    fragmentShader: `uniform sampler2D tNoise; uniform sampler2D tMask; uniform float uT; uniform float uDens; uniform vec3 uCol; uniform vec2 uC; uniform float uR; uniform vec2 uW; uniform float uL; varying vec3 vW;
+      #include <fog_pars_fragment>
+      void main(){
+        vec2 p = vW.xz / 60.0 + uW * uT * 0.004 + uL * 0.37;
+        float n = texture2D(tNoise, p).r * 0.65 + texture2D(tNoise, p * 2.3 + 0.41).r * 0.35;
+        float water = texture2D(tMask, (vW.xz - uC) / (2.0 * uR) + 0.5).r;           // только над водой и чуть на берег
+        float a = uDens * smoothstep(0.36, 0.8, n) * water * (0.55 + 0.45 * (1.0 - uL));
+        gl_FragColor = vec4(uCol, a * 0.34);
+        #include <fog_fragment>
+      }`,
+  });
+  мат.uniforms.tNoise = { value: тек };
+  const пятна = [];
+  for (const в of API.воды) {
+    let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+    for (const [x, z] of в.п) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); z0 = Math.min(z0, z); z1 = Math.max(z1, z); }
+    const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, R = Math.max(x1 - x0, z1 - z0) / 2 + 25;
+    if (R < 30) continue;                                             // лужицы и канавы — без тумана
+    // маска: вода белым, края размыты и чуть расползаются на берег (~8 м)
+    const Н = 256, хо = document.createElement('canvas'); хо.width = хо.height = Н; const сх = хо.getContext('2d');
+    сх.fillStyle = '#000'; сх.fillRect(0, 0, Н, Н); сх.filter = 'blur(' + Math.max(2, Н * 6 / (2 * R)).toFixed(1) + 'px)';
+    сх.fillStyle = '#fff'; сх.strokeStyle = '#fff'; сх.lineWidth = Н * 10 / (2 * R); сх.lineJoin = 'round';
+    for (const в2 of API.воды) {
+      сх.beginPath(); в2.п.forEach(([x, z], i) => сх[i ? 'lineTo' : 'moveTo']((x - cx) / (2 * R) * Н + Н / 2, (z - cz) / (2 * R) * Н + Н / 2)); сх.closePath(); сх.fill(); сх.stroke();
+    }
+    const маска = new THREE.CanvasTexture(хо); маска.flipY = false;
+    const гр = new THREE.Group(); гр.visible = false;
+    // слои: у каждого свой материал (свой номер слоя uL — узор у слоёв разный, верхние прозрачнее)
+    СЛОИ.forEach((h, i) => {
+      const мс = мат.clone(), u = мс.uniforms;
+      u.tNoise = { value: тек }; u.tMask = { value: маска }; u.uC.value.set(cx, cz); u.uR.value = R; u.uL.value = i / Math.max(1, СЛОИ.length - 1);
+      const м = new THREE.Mesh(new THREE.PlaneGeometry(R * 2, R * 2, 1, 1).rotateX(-Math.PI / 2), мс);
+      м.position.set(cx, в.уровень + h, cz); м.renderOrder = 3; м.frustumCulled = false; гр.add(м);
+    });
+    сцена.add(гр); пятна.push({ гр, cx, cz, R });
+  }
+  if (!пятна.length) return;
+  let плотн = 0;
+  const тумКол = new THREE.Color(), белый = new THREE.Color(1, 1, 1);
+  API.каждыйКадр.push((dt, ms) => {
+    if (!dt) return;
+    const С = window.__свет, ф = С ? С.какой() : 'день', сез = window.__сезон && window.__сезон.какой;
+    const мк = window.__погода && window.__погода.мокро ? window.__погода.мокро() : 0;
+    let цель = (ф === 'утро' ? 1 : ф === 'ночь' ? 0.55 : ф === 'вечер' ? 0.35 : 0) + 0.35 * мк;
+    if (сез === 'зима') цель *= 0.3;
+    плотн += (Math.min(1, цель) - плотн) * Math.min(1, dt * 0.08);
+    const к = камера.position, в = window.__ветер || { x: 1.1, z: 0.45 };
+    // цвет: светлее тумана вокруг (утром — розоватая дымка, ночью — сизая)
+    тумКол.copy(сцена.fog.color).lerp(белый, ф === 'ночь' ? 0.3 : 0.7);
+    for (const п of пятна) {
+      const вид = плотн > 0.02 && Math.hypot(п.cx - к.x, п.cz - к.z) < п.R + 450;
+      п.гр.visible = вид; if (!вид) continue;
+      for (const м of п.гр.children) { const u = м.material.uniforms; u.uT.value = ms / 1000; u.uDens.value = плотн; u.uCol.value.copy(тумКол); u.uW.value.set(в.x, в.z); }
+    }
+  });
+  window.__туманВоды = { пятна, плотн: () => плотн };
 }]);
 
 // ===================== ЭМОЦИИ =====================
@@ -15961,7 +16135,19 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
     g.gain.setTargetAtTime(0.05, к.currentTime, 0.2);
     ез.звук = { к, о, о2, ф, g };
   }
-  function моторВыкл() { const з = ез.звук; if (!з) return; try { з.g.gain.setTargetAtTime(0.0001, з.к.currentTime, 0.12); з.о.stop(з.к.currentTime + 0.5); з.о2.stop(з.к.currentTime + 0.5); } catch (e) {} ез.звук = null; }
+  // визг шин на асфальте: шум через узкий фильтр ~1,3 кГц с дрожью
+  let визгУзел = null;
+  function визг(сила) {
+    const Я = ядро(), к = Я && Я.звук && Я.звук(); if (!к) return;
+    if (!визгУзел) {
+      if (сила <= 0) return;
+      const b = к.createBuffer(1, к.sampleRate, к.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+      const и = к.createBufferSource(), ф = к.createBiquadFilter(), g = к.createGain(); и.buffer = b; и.loop = true; ф.type = 'bandpass'; ф.frequency.value = 1300; ф.Q.value = 9; g.gain.value = 0;
+      и.connect(ф); ф.connect(g); g.connect(Я.выход()); и.start(); визгУзел = { к, ф, g };
+    }
+    визгУзел.g.gain.setTargetAtTime(сила * 0.22, визгУзел.к.currentTime, 0.05); визгУзел.ф.frequency.setTargetAtTime(1150 + сила * 400 + Math.random() * 120, визгУзел.к.currentTime, 0.03);
+  }
+  function моторВыкл() { визг(0); const з = ез.звук; if (!з) return; try { з.g.gain.setTargetAtTime(0.0001, з.к.currentTime, 0.12); з.о.stop(з.к.currentTime + 0.5); з.о2.stop(з.к.currentTime + 0.5); } catch (e) {} ез.звук = null; }
   function бип() {
     const Я = ядро(), к = Я && Я.звук && Я.звук(); if (!к) return;
     const t = к.currentTime;
@@ -15991,7 +16177,7 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
   function вСалон() {
     const Мир = window.__мир; if (!машина || ез.едет || !Мир) return;
     хлоп(); толкнуть(0.02, -0.55, -0.05);          // сел на левую сторону — она проседает
-    Object.assign(ез, { едет: true, v: 0, руль: 0 });
+    Object.assign(ез, { едет: true, v: 0, руль: 0, vx: 0, vz: 0, занос: 0 });
     ез.было = { высота: Мир.кам.высота, даль: Мир.кам.даль, скрыт: window.__игрокСкрыт };
     if (машина.преп) машина.преп.п = [[1e6, 1e6], [1e6 + 1, 1e6], [1e6, 1e6 + 1]];      // своё же препятствие — не мешает ехать
     window.__заРулём = true; window.__игрокСкрыт = true; window.__вазЕдет = true;
@@ -16335,7 +16521,17 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
       const угол = ез.руль * 0.56 / (1 + Math.abs(ез.v) / 14);
       const курсБыл = машина.курс;
       машина.курс -= ез.v * Math.tan(угол) / БАЗА * dt;
-      const fx = Math.sin(машина.курс), fz = Math.cos(машина.курс), nx = машина.x + fx * ез.v * dt, nz = машина.z + fz * ез.v * dt;
+      // сцепление: сухой асфальт держит, грунт и трава — хуже, мокрое — ещё хуже, зимой скользко; на скорости в повороте
+      // машину сносит наружу (скорость догоняет направление кузова не сразу)
+      if ((ез.пкТ = (ез.пкТ || 0) - dt) <= 0) { ез.пкТ = 0.3; ез.пк = window.__клубы ? window.__клубы.покрытие(машина.x, машина.z) : 0; }
+      const мк = window.__погода ? window.__погода.мокро() : 0, зима = (window.__сезон && window.__сезон.какой) === 'зима';
+      const твёрдо = ез.пк === 0 || ез.пк === 3, сцеп = зима ? 0.3 : твёрдо ? 1 - 0.55 * мк : (ез.пк === 4 ? 0.7 : 0.82) - 0.4 * мк;
+      const fx = Math.sin(машина.курс), fz = Math.cos(машина.курс);
+      if (ез.vx === undefined) { ез.vx = fx * ез.v; ез.vz = fz * ез.v; }
+      const кС = Math.min(1, dt * (1.5 + 10 * сцеп));
+      ез.vx += (fx * ез.v - ез.vx) * кС; ез.vz += (fz * ез.v - ез.vz) * кС;
+      ез.занос = Math.abs(ез.vx * fz - ез.vz * fx);                              // боковая скорость, м/с
+      const nx = машина.x + ез.vx * dt, nz = машина.z + ез.vz * dt;
       const удар = упёрся(nx, nz, fx, fz);
       if (удар) {
         машина.курс = курсБыл;
@@ -16348,7 +16544,7 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
           if (было < 50 && урон >= 50) window.__подсказки && window.__подсказки.совет('💨 Из-под капота пошёл дым. Почини у дома.', 3.5);
           if (было < 100 && урон >= 100) window.__подсказки && window.__подсказки.совет('🚗 Всё, еле тянет. Домой — чинить.', 3.5);
         }
-        ез.v *= -0.15;
+        ез.v *= -0.15; ез.vx = fx * ез.v; ез.vz = fz * ез.v;
       } else {
         ез.пробег += Math.hypot(nx - машина.x, nz - машина.z);
         машина.x = Math.max(-API.ШИР / 2 + 25, Math.min(API.ШИР / 2 - 25, nx)); машина.z = Math.max(-API.ГЛУБ / 2 + 25, Math.min(API.ГЛУБ / 2 - 25, nz));
@@ -16360,7 +16556,13 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
         if ((ез.дымТ = (ез.дымТ || 0) - dt) <= 0) { const жм = газ > 0 && ез.v < цель - 1 ? 1 : 0; ез.дымТ = жм ? 0.08 : 0.24;
           Кл.выхлоп(машина.x - fx * 2.1 - fz * 0.5, машина.обёртка.position.y + 0.25, машина.z - fz * 2.1 + fx * 0.5, fx, fz, жм); }
         for (const сб of [-1, 1]) Кл.колесо(машина.x - fx * 1.24 + сб * fz * 0.68, машина.z - fz * 1.24 - сб * fx * 0.68, ез.v, fx, fz, dt, 0.6);
+        // занесло на сухом асфальте — шины дымят
+        if (ез.занос > 2.5 && твёрдо && мк < 0.3 && !зима) for (const сб of [-1, 1]) if (Math.random() < dt * ез.занос * 3) {
+          const x = машина.x - fx * 1.24 + сб * fz * 0.68, z = машина.z - fz * 1.24 - сб * fx * 0.68;
+          Кл.пуск({ p: [x, машина.обёртка.position.y + 0.2, z], v: [(Math.random() - 0.5), 0.5 + Math.random() * 0.5, (Math.random() - 0.5)], жизнь: 1.8, р0: 0.5, р1: 2.6, ц0: [0.86, 0.86, 0.86, 0.4], ц1: [0.9, 0.9, 0.9, 0], тормоз: 1.2, тяг: -0.1, ветер: 0.8 });
+        }
       }
+      визг(твёрдо && !зима ? Math.max(0, Math.min(1, (ез.занос - 2) / 4)) : 0);
       // игрок — на месте водителя (слева, чуть впереди центра)
       поз.x = машина.x + fx * 0.2 + fz * 0.35; поз.z = машина.z + fz * 0.2 - fx * 0.35; поз.угол = машина.курс;
       if (Math.abs(ез.v) > 1 && (!Мир.взгляд || Мир.взгляд.ид === null)) { let dк = машина.курс + (ез.v < 0 ? 0 : Math.PI) - Мир.кам.рыск; dк = Math.atan2(Math.sin(dк), Math.cos(dк)); Мир.кам.рыск += dк * Math.min(1, dt * 2); }
@@ -16783,7 +16985,7 @@ window.ДЕТАЛИ.push(['гонки', function (API) {
   // ---- на чём едем ----
   function транспорт() {
     const В2 = window.__ваз, М = window.__мопед;
-    if (window.__вазЕдет && В2) return { вид: 'ваз', где: () => [В2.машина.x, В2.машина.z, В2.машина.курс], стоп: () => { В2.ез && (В2.ез.v = 0); }, на: (x, z, к) => { Object.assign(В2.машина, { x, z, курс: к }); } };
+    if (window.__вазЕдет && В2) return { вид: 'ваз', где: () => [В2.машина.x, В2.машина.z, В2.машина.курс], стоп: () => { В2.ез && (В2.ез.v = 0, В2.ез.vx = 0, В2.ез.vz = 0); }, на: (x, z, к) => { Object.assign(В2.машина, { x, z, курс: к }); } };
     if (window.__мопедЕдет && М) return { вид: 'мопед', где: () => [М.ст.х, М.ст.z, М.ст.курс], стоп: () => { М.ст.v = 0; }, на: (x, z, к) => { М.ст.х = x; М.ст.z = z; М.ст.курс = к; } };
     return null;
   }
@@ -23326,11 +23528,14 @@ window.ДЕТАЛИ.push(['сезоны', function (API) {
     const к = API.камера.position, p = гео.attributes.position.array, t = ms / 1000;
     if (!расставлены) { расставлены = true; for (let i = 0; i < N; i++) раскидать(к, i); }
     точки.visible = !document.body.classList.contains('кабина');
+    // ветер (модуль «погода»): сносит снежинки и листья; в метель снег летит почти вбок и быстрее
+    const В2 = window.__ветер || { x: 1.1, z: 0.45, сила: 1 }, мт = window.__метель || 0, вс = (В2.сила === undefined ? 1 : В2.сила) * (ЗИМА ? 0.35 + мт * 2.2 : 0.6);
+    const вx = В2.x * вс, вz = В2.z * вс, падать = 1 + мт * 1.4;
     for (let i = 0; i < N; i++) {
       const и = i * 3;
-      p[и + 1] -= ск[i] * dt;
-      p[и] += Math.sin(t * (ЗИМА ? 0.8 : 1.6) + фаза[i]) * dt * (ЗИМА ? 0.5 : 1.1) + (ЗИМА ? 0.15 : 0.4) * dt;
-      p[и + 2] += Math.cos(t * (ЗИМА ? 0.6 : 1.3) + фаза[i]) * dt * (ЗИМА ? 0.4 : 0.9);
+      p[и + 1] -= ск[i] * dt * падать;
+      p[и] += Math.sin(t * (ЗИМА ? 0.8 : 1.6) + фаза[i]) * dt * (ЗИМА ? 0.5 : 1.1) + вx * dt;
+      p[и + 2] += Math.cos(t * (ЗИМА ? 0.6 : 1.3) + фаза[i]) * dt * (ЗИМА ? 0.4 : 0.9) + вz * dt;
       if (p[и + 1] < к.y - 4 || Math.abs(p[и] - к.x) > Р * 1.3 || Math.abs(p[и + 2] - к.z) > Р * 1.3) { раскидать(к, i); p[и + 1] = к.y + ВЫС - 4; }
     }
     гео.attributes.position.needsUpdate = true;
@@ -23725,12 +23930,12 @@ let небоМат;
   небоМат = new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false, fog: false,
     uniforms: Object.assign({ sunDir: { value: СОЛНЦЕ }, uApok: { value: 0 }, uFlash: { value: 0 }, uTime: { value: 0 }, uTint: { value: new THREE.Vector3(1, 1, 1) },
-      uNight: { value: 0 }, uMoon: { value: new THREE.Vector3(...СВЕТЫ.ночь.солнце).normalize() }, uMoonPh: { value: 0.5 } }, НЕБО_Ц),   // апокалипсис 0..1.2, вспышка взрыва, uTint — ручной цвет от Шторма
+      uNight: { value: 0 }, uMoon: { value: new THREE.Vector3(...СВЕТЫ.ночь.солнце).normalize() }, uMoonPh: { value: 0.5 }, uRainbow: { value: 0 }, uMoln: { value: 0 } }, НЕБО_Ц),   // апокалипсис 0..1.2, вспышка взрыва, uTint — ручной цвет от Шторма
     vertexShader: 'varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
     fragmentShader: `
       uniform vec3 sunDir; uniform float uApok; uniform float uFlash; uniform float uTime; uniform vec3 uTint; varying vec3 vDir;
       uniform vec3 uZen; uniform vec3 uMid; uniform vec3 uHor; uniform vec3 uGlow; uniform float uGlowP; uniform vec3 uDisc; uniform vec3 uCloudLit; uniform vec3 uCloudSh;
-      uniform float uSmoke; uniform vec3 uSmokeCol; uniform float uNight; uniform vec3 uMoon; uniform float uMoonPh;
+      uniform float uSmoke; uniform vec3 uSmokeCol; uniform float uNight; uniform vec3 uMoon; uniform float uMoonPh; uniform float uRainbow; uniform float uMoln;
       float hs(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
       float ns(vec2 p){ vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
         return mix(mix(hs(i), hs(i + vec2(1.0, 0.0)), f.x), mix(hs(i + vec2(0.0, 1.0)), hs(i + vec2(1.0, 1.0)), f.x), f.y); }
@@ -23786,6 +23991,19 @@ let небоМат;
         if (vDir.y < 0.0) col = mix(hor, hor * vec3(0.42, 0.36, 0.3), smoothstep(0.0,-0.1,vDir.y));
         col += vec3(1.0, 0.55, 0.2) * uFlash * (0.35 + 0.65 * smoothstep(0.3, -0.05, vDir.y));
         col = mix(col, uSmokeCol, uSmoke * (0.75 + 0.25 * smoothstep(0.5, 0.0, vDir.y)));
+        // радуга после дождя: дуга 42° вокруг точки против солнца (солнце для неё — не выше 15°, иначе дуга утонет за горизонтом),
+        // снаружи вторая, бледнее и с цветами наоборот
+        if (uRainbow > 0.001 && vDir.y > -0.02) {
+          vec3 sv = normalize(vec3(sunDir.x, min(sunDir.y, 0.26), sunDir.z));
+          float th = acos(clamp(dot(normalize(vDir), -sv), -1.0, 1.0));
+          float t1 = (th - 0.712) / 0.03, t2 = (0.925 - th) / 0.045;
+          vec3 rb = vec3(0.0);
+          if (t1 > 0.0 && t1 < 1.0) { vec3 h = clamp(abs(fract(vec3(1.0, 0.6667, 0.3333) + 0.78 * (1.0 - t1)) * 6.0 - 3.0) - 1.0, 0.0, 1.0); rb += h * sin(t1 * 3.1416) * 0.3; }
+          if (t2 > 0.0 && t2 < 1.0) { vec3 h = clamp(abs(fract(vec3(1.0, 0.6667, 0.3333) + 0.78 * (1.0 - t2)) * 6.0 - 3.0) - 1.0, 0.0, 1.0); rb += h * sin(t2 * 3.1416) * 0.1; }
+          col += rb * uRainbow * smoothstep(-0.02, 0.08, vDir.y) * (1.0 - smoothstep(0.55, 0.85, vDir.y));
+          if (th < 0.712) col *= 1.0 + 0.06 * uRainbow;                 // внутри дуги небо чуть светлее
+        }
+        col += vec3(0.78, 0.84, 1.0) * uMoln * (0.5 + 0.5 * smoothstep(-0.1, 0.4, vDir.y));     // молния: белая вспышка
         gl_FragColor = vec4(col * uTint, 1.0);
       }`
   });
@@ -23899,16 +24117,18 @@ function текс(имя, вариант = '') {
 }
 // цвет палитры на серой текстуре со средним 0.85 — чуть поднимаем
 const оттенок = (h, к = 0.85) => цвет(h).multiplyScalar(1 / лин(к));
-// Время для ветра: листва и трава чуть качаются
-const ВЕТЕР = { value: 0 };
+// Время для ветра: листва и трава чуть качаются. ВЕТЕР_К — сила (1 — обычный ветер, 2 — буря; ставит модуль «погода»)
+const ВЕТЕР = { value: 0 }, ВЕТЕР_К = { value: 1 };
+// Мокро после дождя (0…1): асфальт темнеет и блестит, в нём отражается небо (ставит модуль «погода»)
+const МОКРО = { value: 0 };
 // Листва и травинки — плоские карточки. Свет на них считаем «как на шаре»,
 // не переворачивая для обратной стороны, иначе половина листьев чернеет.
 function мягкийСвет(мат, качать) {
   мат.onBeforeCompile = ш => {
-    ш.uniforms.uWind = ВЕТЕР;
+    ш.uniforms.uWind = ВЕТЕР; ш.uniforms.uWindK = ВЕТЕР_К;
     ш.fragmentShader = ш.fragmentShader.replace('#include <normal_fragment_begin>',
       'float faceDirection = 1.0;\nvec3 normal = normalize(vNormal);\nvec3 geometryNormal = normal;');
-    if (качать) ш.vertexShader = 'uniform float uWind;\n' + ш.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
+    if (качать) ш.vertexShader = 'uniform float uWind; uniform float uWindK;\n' + ш.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>
       #ifdef USE_INSTANCING
         vec3 ip = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
       #else
@@ -23916,7 +24136,7 @@ function мягкийСвет(мат, качать) {
       #endif
       // порывы: по траве и деревьям волной бежит ветер (полоса шириной ~25 м, с запада на восток)
       float gust = 0.45 + 1.25 * pow(0.5 + 0.5 * sin(dot(ip.xz, vec2(0.05, 0.022)) - uWind * 0.85), 4.0);
-      float sway = (sin(uWind * 1.7 + ip.x * 0.35 + ip.z * 0.22) + 0.5 * sin(uWind * 2.9 + ip.z * 0.5)) * gust + 0.35 * (gust - 0.45);
+      float sway = ((sin(uWind * 1.7 + ip.x * 0.35 + ip.z * 0.22) + 0.5 * sin(uWind * 2.9 + ip.z * 0.5)) * gust + 0.35 * (gust - 0.45)) * uWindK + 0.25 * (uWindK - 1.0);
       transformed.x += sway * ${качать.toFixed(3)} * max(position.y, 0.0);
       transformed.z += sway * ${(качать * 0.6).toFixed(3)} * max(position.y, 0.0);`);
   };
@@ -24314,9 +24534,12 @@ function ближайшаяДорога(x, z, фильтр) {
       ш.uniforms.mapGravel = { value: текс('gruntovka') };
       ш.uniforms.aoTex = { value: текТени };
       ш.uniforms.uWH = { value: new THREE.Vector2(ШИР, ГЛУБ) };
+      ш.uniforms.uMokro = МОКРО;
       ш.vertexShader = 'attribute vec3 aEdge;\nvarying vec3 vEdge;\nvarying vec2 vAo;\nuniform vec2 uWH;\n' + ш.vertexShader.replace('#include <begin_vertex>',
         '#include <begin_vertex>\n vEdge = aEdge;\n vAo = vec2((position.x + uWH.x * 0.5) / uWH.x, 1.0 - (position.z + uWH.y * 0.5) / uWH.y);');
-      ш.fragmentShader = 'uniform sampler2D mapGrass;\nuniform sampler2D mapGravel;\nuniform sampler2D aoTex;\nvarying vec3 vEdge;\nvarying vec2 vAo;\n' + ш.fragmentShader.replace('#include <map_fragment>', `
+      ш.fragmentShader = 'uniform sampler2D mapGrass;\nuniform sampler2D mapGravel;\nuniform sampler2D aoTex;\nuniform float uMokro;\nvarying vec3 vEdge;\nvarying vec2 vAo;\n' + ш.fragmentShader
+        .replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n        roughnessFactor = mix(roughnessFactor, vEdge.z < 0.5 || vEdge.z > 2.5 ? 0.3 : 0.55, uMokro);')
+        .replace('#include <map_fragment>', `
         vec4 tx = texture2D(map, vUv);
         float e = abs(vEdge.x), inner = abs(vEdge.y), kind = vEdge.z, ruts = vEdge.y > 0.0 ? 1.0 : 0.0;
         float rag = (texture2D(map, vUv * 0.31).r - 0.5) * 0.5 + (texture2D(map, vUv * 1.7).g - 0.5) * 0.25;
@@ -24337,9 +24560,11 @@ function ближайшаяДорога(x, z, фильтр) {
           col *= 0.86 * (0.94 + 0.06 * smoothstep(0.2, 0.0, abs(e / max(inner, 0.01) - 0.5)));      // асфальт темнее — как на снимке
         }
         col *= texture2D(aoTex, vAo).r;
+        col *= 1.0 - (kind < 0.5 || kind > 2.5 ? 0.34 : 0.26) * uMokro;          // мокрая — темнее
         diffuseColor.rgb *= col;
         diffuseColor.a *= a;`);
     };
+    стеклоНеба(мат, 'uMokro * (vEdge.z < 0.5 || vEdge.z > 2.5 ? 0.55 : 0.3)', 1);         // и отражает небо — сильнее под острым углом
     const м = new THREE.Mesh(g, мат);
     м.receiveShadow = true; м.renderOrder = порядок; сцена.add(м);
   }
@@ -25088,7 +25313,7 @@ const API = {
   Сборка, коробка, плашка, дома, дороги, ШИРИНА, угодья, воды, вДоме, вВоде, вДворе, ближайшаяДорога, кДругойДороге, отрезкиДороги,
   сплат: { сп, СX, СZ, СМ, путь: сплатПуть, пятно: сплатПятно, обновить: () => { текСплат.needsUpdate = true; } },
   тени: { контур: затенитьКонтур, пятно: затенитьПятно, обновить: () => { текТени.needsUpdate = true; } },
-  добавитьПрепятствие, безТравы, безДеревьев, ДВОР, ВЕТЕР, солнце, небоСвет, камера, рендер, СОЛНЦЕ, небоМат, НЕБО_Ц, стеклоНеба, окнаНочью, ОБЛАКА, ОСТАНОВКА, ЗАБОРЫ, ГАЗ, СТОЛБЫ, ДЕРЕВЬЯ, ПОДПИСИ_ОРИЕНТИРОВ: [],
+  добавитьПрепятствие, безТравы, безДеревьев, ДВОР, ВЕТЕР, ВЕТЕР_К, МОКРО, солнце, небоСвет, камера, рендер, СОЛНЦЕ, небоМат, НЕБО_Ц, стеклоНеба, окнаНочью, ОБЛАКА, ОСТАНОВКА, ЗАБОРЫ, ГАЗ, СТОЛБЫ, ДЕРЕВЬЯ, ПОДПИСИ_ОРИЕНТИРОВ: [],
   свободныеДворы: [],             // многоугольники: свои дворы по фото — сюда модуль «дворы» ничего не ставит
   каждыйКадр: [],                 // функции (dt, ms, поз) — вызываются в каждом кадре
 };
