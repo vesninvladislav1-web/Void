@@ -15775,7 +15775,7 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
   function выйти() {
     if (!ез.едет) return;
     const Мир = window.__мир, б = ез.было;
-    ез.едет = false; ез.v = 0; window.__заРулём = false; window.__игрокСкрыт = б.скрыт; window.__вазЕдет = false;
+    ез.едет = false; ез.v = 0; ез.фарыТ = 20; window.__заРулём = false; window.__игрокСкрыт = б.скрыт; window.__вазЕдет = false;
     Мир.кам.высота = б.высота; Мир.кам.даль = б.даль;
     document.body.classList.remove('ваз'); пульт.classList.remove('видно'); моторВыкл();
     // вылезаем у двери водителя (слева), если там стена — справа, сзади, спереди
@@ -15790,10 +15790,120 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
   function упёрся(x, z, fx, fz) {
     for (const a of [ДЛИНА / 2, 0, -ДЛИНА / 2]) for (const b2 of [-ШИР_М, ШИР_М]) {
       const px = x + fx * a + fz * b2, pz = z + fz * a - fx * b2;
-      if (API.вДоме(px, pz, 0.05) || API.вВоде(px, pz) || (window.__машины && window.__машины.занято(px, pz))) return true;
+      if (API.вДоме(px, pz, 0.05) || API.вВоде(px, pz) || (window.__машины && window.__машины.занято(px, pz))) return [px, pz];
     }
-    return false;
+    return null;
   }
+
+  // ---- вмятины: кузов прогибается там, где ударился, краска в том месте обдирается ----
+  // Модель сжата (координаты — 16-битные целые): при загрузке кузов переводим в обычные числа, запоминаем исходник для ремонта.
+  const мнётся = [];
+  let урон = 0, дымТ = 0, ремонт = 0;
+  function готовитьКузов(модель) {
+    модель.traverse(о => {
+      if (!о.isMesh || /tire|wheel/i.test(о.name)) return;
+      const п = о.geometry.attributes.position; if (!п || п.count < 100) return;
+      const мас = п.isInterleavedBufferAttribute ? п.data.array : п.array;          // координаты могут лежать вперемешку с нормалями
+      const м = п.normalized ? (мас instanceof Int16Array ? 1 / 32767 : мас instanceof Int8Array ? 1 / 127 : мас instanceof Uint16Array ? 1 / 65535 : мас instanceof Uint8Array ? 1 / 255 : 1) : 1;
+      const зн = мас instanceof Int16Array || мас instanceof Int8Array, ч = v => зн ? Math.max(v * м, -1) : v * м;
+      const f = new Float32Array(п.count * 3); for (let i = 0; i < п.count; i++) { f[i * 3] = ч(п.getX(i)); f[i * 3 + 1] = ч(п.getY(i)); f[i * 3 + 2] = ч(п.getZ(i)); }
+      о.geometry = о.geometry.clone();
+      о.geometry.setAttribute('position', new THREE.BufferAttribute(f, 3));
+      const цвет = new THREE.BufferAttribute(new Float32Array(п.count * 3).fill(1), 3); о.geometry.setAttribute('color', цвет);
+      о.material = о.material.clone(); о.material.vertexColors = true;
+      мнётся.push({ о, исх: f.slice(), цвет });
+    });
+  }
+  const мВ = new THREE.Matrix4(), м3 = new THREE.Matrix3(), вТ = new THREE.Vector3(), вД = new THREE.Vector3(), вМасш = new THREE.Vector3();
+  function вмятина(x, y, z, dx, dz, сила) {
+    const R = 0.4 + сила * 0.3, глуб = Math.min(0.11, 0.025 + сила * 0.03);
+    for (const { о, исх, цвет } of мнётся) {
+      о.updateMatrixWorld(true); мВ.copy(о.matrixWorld).invert(); м3.setFromMatrix4(мВ);
+      вМасш.setFromMatrixScale(о.matrixWorld); const ск = вМасш.x || 1;
+      вТ.set(x, y, z).applyMatrix4(мВ); вД.set(dx * глуб, -0.25 * глуб, dz * глуб).applyMatrix3(м3);
+      const Rл = R / ск, пред = 0.16 / ск, a = о.geometry.attributes.position.array, c = цвет.array;
+      let тронут = false; const сдв = [вД.x, вД.y, вД.z];
+      for (let i = 0; i < a.length; i += 3) {
+        const ex = a[i] - вТ.x, ey = a[i + 1] - вТ.y, ez = a[i + 2] - вТ.z, d2 = ex * ex + ey * ey + ez * ez;
+        if (d2 > Rл * Rл) continue;
+        const k = (1 - Math.sqrt(d2) / Rл) ** 2;
+        for (let j = 0; j < 3; j++) { const н = a[i + j] + сдв[j] * k, от = н - исх[i + j]; a[i + j] = исх[i + j] + Math.max(-пред, Math.min(пред, от)); }
+        const тёмн = 1 - 0.35 * k; c[i] *= тёмн; c[i + 1] *= тёмн; c[i + 2] *= тёмн * 0.97;     // ободрано: темнее, к ржавчине
+        тронут = true;
+      }
+      if (тронут) { о.geometry.attributes.position.needsUpdate = true; цвет.needsUpdate = true; }
+    }
+  }
+  function починить() {
+    for (const { о, исх, цвет } of мнётся) { о.geometry.attributes.position.array.set(исх); о.geometry.attributes.position.needsUpdate = true; цвет.array.fill(1); цвет.needsUpdate = true; }
+    урон = 0;
+  }
+  // ---- фары, стопари, лучи света вечером; дым из-под капота у битой ----
+  const фарыМ = [], стопыМ = [], лучи = new THREE.Group(); лучи.visible = false;
+  function готовитьСвет(модель, обёртка) {
+    const рамка = new THREE.Box3(), т = new THREE.Box3();
+    обёртка.updateMatrixWorld(true);
+    модель.traverse(о => {
+      if (!о.isMesh) return;
+      const имя = (о.material && о.material.name) || '';
+      if (/fara(?!s)/i.test(имя)) {           // стёкла передних фар (faras — задний фонарь)
+        о.material = о.material.clone(); о.material.emissive = new THREE.Color(0xFFE9B0); о.material.emissiveMap = о.material.map || null; о.material.emissiveIntensity = 0; фарыМ.push(о.material);
+        т.setFromObject(о); рамка.union(т);
+      }
+      if (/Stop|^lada2114_red$/i.test(имя)) { о.material = о.material.clone(); о.material.emissive = new THREE.Color(0xFF2010); о.material.emissiveIntensity = 0; стопыМ.push(о.material); }
+    });
+    // где фары — в координатах обёртки (если не нашли — по размерам машины)
+    let фары = [[-0.55, 0.65, ДЛИНА / 2 - 0.05], [0.55, 0.65, ДЛИНА / 2 - 0.05]];
+    if (!рамка.isEmpty()) {
+      const а = обёртка.worldToLocal(рамка.min.clone()), б = обёртка.worldToLocal(рамка.max.clone());
+      const x0 = Math.min(а.x, б.x), x1 = Math.max(а.x, б.x), y = (а.y + б.y) / 2, z = Math.max(а.z, б.z);
+      фары = x1 - x0 > 0.6 ? [[x0 + 0.12, y, z], [x1 - 0.12, y, z]] : [[(x0 + x1) / 2, y, z], [-(x0 + x1) / 2, y, z]];
+    }
+    const лучМ = new THREE.MeshBasicMaterial({ color: 0xFFE7B0, transparent: true, opacity: 0.09, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: true });
+    const конус = new THREE.ConeGeometry(1.6, 9, 18, 1, true).translate(0, -4.5, 0).rotateX(-Math.PI / 2 + 0.06);
+    for (const [x, y, z] of фары) { const л = new THREE.Mesh(конус, лучМ); л.position.set(x, y, z); л.renderOrder = 6; лучи.add(л); }
+    const пятноТ = (() => { const к = document.createElement('canvas'); к.width = к.height = 64; const с = к.getContext('2d'), г = с.createRadialGradient(32, 32, 2, 32, 32, 32); г.addColorStop(0, 'rgba(255,240,200,0.9)'); г.addColorStop(1, 'rgba(255,240,200,0)'); с.fillStyle = г; с.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(к); })();
+    const пятно = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 7).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ map: пятноТ, transparent: true, opacity: 0.32, blending: THREE.AdditiveBlending, depthWrite: false }));
+    пятно.position.set(0, 0.06, ДЛИНА / 2 + 5); пятно.renderOrder = 6; лучи.add(пятно);
+    обёртка.add(лучи);
+  }
+  const дымТекс = (() => { const к = document.createElement('canvas'); к.width = к.height = 64; const с = к.getContext('2d'), г = с.createRadialGradient(32, 32, 4, 32, 32, 30); г.addColorStop(0, 'rgba(90,90,90,0.8)'); г.addColorStop(1, 'rgba(90,90,90,0)'); с.fillStyle = г; с.fillRect(0, 0, 64, 64); return new THREE.CanvasTexture(к); })();
+  const дым = Array.from({ length: 14 }, () => { const с = new THREE.Sprite(new THREE.SpriteMaterial({ map: дымТекс, transparent: true, depthWrite: false, opacity: 0 })); с.visible = false; сцена.add(с); return { с, t: 0, жив: false }; });
+  let дымI = 0;
+  function пыхнуть() {
+    const fx = Math.sin(машина.курс), fz = Math.cos(машина.курс), к = дым[дымI++ % дым.length], p = машина.обёртка.position;
+    к.с.position.set(p.x + fx * (ДЛИНА / 2 - 0.7) + (Math.random() - 0.5) * 0.4, p.y + 1.0, p.z + fz * (ДЛИНА / 2 - 0.7) + (Math.random() - 0.5) * 0.4);
+    к.t = 0; к.жив = true; к.с.visible = true;
+  }
+  function шагДыма(dt) {
+    for (const к of дым) { if (!к.жив) continue; к.t += dt; const k = к.t / 2.2; if (k >= 1) { к.жив = false; к.с.visible = false; continue; }
+      к.с.position.y += dt * (0.9 - k * 0.4); к.с.position.x += dt * 0.3; к.с.scale.setScalar(0.5 + k * 2.2); к.с.material.opacity = 0.55 * (1 - k) * Math.min(1, к.t * 5); }
+  }
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt || !машина) return;
+    const вечер = window.__свет && window.__свет.какой && window.__свет.какой() === 'вечер';
+    const горят = вечер && (ез.едет || ез.фарыТ > 0);
+    for (const м of фарыМ) м.emissiveIntensity = горят ? 1.6 : 0;
+    лучи.visible = горят;
+    const тормозит = ез.едет && ез.тормоз;
+    for (const м of стопыМ) м.emissiveIntensity = тормозит ? 2.2 : горят ? 0.7 : 0;
+    if (ез.фарыТ > 0) ез.фарыТ -= dt;
+    шагДыма(dt);
+    if (урон >= 50) { дымТ -= dt * (урон >= 100 ? 2 : 1); if (дымТ <= 0) { дымТ = 0.22; if (Math.hypot(поз.x - машина.x, поз.z - машина.z) < 80) пыхнуть(); } }
+    // ремонт у своего дома: пара секунд стука ключом
+    if (ремонт > 0) {
+      ремонт -= dt;
+      if (Math.floor(ремонт * 3) !== Math.floor((ремонт + dt) * 3)) { const Я = ядро(); Я && Я.удар && Я.удар(0.05, 0.08, 0); }
+      if (ремонт <= 0) { починить(); window.__подсказки && window.__подсказки.совет('🔧 Как новая. Ну, почти.', 3); }
+    }
+    кнЧинить.style.display = !ез.едет && урон > 0 && ремонт <= 0 && уДома() && Math.hypot(поз.x - машина.x, поз.z - машина.z) < 4 && document.getElementById('старт').hidden && !занят() ? 'block' : 'none';
+  });
+  const ДИ = API.КАРТА.дом_игрока;
+  const уДома = () => !ДИ || Math.hypot(машина.x - ДИ.о[0], машина.z - ДИ.о[1]) < 35;
+  const кнЧинить = document.createElement('button'); кнЧинить.id = 'вазЧинить'; кнЧинить.textContent = '🔧 ПОЧИНИТЬ ВАЗ';
+  кнЧинить.style.cssText = 'position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);z-index:8;display:none;height:44px;padding:0 20px;border:0;border-radius:14px;background:#C9D6E0;color:#12181E;font:800 13px system-ui,sans-serif;letter-spacing:1px;box-shadow:0 4px 18px rgba(0,0,0,.45)';
+  document.body.appendChild(кнЧинить);
+  кнЧинить.addEventListener('click', () => { if (ремонт > 0 || урон <= 0) return; ремонт = 2.6; кнЧинить.style.display = 'none'; window.__подсказки && window.__подсказки.совет('🔧 Выправляешь, рихтуешь…', 2.4); });
   API.каждыйКадр.push((dt, ms, поз) => {
     if (!dt || !машина) return;
     const Мир = window.__мир;
@@ -15806,8 +15916,8 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
       if (Math.abs(газ) < 0.12) газ = 0; if (Math.abs(руль) < 0.12) руль = 0;
       if (document.body.classList.contains('кино')) { газ = 0; руль = 0; }
       // едет вперёд, а тянешь назад — сначала тормоз, потом задний ход
-      const тормоз = газ * ез.v < 0;
-      const цель = газ >= 0 ? газ * 22 : газ * 5;
+      const тормоз = газ * ез.v < 0; ез.тормоз = тормоз;
+      const цель = (газ >= 0 ? газ * 22 : газ * 5) * (урон >= 100 ? 0.45 : 1);       // разбитая — еле тянет
       ез.v += (цель - ез.v) * Math.min(1, dt * (тормоз ? 2.5 : газ ? 0.45 : 0.6));
       if (Math.abs(ез.v) < 0.05 && !газ) ез.v = 0;
       ез.руль += (руль - ез.руль) * Math.min(1, dt * 6);
@@ -15816,9 +15926,17 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
       const курсБыл = машина.курс;
       машина.курс -= ез.v * Math.tan(угол) / БАЗА * dt;
       const fx = Math.sin(машина.курс), fz = Math.cos(машина.курс), nx = машина.x + fx * ез.v * dt, nz = машина.z + fz * ез.v * dt;
-      if (упёрся(nx, nz, fx, fz)) {
+      const удар = упёрся(nx, nz, fx, fz);
+      if (удар) {
         машина.курс = курсБыл;
         if (Math.abs(ез.v) > 5) { const Я = ядро(); Я && Я.удар && Я.удар(0.15, 0.5, 0); Я && Я.тряхнуть && Я.тряхнуть(0.25); }
+        if (Math.abs(ез.v) > 3) {
+          const сила = Math.min(3, (Math.abs(ез.v) - 3) / 4), зн = Math.sign(ез.v);
+          вмятина(удар[0] - fx * 0.25 * зн, машина.обёртка.position.y + 0.6, удар[1] - fz * 0.25 * зн, -fx * зн, -fz * зн, сила);
+          const было = урон; урон = Math.min(100, урон + (Math.abs(ез.v) - 3) * 4);
+          if (было < 50 && урон >= 50) window.__подсказки && window.__подсказки.совет('💨 Из-под капота пошёл дым. Почини у дома.', 3.5);
+          if (было < 100 && урон >= 100) window.__подсказки && window.__подсказки.совет('🚗 Всё, еле тянет. Домой — чинить.', 3.5);
+        }
         ез.v *= -0.15;
       } else {
         ез.пробег += Math.hypot(nx - машина.x, nz - машина.z);
@@ -15828,7 +15946,7 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
       // игрок — на месте водителя (слева, чуть впереди центра)
       поз.x = машина.x + fx * 0.2 + fz * 0.35; поз.z = машина.z + fz * 0.2 - fx * 0.35; поз.угол = машина.курс;
       if (Math.abs(ез.v) > 1 && (!Мир.взгляд || Мир.взгляд.ид === null)) { let dк = машина.курс + (ез.v < 0 ? 0 : Math.PI) - Мир.кам.рыск; dк = Math.atan2(Math.sin(dк), Math.cos(dк)); Мир.кам.рыск += dк * Math.min(1, dt * 2); }
-      спидометр.textContent = Math.round(Math.abs(ез.v) * 3.6) + ' км/ч';
+      спидометр.textContent = Math.round(Math.abs(ез.v) * 3.6) + ' км/ч' + (урон > 0 ? ' · 🔧 ' + Math.round(урон) + '%' : '');
       const з = ез.звук; if (з) {
         // «передачи»: обороты растут и падают на каждой
         const v = Math.abs(ез.v), пер = v < 5 ? v / 5 : v < 11 ? (v - 5) / 6 : (v - 11) / 11, об = 28 + пер * 38 + (газ > 0 ? 4 : 0);
@@ -15864,7 +15982,8 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
         const обёртка = new THREE.Group(); обёртка.add(гр); обёртка.rotation.y = м.курс;
         обёртка.position.set(м.x, API.землиВысота(м.x, м.z), м.z); сцена.add(обёртка);
         машина = { обёртка, x: м.x, z: м.z, курс: м.курс, преп: null }; поставить(); разместить();
-        window.__ваз = { обёртка, м, сесть, выйти, машина, переставить };
+        try { готовитьКузов(модель); готовитьСвет(модель, обёртка); } catch (e) { console.warn('ваз: кузов/свет', e); }
+        window.__ваз = { обёртка, м, сесть, выйти, машина, переставить, вмятина, починить, урон: () => урон };
         if (window.__вазЖдёт) { переставить(...window.__вазЖдёт); window.__вазЖдёт = null; }
       }, e => console.warn('ваз 2114:', e && e.message));
     };
@@ -22311,7 +22430,7 @@ window.ДЕТАЛИ.push(['сезоны', function (API) {
 // радар Шторма и руль Феникса не трогаем: там важны точные координаты пальца.
 window.ДЕТАЛИ.push(['размер интерфейса', function () {
   const ЧТО = ['#кнопки', '#шестерня', '#онлКн', '#компас', '#миникарта:not(.большая)', '#улица', '#цель', '#совет', '#меню',
-    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#курыПульт', '#вазСесть', '#вазПульт', '#вазСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#дуракКн', '#футболКн', '#футболПульт', '#футболСчёт', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
+    '#онлПанель', '#онлСилы', '#онлФразы', '#онлЧат', '#онлСтрелка', '#мопедПульт', '#мопедСесть', '#мопедСкорость', '#курыПульт', '#вазСесть', '#вазЧинить', '#вазПульт', '#вазСкорость', '#рыбалкаКн', '#рыбалкаПульт', '#рыбалкаУлов', '#дуракКн', '#футболКн', '#футболПульт', '#футболСчёт', '#штормИнстр', '#clawdРеплика', '#итогиТост', '#звонок', '#жми', '#пропустить',
     '#войнаПанель', '#войнаНаВойну', '#войнаКинуть', '#войнаДрон', '#войнаЖизни', '#войнаТревога',
     '#полигонВерх', '#полигонКн1', '#полигонКн2', '#полигонСесть', '#полигонЛёт', '#полигонСвин', '#полётВВ', '#полётВН',
     '#яшолёт', '#яшолётСесть', '#яшолётКуры', '#фениксСесть', '#выход-каб', '#кн-сюжет', '#кн-халупа', '#кн-шторм', '#озон-окно',
