@@ -2,6 +2,9 @@ package site.voidm.borozdinovsky;
 
 import android.Manifest;
 import android.app.Activity;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -47,8 +50,8 @@ public class MainActivity extends Activity {
         н.setDatabaseEnabled(true);
         н.setMediaPlaybackRequiresUserGesture(false);
         н.setCacheMode(WebSettings.LOAD_DEFAULT);
-        н.setUserAgentString(н.getUserAgentString() + " BrzdApp/3");   // игра знает, что она в приложении
-        веб.addJavascriptInterface(new PhotoBridge(), "BrzdApp");                 // фоторежим: сохранить снимок в галерею
+        н.setUserAgentString(н.getUserAgentString() + " BrzdApp/4");   // игра знает, что она в приложении
+        веб.addJavascriptInterface(new PhotoBridge(), "BrzdApp");                 // фоторежим: снимок в галерею; копирование в буфер
 
         веб.setWebChromeClient(new WebChromeClient());
         веб.setWebViewClient(new WebViewClient() {
@@ -101,6 +104,13 @@ public class MainActivity extends Activity {
                 return ок;
             } catch (Exception e) { сказать("Не вышло сохранить фото"); return false; }
         }
+        // window.BrzdApp.copyText(текст) — в буфер обмена (в WebView обычное копирование ненадёжно)
+        @JavascriptInterface
+        public boolean copyText(String т) {
+            if (т == null || т.length() > 100_000) return false;
+            runOnUiThread(() -> { ClipboardManager б = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE); if (б != null) б.setPrimaryClip(ClipData.newPlainText("Бороздиновский", т)); });
+            return true;
+        }
     }
     private void сказать(String т) { runOnUiThread(() -> Toast.makeText(this, т, Toast.LENGTH_SHORT).show()); }
 
@@ -124,8 +134,18 @@ public class MainActivity extends Activity {
     @Override
     public void onWindowFocusChanged(boolean фокус) { super.onWindowFocusChanged(фокус); if (фокус) спрятатьПанели(); }
 
+    // «Назад»: сначала игра закрывает своё окно (меню, гонки, онлайн…); нечего закрывать — выход только по второму нажатию
+    private long прошлыйНазад = 0;
     @Override
-    public void onBackPressed() { if (веб.canGoBack()) веб.goBack(); else super.onBackPressed(); }
+    public void onBackPressed() {
+        веб.evaluateJavascript("(window.__назад && window.__назад()) ? 1 : 0", ответ -> {
+            if ("1".equals(ответ)) return;
+            if (веб.canGoBack()) { веб.goBack(); return; }
+            long сейчас = System.currentTimeMillis();
+            if (сейчас - прошлыйНазад < 2000) finish();
+            else { прошлыйНазад = сейчас; сказать("Нажми «Назад» ещё раз, чтобы выйти"); }
+        });
+    }
 
     @Override
     protected void onResume() { super.onResume(); веб.onResume(); веб.resumeTimers(); }
