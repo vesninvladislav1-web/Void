@@ -6883,7 +6883,7 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
     if (ветерГ) ветерГ.gain.setTargetAtTime(0.02 + Math.min(0.05, Math.hypot(поз.x, поз.z) / 30000), А.ctx.currentTime, 1);
     // днём — птицы, сверчков почти не слышно; вечером — наоборот (свет — в настройках)
     // зимой — ни сверчков, ни лягушек, птиц мало; в дождь природа притихает
-    const день = !!window.__свет && window.__свет.какой() === 'день', зима = window.__сезон === 'зима', дождь = (window.__дождь || 0) > 0.4;
+    const день = !!window.__свет && window.__свет.какой() === 'день', зима = (window.__сезон && window.__сезон.какой) === 'зима', дождь = (window.__дождь || 0) > 0.4;
     if (сверчкиГ) сверчкиГ.gain.setTargetAtTime(зима || дождь ? 0 : день ? 0.01 : 0.05, А.ctx.currentTime, 2);
     if (день) { таймПтицы -= dt * (зима ? 0.25 : 1) * (дождь ? 0.15 : 1); if (таймПтицы <= 0) { таймПтицы = 1.2 + Math.random() * 4; птица(0.4 + Math.random() * 0.8, Math.random() * 2 - 1); } }
     else if (!зима && !дождь) { таймСверчок -= dt; if (таймСверчок <= 0) { таймСверчок = 0.25 + Math.random() * 0.9; чирик(0.4 + Math.random() * 0.8, Math.random() * 2 - 1); } }
@@ -15172,7 +15172,7 @@ window.ДЕТАЛИ.push(['погода', function (API) {
   const { THREE, сцена, камера } = API;
   const ОКНО = 12 * 60 * 1000;                       // погода меняется кусками по 12 минут
   const хэш = n => { let x = Math.sin(n * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
-  const шанс = () => window.__сезон === 'зима' ? 0 : window.__сезон === 'осень' ? 0.35 : 0.2;
+  const шанс = () => { const с = window.__сезон && window.__сезон.какой; return с === 'зима' ? 0 : с === 'осень' ? 0.35 : 0.2; };
   let силой = null;                                   // ⚙ / проверка: true, false или null — как по расписанию
   function поРасписанию() {
     const с = Math.floor(Date.now() / ОКНО), t = (Date.now() % ОКНО) / ОКНО;
@@ -16041,6 +16041,178 @@ window.ДЕТАЛИ.push(['футбол', function (API) {
     const [qx, qz] = с.W(г.марк.a + Math.cos(г.марк.угол), г.марк.b + Math.sin(г.марк.угол)); м.группа.rotation.y = Math.atan2(qx - kx, qz - kz);
   });
   window.__футбол = { начать, закончить, игра: () => игра };
+}]);
+
+// ===================== МЕЛОЧИ ПОСЁЛКА =====================
+// То, на что не смотришь, но без чего пусто: во дворах — вёдра, лейки, шины, канистры, газовые баллоны,
+// ящики, бочки, пластиковые стулья, лавки, корзины (и редкий садовый гном); вдоль дорог и заборов —
+// крапива, лопухи, щавель, одуванчики; у стен — папоротник; перед домами — цветы.
+// Модели — Poly Haven (CC0), упрощены и с маленькими текстурами; файлы meloch/*.js догружаются после старта.
+// Рисуем только то, что рядом с игроком (дальность и количество — по графике); на «низкой» мелочей нет.
+window.ДЕТАЛИ.push(['мелочи', function (API) {
+  const { THREE, сцена } = API;
+  const УР = API.УР;
+  if (УР === 0) return;
+  const НАСТР = API.УЛЬТРА ? { рR: 80, рМакс: 900, вR: 130, вМакс: 240 } : УР >= 2 ? { рR: 60, рМакс: 500, вR: 100, вМакс: 150 } : { рR: 40, рМакс: 200, вR: 70, вМакс: 60 };
+  const ВЕЩИ = {      // имя: [вес, у стены, отбрасывает тень]
+    wooden_bucket_02: [5, 0], watering_can_metal_01: [5, 0], old_tyre: [5, 0], metal_jerrycan_green: [3, 1], propane_tank: [4, 1],
+    plastic_monobloc_chair_01: [3, 1], painted_wooden_bench: [3, 1], wooden_crate_01: [4, 1], barrel_03: [4, 1], wicker_basket_02: [3, 0],
+    rusted_spade_01: [2, 1], garden_gnome: [0.4, 0],
+  };
+  // в наборах Poly Haven — молодые ростки (крапива ~20 см, щавель ~6 см): у нас — взрослый бурьян
+  const РОСТ = { nettle_plant: 6, weed_plant_02: 5, shrub_sorrel_01: 9, dandelion_01: 2.6, shrub_03: 3.6, flower_empodium: 2.6, fern_02: 1.3 };
+  const РАСТ = { обочина: ['nettle_plant', 'weed_plant_02', 'shrub_sorrel_01', 'dandelion_01'], стена: ['fern_02', 'nettle_plant', 'shrub_03'], цветы: ['flower_empodium', 'dandelion_01'] };
+  // детерминированный случай: одинаково у всех игроков и при каждом запуске
+  let зерно = 1234567;
+  const сл = () => { зерно = (зерно * 16807) % 2147483647; return (зерно - 1) / 2147483646; };
+  const выбор = м => м[Math.floor(сл() * м.length) % м.length];
+  const свободно = (x, z, запас) => !API.вДоме(x, z, запас) && !API.вВоде(x, z) && !(API.вДворе && API.вДворе(x, z, 1))
+    && !(API.свободныеДворы || []).some(п => API.внутри(x, z, п));
+  const наДороге = (x, z, запас) => { const д = API.ближайшаяДорога(x, z); return д && д.d < API.ШИРИНА[д.д.т] / 2 + запас; };
+
+  // ---------- где что стоит (один раз) ----------
+  const точкиВ = [], точкиР = [];         // { x, z, имя, вар, рот, мас }
+  function расставить() {
+    // вещи — во дворах: за домом (от дороги), у стены или чуть поодаль
+    for (const д of API.дома) {
+      if (сл() > 0.5) continue;
+      const дор = API.ближайшаяДорога(д.cx, д.cz); if (!дор) continue;
+      const ох = д.cx - дор.px, оз = д.cz - дор.pz, ол = Math.hypot(ох, оз) || 1;     // от дороги вглубь двора
+      const n = 1 + (сл() < 0.35 ? 1 : 0) + (сл() < 0.15 ? 1 : 0);
+      for (let k = 0; k < n; k++) {
+        const всего = Object.values(ВЕЩИ).reduce((a, b) => a + b[0], 0); let r = сл() * всего, имя = 'wooden_bucket_02';
+        for (const [и, [в]] of Object.entries(ВЕЩИ)) { r -= в; if (r <= 0) { имя = и; break; } }
+        const у = сл() * 1.4 - 0.7, расст = д.r + (ВЕЩИ[имя][1] ? 0.4 : 1.5 + сл() * 3);
+        let x = д.cx + (ох * Math.cos(у) - оз * Math.sin(у)) / ол * расст, z = д.cz + (ох * Math.sin(у) + оз * Math.cos(у)) / ол * расст;
+        // к стене: подвинуть к дому, пока не упрёмся
+        for (let ш = 0; ш < 8 && !API.вДоме(x, z, 0.7); ш++) { x -= ох / ол * 0.5; z -= оз / ол * 0.5; }
+        if (!свободно(x, z, 0.45) || наДороге(x, z, 1)) continue;
+        точкиВ.push({ x, z, имя, вар: 0, рот: ВЕЩИ[имя][1] ? Math.atan2(ох, оз) + (сл() - 0.5) * 0.4 : сл() * 6.28, мас: 0.9 + сл() * 0.2 });
+      }
+      // цветы — перед домом, со стороны дороги
+      if (сл() < 0.35) {
+        const кx = д.cx - ох / ол * (д.r + 1.2), кz = д.cz - оз / ол * (д.r + 1.2), вдольX = -оз / ол, вдольZ = ох / ол;
+        for (let i = -2; i <= 2; i++) { const x = кx + вдольX * i * 0.9 + (сл() - 0.5) * 0.4, z = кz + вдольZ * i * 0.9 + (сл() - 0.5) * 0.4;
+          if (свободно(x, z, 0.2) && !наДороге(x, z, 0.3)) точкиР.push({ x, z, имя: выбор(РАСТ.цветы), вар: -1, рот: сл() * 6.28, мас: 0.8 + сл() * 0.5 }); }
+      }
+      // у стены — папоротник и крапива в тени
+      if (сл() < 0.4) {
+        const у = сл() * 6.28, x = д.cx + Math.cos(у) * (д.r + 0.2), z = д.cz + Math.sin(у) * (д.r + 0.2);
+        let px = x, pz = z; for (let ш = 0; ш < 10 && API.вДоме(px, pz, 0.3); ш++) { px += Math.cos(у) * 0.4; pz += Math.sin(у) * 0.4; }
+        if (свободно(px, pz, 0.25) && !наДороге(px, pz, 0.5)) for (let i = 0; i < 2 + (сл() * 3 | 0); i++) точкиР.push({ x: px + (сл() - 0.5) * 1.2, z: pz + (сл() - 0.5) * 1.2, имя: выбор(РАСТ.стена), вар: -1, рот: сл() * 6.28, мас: 0.7 + сл() * 0.5 });
+      }
+    }
+    // обочины: кустики сорняков вдоль дорог, с обеих сторон
+    for (const д of API.дороги) {
+      const пш = API.ШИРИНА[д.т] / 2;
+      for (let i = 0; i < д.п.length - 1; i++) {
+        const [ax, az] = д.п[i], [bx, bz] = д.п[i + 1], L = Math.hypot(bx - ax, bz - az); if (!L) continue;
+        const ux = (bx - ax) / L, uz = (bz - az) / L;
+        for (let s = сл() * 5; s < L; s += 3 + сл() * 6) {
+          if (сл() < 0.45) continue;
+          const сторона = сл() < 0.5 ? -1 : 1, отступ = пш + 0.5 + сл() * 1.6;
+          const x = ax + ux * s - uz * отступ * сторона, z = az + uz * s + ux * отступ * сторона;
+          if (!свободно(x, z, 0.3) || наДороге(x, z, 0.3)) continue;
+          const куст = 1 + (сл() < 0.4 ? 1 + (сл() * 2 | 0) : 0), имя = выбор(РАСТ.обочина);
+          for (let k = 0; k < куст; k++) точкиР.push({ x: x + (сл() - 0.5) * 0.9, z: z + (сл() - 0.5) * 0.9, имя, вар: -1, рот: сл() * 6.28, мас: 0.6 + сл() * 0.6 });
+        }
+      }
+    }
+  }
+
+  // ---------- модели ----------
+  const шаблоны = {};             // имя → [вариант: [{ геом, мат }]]
+  function разобрать(имя, сц, растение) {
+    сц.updateMatrixWorld(true);
+    const варианты = [];
+    const узлы = растение ? сц.children : [сц];
+    for (const у of узлы) {
+      const части = [];
+      у.traverse(о => { if (!о.isMesh) return;
+        const г = о.geometry.clone(); const м = о.matrixWorld.clone();
+        if (растение) { const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); у.matrixWorld.decompose(p, q, s); м.premultiply(new THREE.Matrix4().makeTranslation(-p.x, -p.y, -p.z)); }
+        г.applyMatrix4(м);
+        // листья: нормали — вверх, как у травы: иначе изнанка, повёрнутая к солнцу, выходит чёрной
+        if (растение && г.attributes.normal) { const н = г.attributes.normal; for (let i = 0; i < н.count; i++) н.setXYZ(i, 0, 1, 0); н.needsUpdate = true; }
+        части.push({ геом: г, мат: о.material }); });
+      if (!части.length) continue;
+      const б = new THREE.Box3(); for (const ч of части) { ч.геом.computeBoundingBox(); б.union(ч.геом.boundingBox); }
+      const ц = б.getCenter(new THREE.Vector3());
+      for (const ч of части) { ч.геом.translate(-ц.x, -б.min.y, -ц.z); ч.геом.computeBoundingSphere(); }
+      for (const ч of части) {
+        const м = ч.мат; м.side = растение ? THREE.DoubleSide : м.side;
+        if (растение) { м.alphaTest = 0.5; м.transparent = false; }
+        м.metalness = Math.min(м.metalness, 0.12);          // без отражений окружения металл выходит чёрным
+      }
+      варианты.push(части);
+    }
+    шаблоны[имя] = варианты;
+  }
+  function загрузить(файл, имена, растения) {
+    return new Promise(ок => {
+      const с = document.createElement('script'); с.src = 'meloch/' + файл + '.js';
+      с.onload = () => {
+        let ждём = имена.length; if (!ждём) ок();
+        for (const имя of имена) {
+          const д = window.__glb && window.__glb['м_' + имя]; if (!д) { if (!--ждём) ок(); continue; }
+          const с2 = atob(д.b), б = new Uint8Array(с2.length); for (let i = 0; i < с2.length; i++) б[i] = с2.charCodeAt(i);
+          delete window.__glb['м_' + имя];
+          new THREE.GLTFLoader().parse(б.buffer, '', г => { разобрать(имя, г.scene, растения); if (!--ждём) ок(); }, () => { if (!--ждём) ок(); });
+        }
+      };
+      с.onerror = () => ок();
+      document.head.appendChild(с);
+    });
+  }
+
+  // ---------- отрисовка: InstancedMesh на каждую часть каждого варианта ----------
+  const меши = new Map();         // 'имя/вар/часть' → InstancedMesh
+  const осень = new THREE.Color(1.25, 0.95, 0.55), белый = new THREE.Color(1, 1, 1);
+  function меш(ключ, ч, макс, тень) {
+    let м = меши.get(ключ);
+    if (!м) { м = new THREE.InstancedMesh(ч.геом, ч.мат, макс); м.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(макс * 3).fill(1), 3);   // цвета — сразу на все места: setColorAt при count = 0 создал бы пустой массив (чёрные кусты)
+      м.castShadow = тень; м.receiveShadow = true; м.count = 0; сцена.add(м); меши.set(ключ, м); }
+    return м;
+  }
+  const мат4 = new THREE.Matrix4(), кв = new THREE.Quaternion(), ось = new THREE.Vector3(0, 1, 0), поз = new THREE.Vector3(), мас = new THREE.Vector3();
+  let цx = Infinity, цz = Infinity, готово = false;
+  function обновить(px, pz, сразу) {
+    if (!готово || (!сразу && Math.hypot(px - цx, pz - цz) < 15)) return;
+    цx = px; цz = pz;
+    const сз = window.__сезон && window.__сезон.какой, зима = сз === 'зима', оттенок = сз === 'осень' ? осень : белый;
+    const счёт = new Map();
+    const поставить = (т, растение, макс, тень) => {
+      const вар = шаблоны[т.имя]; if (!вар || !вар.length) return;
+      const в = т.вар >= 0 ? т.вар % вар.length : Math.floor((т.x * 7.13 + т.z * 3.71) * 100) % вар.length;
+      вар[Math.abs(в)].forEach((ч, i) => {
+        const ключ = т.имя + '/' + Math.abs(в) + '/' + i, м = меш(ключ, ч, макс, тень), n = счёт.get(ключ) || 0;
+        if (n >= макс) return;
+        кв.setFromAxisAngle(ось, т.рот); поз.set(т.x, API.землиВысота(т.x, т.z) - 0.02, т.z); мас.setScalar(т.мас * (РОСТ[т.имя] || 1));
+        м.setMatrixAt(n, мат4.compose(поз, кв, мас)); if (растение) м.setColorAt(n, оттенок);
+        счёт.set(ключ, n + 1);
+      });
+    };
+    // ближние — первыми (если упрёмся в предел)
+    const бл = (список, R, предел) => список.filter(т => Math.abs(т.x - px) < R && Math.abs(т.z - pz) < R && (т.дд = (т.x - px) ** 2 + (т.z - pz) ** 2) < R * R).sort((a, b) => a.дд - b.дд).slice(0, предел);
+    for (const т of бл(точкиВ, НАСТР.вR, НАСТР.вМакс)) поставить(т, false, 40, УР >= 2);
+    if (!зима) for (const т of бл(точкиР, НАСТР.рR, НАСТР.рМакс)) поставить(т, true, 160, false);
+    for (const [ключ, м] of меши) { м.count = счёт.get(ключ) || 0; м.instanceMatrix.needsUpdate = true; if (м.instanceColor) м.instanceColor.needsUpdate = true; }
+  }
+  // догружаем после старта, когда игра уже идёт (не мешаем загрузке)
+  let начато = false;
+  API.каждыйКадр.push((dt, ms, П) => {
+    if (!начато && document.getElementById('старт').hidden) {
+      начато = true;
+      setTimeout(async () => {
+        расставить();
+        await загрузить('veshchi', Object.keys(ВЕЩИ), false);
+        await загрузить('rasteniya', [...new Set([...РАСТ.обочина, ...РАСТ.стена, ...РАСТ.цветы])], true);
+        готово = true; обновить(П.x, П.z, true);
+      }, 4000);
+    }
+    if (готово) { const ф = window.__фокус || П; обновить(ф.x, ф.z); }
+  });
+  window.__мелочи = { точкиВ, точкиР, обновить: () => обновить(window.__мир.поз.x, window.__мир.поз.z, true), меши };
 }]);
 
 // ⚙ → УПРАВЛЕНИЕ И ЗВУК: три ползунка громкости
