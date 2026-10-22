@@ -23482,6 +23482,9 @@ function наДамбе(x, z, запас = 2.2) {
 }
 function вВоде(x, z) { if (ДАМБЫ.length && наДамбе(x, z)) return null; for (const в of воды) if (внутри(x, z, в.п)) return в; return null; }
 const СПЛ_W = 2048, СПЛ_H = Math.round(2048 * ГЛУБ / ШИР);
+// Земля со спутника (Esri World Imagery, 2 м на пиксель): в красном — пашня (и огороды), в зелёном — стерня и
+// сухая трава, в синем — утоптанная земля. Поля, огороды и межи — как на снимке, а не наугад. Нет файла — по карте OSM.
+const снимокЗемли = await new Promise(ок => { const к = new Image(); к.onload = () => ок(к); к.onerror = () => ок(null); к.src = 'tex/zemlya_sputnik.png'; setTimeout(() => ок(null), 20000); });
 const сплат = document.createElement('canvas'); сплат.width = СПЛ_W; сплат.height = СПЛ_H;
 const сп = сплат.getContext('2d');
 const СX = x => (x + ШИР / 2) / ШИР * СПЛ_W, СZ = z => (z + ГЛУБ / 2) / ГЛУБ * СПЛ_H, СМ = СПЛ_W / ШИР;
@@ -23517,9 +23520,11 @@ const текСплат = new THREE.CanvasTexture(сплат);
   // выгоревшие проплешины по выгону и посёлку
   сп.globalCompositeOperation = 'lighter';
   for (let i = 0; i < 700; i++) сплатПятно((случай(i * 1.37) - 0.5) * ШИР, (случай(i * 2.71 + 5) - 0.5) * ГЛУБ, 6 + случай(i * 3.3) * 26, 'rgba(0,150,0,0.5)');
+  if (снимокЗемли) { сп.globalCompositeOperation = 'lighter'; сп.drawImage(снимокЗемли, 0, 0, СПЛ_W, СПЛ_H); }
   сп.globalCompositeOperation = 'source-over';
   угодья.forEach(у => {
     let цв = null;
+    if (снимокЗемли && (у.т === 'farmland' || у.т === 'allotments' || у.т === 'orchard')) return;      // эти — уже со снимка
     if (у.т === 'farmland') цв = поляРаспашка.get(у) ? 'rgb(255,0,0)' : 'rgb(0,255,0)';
     else if (у.т === 'allotments') цв = 'rgb(215,0,25)';
     else if (у.т === 'orchard') цв = 'rgb(0,12,0)';
@@ -23564,11 +23569,11 @@ const текСплат = new THREE.CanvasTexture(сплат);
         vec4 sp = texture2D(splat, vSpl);
         vec3 tG = mix(texture2D(map, vUv).rgb, texture2D(map, vUv * 0.37 + vec2(0.31, 0.57)).rgb, 0.4);
         tG *= 0.78 + 0.3 * texture2D(mapDry, vUv * 0.017).r / 0.72;
-        vec3 tD = mix(texture2D(mapDry, vUv * 0.8).rgb, texture2D(mapDry, vUv * 0.23 + 0.3).rgb, 0.3);
+        vec3 tD = mix(texture2D(mapDry, vUv * 0.8).rgb, texture2D(mapDry, vUv * 0.23 + 0.3).rgb, 0.3) * vec3(1.14, 1.0, 0.7);      // стерня — золотистая
         vec3 tR = texture2D(mapDirt, vUv * 0.7).rgb;
         float farF = clamp(length(vViewPosition) / 90.0, 0.0, 1.0);
         vec3 tS = mix(texture2D(mapSoil, vUv * 0.6).rgb, texture2D(mapSoil, vUv * 0.11 + 0.4).rgb, 0.45 + 0.45 * farF);
-        tS *= vec3(0.78, 0.8, 0.86) * (0.8 + 0.35 * texture2D(mapDry, vUv * 0.021 + 0.2).r / 0.72);
+        tS *= vec3(0.56, 0.47, 0.40) * (0.8 + 0.35 * texture2D(mapDry, vUv * 0.021 + 0.2).r / 0.72);      // чернозём — тёмный, как на снимке
         float nearF = clamp(1.0 - length(vViewPosition) / 70.0, 0.0, 1.0);
         tS *= 1.0 - nearF * (0.16 - 0.16 * sin(vUv.x * 31.4)) * 0.5;
         tD *= 1.0 - nearF * (0.1 - 0.1 * sin(vUv.x * 18.8 + sin(vUv.y * 0.7))) * 0.5;
