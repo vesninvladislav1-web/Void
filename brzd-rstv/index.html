@@ -17872,13 +17872,14 @@ window.ДЕТАЛИ.push(['гонки', function (API) {
   }
   for (const т of ТРАССЫ) Object.assign(т, путь(т));
 
-  // ---- старт: клетчатая арка над дорогой ----
+  // ---- старт: клетчатая арка над дорогой — стоит только во время заезда ----
+  let аркаСтарта = null;
   const клетка = (() => { const к = document.createElement('canvas'); к.width = 128; к.height = 32; const с = к.getContext('2d'); for (let i = 0; i < 16; i++) for (let j = 0; j < 4; j++) { с.fillStyle = (i + j) % 2 ? '#111' : '#F4F4F0'; с.fillRect(i * 8, j * 8, 8, 8); } const т = new THREE.CanvasTexture(к); return т; })();
   {
     const гр = new THREE.Group(), м = new THREE.MeshStandardMaterial({ color: 0xB8B8B8, roughness: 0.6 }), ш = 4.2;
     for (const s of [-1, 1]) { const с = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 4.6, 8), м); с.position.set(s * ш, 2.3, 0); с.castShadow = true; гр.add(с); }
     const п = new THREE.Mesh(new THREE.BoxGeometry(ш * 2 + 0.3, 0.7, 0.06), new THREE.MeshStandardMaterial({ map: клетка, roughness: 0.7 })); п.position.y = 4.3; гр.add(п);
-    гр.position.set(старт.x, В(старт.x, старт.z), старт.z); гр.rotation.y = ТРАССЫ[0].курс0; сцена.add(гр);
+    гр.position.set(старт.x, В(старт.x, старт.z), старт.z); гр.rotation.y = ТРАССЫ[0].курс0; гр.visible = false; сцена.add(гр); аркаСтарта = гр;
   }
 
   // ---- кольца ----
@@ -17962,13 +17963,14 @@ window.ДЕТАЛИ.push(['гонки', function (API) {
     const рв = (рекорды()[т.ид] || {})[тр.вид];
     тр.на(старт.x, старт.z, т.курс0);
     г = { т, тр, этап: 'отсчёт', t: 3.2, i: 0, путь: [], запись: 0, лучш: рв || null, призрак: рв && рв.п && рв.п.length > 2 ? сделатьПризрак(тр.вид) : null };
-    отсчёт.style.display = 'block'; таймер.style.display = 'block'; кнСойти.style.display = 'block';
+    отсчёт.style.display = 'block'; таймер.style.display = 'block'; кнСойти.style.display = 'block'; if (аркаСтарта) аркаСтарта.visible = true;
     поставитьКольцо(кольцаМ[0], т.кольца[0], т.кольца.length === 1, false); поставитьКольцо(кольцаМ[1], т.кольца[1], т.кольца.length === 2, true);
   }
   function убрать() {
     if (!г) return;
     if (г.призрак) сцена.remove(г.призрак);
     for (const м of кольцаМ) м.visible = false;
+    if (аркаСтарта) аркаСтарта.visible = false;
     отсчёт.style.display = 'none'; таймер.style.display = 'none'; кнСойти.style.display = 'none';
     подск() && подск().убратьМетку && подск().убратьМетку();
     г = null;
