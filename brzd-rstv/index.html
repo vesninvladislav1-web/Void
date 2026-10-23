@@ -2654,6 +2654,7 @@ window.ДЕТАЛИ.push(['дворы', function (API) {
     let сосед = null;
     забСетка.вокруг(нx, нz, 1.2, о => { if (о !== п && Math.hypot(о.x - нx, о.z - нz) < 0.7 && Math.abs(Math.cos(о.угол - п.угол)) > 0.97 && !занятыеПанели.has(о)) { сосед = о; return true; } return false; });
     if (сосед) { занятыеПанели.add(сосед); лист(сосед, металл ? К.воротаМ : К.воротаД, false); плюс('ворот'); }
+    к.ворота = сосед ? [сосед.x, сосед.z] : [п.x, п.z];          // середина ворот — туда заходит скотина
     // столбы — выше полотна, с «шапками»
     const цвСт = металл ? оттенок('#4A4A48', 0.78) : оттенок('#6B5A48', 0.75);
     const столбы = [[п.x + ux * 1.33, п.z + uz * 1.33], [п.x - ux * 1.33, п.z - uz * 1.33]];
@@ -2988,6 +2989,7 @@ window.ДЕТАЛИ.push(['дворы', function (API) {
       API.безТравы.push(углы);
       API.тени.пятно(x, z, 0.8, 0.4);
       занять(x + fx * 0.2, z + fz * 0.2, fx, fz, 0.8, 0.55);
+      (window.__будки = window.__будки || []).push({ x: x + fx * 0.85, z: z + fz * 0.85, fx, fz });      // тут лежит собака (модуль «животные»)
       плюс('будок', x, z);
       return;
     }
@@ -3114,7 +3116,7 @@ window.ДЕТАЛИ.push(['дворы', function (API) {
   // 1. улица: калитки с воротами, палисадники, лавочки
   for (const д of жилые) {
     const р = рамки.get(д), к = найтиКалитку(д);
-    if (к) { калитки.set(д, к); воротаКалитка(д, к); }
+    if (к) { калитки.set(д, к); воротаКалитка(д, к); (window.__калитки = window.__калитки || []).push({ x: к.ворота[0], z: к.ворота[1], wx: к.wx, wz: к.wz }); }   // в ворота вечером заходит своя корова (модуль «животные»)
     палисадник(д, р);
     if (к) лавочка(д, к);
   }
@@ -6921,6 +6923,7 @@ window.ДЕТАЛИ.push(['звуки', function (API) {
     if (ночь && !дождь) { таймСова -= dt; if (таймСова <= 0) { таймСова = 25 + Math.random() * 50; сова(0.4 + Math.random() * 0.5, Math.random() * 2 - 1); } }
   });
 
+  window.__звуки = { гав: (гр, p, злая) => { if (А.ctx && А.ctx.state === 'running') гав(гр, p, злая); } };
   // после взрыва: звон в ушах, фон стихает, и по всему посёлку лают собаки
   window.__подписка('сортир-взорвался', д => {
     if (!А.ctx) return;
@@ -9149,7 +9152,22 @@ window.ДЕТАЛИ.push(['красота', function (API) {
     const мат = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8 });
     const утки = [];
     const Nу = УЛ ? 6 : 3;
-    for (let i = 0; i < Nу; i++) { const м = new THREE.Mesh(утка(i % 3 === 0), мат); м.castShadow = true; м.visible = false; сцена.add(м); утки.push({ м, в: null, курс: сл() * 6.28, t: сл() * 10 }); }
+    for (let i = 0; i < Nу; i++) { const м = new THREE.Mesh(утка(i % 3 === 0), мат); м.castShadow = true; м.visible = false; м.rotation.order = 'YXZ'; сцена.add(м); утки.push({ м, в: null, курс: сл() * 6.28, t: сл() * 10, ныряет: 0 }); }
+    window.__утки = утки;
+    // «кря-кря-кря»: гнусавое, каждое тише и ниже предыдущего
+    let кряТ = 6 + сл() * 10;
+    function кря(x, z) {
+      const а = window.__аудио; if (!а || !а.ctx || а.ctx.state !== 'running') return;
+      const к = API.камера.position, гр = Math.max(0, 1 - Math.hypot(x - к.x, z - к.z) / 70); if (гр <= 0) return;
+      const c = а.ctx, n = 2 + (сл() * 3 | 0);
+      for (let i = 0; i < n; i++) {
+        const t = c.currentTime + i * 0.19, о = c.createOscillator(), ф = c.createBiquadFilter(), g = c.createGain(), f = 300 - i * 18;
+        о.type = 'sawtooth'; о.frequency.setValueAtTime(f, t); о.frequency.exponentialRampToValueAtTime(f * 0.78, t + 0.13);
+        ф.type = 'bandpass'; ф.frequency.value = 1250; ф.Q.value = 3.5;
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.07 * гр * (1 - i * 0.18), t + 0.015); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.14);
+        о.connect(ф); ф.connect(g); g.connect(а.фон || а.мастер); о.start(t); о.stop(t + 0.16);
+      }
+    }
     // круги — кольца, расходятся и гаснут
     const кМат = () => new THREE.MeshBasicMaterial({ color: 0xF0F4F4, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide });
     const круги = []; for (let i = 0; i < 6; i++) { const м = new THREE.Mesh(new THREE.RingGeometry(0.92, 1, 40).rotateX(-Math.PI / 2), кМат()); м.visible = false; м.userData.безОблаков = true; сцена.add(м); круги.push({ м, t: 9 }); }
@@ -9162,17 +9180,29 @@ window.ДЕТАЛИ.push(['красота', function (API) {
       // ближайший пруд в 160 м
       let бл = null, лучш = 160;
       for (const в of воды) { let cx = 0, cz = 0; for (const т of в.п) { cx += т[0]; cz += т[1]; } cx /= в.п.length; cz /= в.п.length; в.ц = в.ц || [cx, cz]; const d = Math.hypot(в.ц[0] - П.x, в.ц[1] - П.z); if (d < лучш) { лучш = d; бл = в; } }
+      const лёд = window.__сезон && window.__сезон.какой === 'зима';      // зимой пруд подо льдом — уток нет
       for (const у of утки) {
-        if (!бл) { у.м.visible = false; у.в = null; continue; }
+        if (!бл || лёд) { у.м.visible = false; у.в = null; continue; }
         if (у.в !== бл) { const т = точкаНаВоде(бл, бл.ц[0], бл.ц[1], 25); if (!т) { у.м.visible = false; continue; } у.в = бл; у.м.position.set(т[0], бл.уровень + 0.01, т[1]); }
         у.м.visible = true; у.t += dt;
-        у.курс += Math.sin(у.t * 0.4) * dt * 0.6;
-        const ск = 0.35 + Math.sin(у.t * 0.3) * 0.15, nx = у.м.position.x + Math.sin(у.курс) * ск * dt, nz = у.м.position.z + Math.cos(у.курс) * ск * dt;
+        const ux = у.м.position.x, uz = у.м.position.z, dП = Math.hypot(ux - П.x, uz - П.z);
+        let ск = 0.35 + Math.sin(у.t * 0.3) * 0.15;
+        if (dП < 7) {                                                       // человек у воды — отплывают от него
+          const а = Math.atan2(ux - П.x, uz - П.z), d = а - у.курс;
+          у.курс += Math.atan2(Math.sin(d), Math.cos(d)) * Math.min(1, dt * 3); ск = 0.95; у.ныряет = 0;
+        } else у.курс += Math.sin(у.t * 0.4) * dt * 0.6;
+        // кормится: голову под воду, хвост кверху
+        у.ныряет = Math.max(0, у.ныряет - dt); if (!у.ныряет && dП > 10 && сл() < dt * 0.05) у.ныряет = 2 + сл() * 2.5;
+        if (у.ныряет > 0) ск = 0.04;
+        const nx = ux + Math.sin(у.курс) * ск * dt, nz = uz + Math.cos(у.курс) * ск * dt;
         if (API.внутри(nx + Math.sin(у.курс) * 0.8, nz + Math.cos(у.курс) * 0.8, бл.п)) { у.м.position.x = nx; у.м.position.z = nz; }
         else у.курс += dt * 2.5;                                           // берег — разворачивается
-        у.м.rotation.set(Math.sin(у.t * 1.6) * 0.04, у.курс, Math.sin(у.t * 1.1) * 0.05);
-        у.м.position.y = бл.уровень + 0.01 + Math.sin(у.t * 1.6) * 0.012;
+        у.нк = (у.нк || 0) + ((у.ныряет > 0.3 ? 1 : 0) - (у.нк || 0)) * Math.min(1, dt * 5); const нырок = у.нк;
+        у.м.rotation.set(Math.sin(у.t * 1.6) * 0.04 * (1 - нырок) + нырок * 1.25, у.курс, Math.sin(у.t * 1.1) * 0.05 * (1 - нырок));
+        у.м.position.y = бл.уровень + 0.01 + Math.sin(у.t * 1.6) * 0.012 - нырок * 0.04;
       }
+      кряТ -= dt;
+      if (кряТ <= 0) { кряТ = 8 + сл() * 25; const у = утки[Math.floor(сл() * утки.length)]; if (у && у.м.visible) кря(у.м.position.x, у.м.position.z); }
       // круги от рыбы — если пруд близко
       тКруг -= dt;
       if (бл && лучш < 90 && тКруг <= 0) {
@@ -16961,6 +16991,835 @@ window.ДЕТАЛИ.push(['машины на дорогах', function (API) {
     return null;
   }
   window.__машины = { машины, занято, узлы, рёбра };
+}]);
+
+// ===================== ЖИВОТНЫЕ =====================
+// Собаки на цепи у будок — встают и лают, когда идёшь мимо или едет машина; дворняги бегают по улицам и с лаем
+// гонятся за машинами, а к пешему подходят виляя хвостом. Стадо коров днём пасётся у пруда, вечером идёт
+// по улице домой (ночью — в сараях), утром обратно. Козы на привязи у домов. Гуси ходят гуськом у пруда —
+// подойдёшь близко, вожак шипит, ещё ближе — разбегаются, хлопая крыльями. Вороны сидят на проводах и
+// каркают, воробьи прыгают по земле — подойдёшь, вспархивают. Кошки сидят на заборах; ночью у них
+// светятся глаза. Зимой коровы, козы и гуси — в сараях; в дождь кошки и воробьи прячутся.
+// Каждая часть тела (туловище, голова, ноги, хвост, крылья) у вида — одна отрисовка на всех.
+window.ДЕТАЛИ.push(['животные', function (API) {
+  const { THREE, сцена, камера } = API, В = API.землиВысота, сл = Math.random;
+  const ц = h => API.цвет ? API.цвет(h) : new THREE.Color(h);
+  const угл = d => Math.atan2(Math.sin(d), Math.cos(d));
+  const сезон = () => window.__сезон ? window.__сезон.какой : 'лето';
+  const фазаДня = () => window.__свет && window.__свет.какой ? window.__свет.какой() : 'день';
+  const темно = () => !!(window.__свет && window.__свет.темно && window.__свет.темно());
+  const дождь = () => (window.__дождь || 0) > 0.4;
+  const поз = () => window.__мир && window.__мир.поз;
+  const свободно = (x, z, r = 0.4) => !API.вДоме(x, z, r) && !API.вВоде(x, z) && Math.abs(x) < API.ШИР / 2 - 30 && Math.abs(z) < API.ГЛУБ / 2 - 30;
+
+  // ---------- модели: детали сливаем в одну геометрию с цветом в вершинах ----------
+  // деталь: [геометрия, цвет, x, y, z, rx, ry, rz]; белые детали потом красятся цветом зверя (окрас), тёмные — остаются
+  function слить(детали) {
+    const p = [], n = [], c = [], м = new THREE.Matrix4(), q = new THREE.Quaternion(), е = new THREE.Euler(), v = new THREE.Vector3(), е1 = new THREE.Vector3(1, 1, 1);
+    for (const [г0, цв, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0] of детали) {
+      const г = г0.index ? г0.toNonIndexed() : г0.clone();
+      м.compose(v.set(x, y, z), q.setFromEuler(е.set(rx, ry, rz)), е1); г.applyMatrix4(м);
+      const col = ц(цв), P = г.attributes.position, N = г.attributes.normal;
+      for (let i = 0; i < P.count; i++) { p.push(P.getX(i), P.getY(i), P.getZ(i)); n.push(N.getX(i), N.getY(i), N.getZ(i)); c.push(col.r, col.g, col.b); }
+      г.dispose();
+    }
+    const г = new THREE.BufferGeometry();
+    г.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); г.setAttribute('normal', new THREE.Float32BufferAttribute(n, 3)); г.setAttribute('color', new THREE.Float32BufferAttribute(c, 3));
+    г.computeBoundingSphere(); return г;
+  }
+  const Я = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+  const Ш = (r, w = 8, h = 6) => new THREE.SphereGeometry(r, w, h);
+  const К = (r, h, n = 6) => new THREE.ConeGeometry(r, h, n);
+  const Ц = (r0, r1, h, n = 6) => new THREE.CylinderGeometry(r0, r1, h, n);
+  const ТЁМН = '#2A2420', БЕЛ = '#FFFFFF';
+
+  // ---------- вид: части на точках крепления; каждая часть — InstancedMesh на всех зверей вида ----------
+  // части: { имя: { г, точки: [[x,y,z], …] } } — у ног и крыльев точек несколько
+  const м4 = new THREE.Matrix4(), м4б = new THREE.Matrix4(), чв = new THREE.Quaternion(), ев = new THREE.Euler(0, 0, 0, 'YXZ'), вв = new THREE.Vector3(), мш = new THREE.Vector3();
+  const ноль = new THREE.Matrix4().makeScale(0, 0, 0), цвТмп = new THREE.Color();
+  function Вид(части, макс, светит) {
+    const мат = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92 });
+    const вид = { части, список: Object.entries(части), меши: {}, макс, n: 0 };
+    for (const [имя, ч] of Object.entries(части)) {
+      const всего = ч.точки.length * макс;
+      const м = new THREE.InstancedMesh(ч.г, ч.свет ? светит : мат, всего);
+      м.instanceMatrix.setUsage(THREE.DynamicDrawUsage); м.castShadow = !ч.свет; м.receiveShadow = false; м.frustumCulled = false;
+      // окрас каждого зверя — цвет экземпляра (умножается на цвета вершин); массив — сразу на всех (setColorAt берёт размер из count)
+      if (!ч.свет) { м.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(всего * 3).fill(1), 3); м.instanceColor.setUsage(THREE.DynamicDrawUsage); }
+      м.count = 0;
+      сцена.add(м); вид.меши[имя] = м;
+    }
+    return вид;
+  }
+  // нарисовать зверя: з — { x, y, z, курс, наклон, крен, м (масштаб), окрас (Color), позы: { часть: [[rx, ry, rz], …] }, сдвиг: { часть: [dx,dy,dz] } }
+  function нарисовать(вид, з) {
+    if (вид.n >= вид.макс) return;
+    const i = вид.n++;
+    м4б.compose(вв.set(з.x, з.y, з.z), чв.setFromEuler(ев.set(з.наклон || 0, з.курс, з.крен || 0)), мш.set(з.м, з.м, з.м));
+    for (const [имя, ч] of вид.список) {
+      const меш = вид.меши[имя], позы = з.позы && з.позы[имя], сдв = з.сдвиг && з.сдвиг[имя];
+      for (let k = 0; k < ч.точки.length; k++) {
+        const [px, py, pz] = ч.точки[k], р = позы ? позы[k] || позы[0] : null;
+        if (р === 'нет') { меш.setMatrixAt(i * ч.точки.length + k, ноль); continue; }
+        ев.set(р ? р[0] : 0, р ? р[1] : 0, р ? р[2] : 0);
+        м4.compose(вв.set(px + (сдв ? сдв[0] : 0), py + (сдв ? сдв[1] : 0), pz + (сдв ? сдв[2] : 0)), чв.setFromEuler(ев), мш.set(1, 1, 1)).premultiply(м4б);
+        меш.setMatrixAt(i * ч.точки.length + k, м4);
+        if (меш.instanceColor) меш.setColorAt(i * ч.точки.length + k, з.окрас);
+      }
+    }
+  }
+  function начатьКадр(вид) { вид.n = 0; }
+  function закончитьКадр(вид) {
+    for (const [имя, ч] of вид.список) {
+      const м = вид.меши[имя]; м.count = вид.n * ч.точки.length; м.visible = м.count > 0;          // никого не видно — и рисовать нечего
+      м.instanceMatrix.needsUpdate = true; if (м.instanceColor) м.instanceColor.needsUpdate = true;
+    }
+  }
+
+  // ===================== МОДЕЛИ =====================
+  const глазаМ = new THREE.MeshBasicMaterial({ color: 0xD8FF70, toneMapped: false });
+  // собака-дворняга: в холке ~0,5 м
+  const СОБАКА = Вид({
+    тело: { г: слить([[Я(0.3, 0.3, 0.62), БЕЛ, 0, 0, 0], [Я(0.32, 0.32, 0.22), БЕЛ, 0, 0.02, 0.2], [Я(0.22, 0.1, 0.4), '#E8E2D8', 0, -0.16, 0.02]]), точки: [[0, 0.5, 0]] },
+    голова: { г: слить([[Я(0.22, 0.2, 0.22), БЕЛ, 0, 0.06, 0.06], [Я(0.13, 0.11, 0.15), БЕЛ, 0, 0.01, 0.22], [Я(0.06, 0.05, 0.04), ТЁМН, 0, 0.05, 0.3], [Я(0.04, 0.03, 0.02), ТЁМН, 0.06, 0.11, 0.17], [Я(0.04, 0.03, 0.02), ТЁМН, -0.06, 0.11, 0.17],
+      [К(0.05, 0.11, 4), БЕЛ, 0.07, 0.2, 0.02, 0, 0.78, 0.2], [К(0.05, 0.11, 4), БЕЛ, -0.07, 0.2, 0.02, 0, 0.78, -0.2]]), точки: [[0, 0.62, 0.3]] },
+    ноги: { г: слить([[Я(0.07, 0.42, 0.07), БЕЛ, 0, -0.21, 0], [Я(0.08, 0.04, 0.1), '#3A3028', 0, -0.41, 0.015]]), точки: [[0.1, 0.42, 0.22], [-0.1, 0.42, 0.22], [0.1, 0.42, -0.22], [-0.1, 0.42, -0.22]] },
+    хвост: { г: слить([[Я(0.05, 0.05, 0.3), БЕЛ, 0, 0, -0.15]]), точки: [[0, 0.58, -0.3]] },
+  }, 90);
+  // корова: в холке ~1,3 м; пятна тёмные (у белой — чёрно-белая, у рыжей — бурые пятна)
+  const КОРОВА = Вид({
+    тело: { г: слить([[Я(0.72, 0.78, 1.7), БЕЛ, 0, 0, 0], [Я(0.74, 0.5, 0.5), ТЁМН, 0.01, 0.12, 0.3], [Я(0.6, 0.45, 0.42), ТЁМН, -0.08, 0.1, -0.45], [Я(0.5, 0.35, 0.3), ТЁМН, 0.12, -0.15, -0.05],
+      [Ш(0.17, 8, 6), '#E8A0A0', 0, -0.42, -0.45]]), точки: [[0, 1.15, 0]] },
+    голова: { г: слить([[Я(0.32, 0.36, 0.48), БЕЛ, 0, -0.05, 0.2], [Я(0.3, 0.2, 0.14), '#D8A898', 0, -0.17, 0.44], [К(0.04, 0.2, 5), '#E8DCC0', 0.15, 0.17, 0.08, 0, 0, -0.7], [К(0.04, 0.2, 5), '#E8DCC0', -0.15, 0.17, 0.08, 0, 0, 0.7],
+      [Я(0.16, 0.06, 0.1), БЕЛ, 0.22, 0.06, 0.08], [Я(0.16, 0.06, 0.1), БЕЛ, -0.22, 0.06, 0.08], [Я(0.04, 0.04, 0.02), ТЁМН, 0.12, 0.05, 0.27], [Я(0.04, 0.04, 0.02), ТЁМН, -0.12, 0.05, 0.27]]), точки: [[0, 1.42, 0.85]] },
+    ноги: { г: слить([[Я(0.15, 0.82, 0.15), БЕЛ, 0, -0.41, 0], [Я(0.16, 0.1, 0.17), '#2E2620', 0, -0.8, 0]]), точки: [[0.24, 0.82, 0.62], [-0.24, 0.82, 0.62], [0.24, 0.82, -0.62], [-0.24, 0.82, -0.62]] },
+    хвост: { г: слить([[Я(0.04, 0.7, 0.04), БЕЛ, 0, -0.35, 0], [Я(0.08, 0.16, 0.08), ТЁМН, 0, -0.74, 0]]), точки: [[0, 1.45, -0.86]] },
+  }, 12);
+  // коза: ~0,7 м, рога назад, бородка
+  const КОЗА = Вид({
+    тело: { г: слить([[Я(0.3, 0.34, 0.68), БЕЛ, 0, 0, 0]]), точки: [[0, 0.62, 0]] },
+    голова: { г: слить([[Я(0.16, 0.2, 0.26), БЕЛ, 0, 0.02, 0.1], [К(0.025, 0.22, 4), '#8A7E6A', 0.05, 0.18, -0.02, -0.9, 0, 0], [К(0.025, 0.22, 4), '#8A7E6A', -0.05, 0.18, -0.02, -0.9, 0, 0],
+      [Я(0.04, 0.12, 0.04), БЕЛ, 0, -0.14, 0.18], [Я(0.12, 0.04, 0.08), БЕЛ, 0.1, 0.07, 0.02], [Я(0.12, 0.04, 0.08), БЕЛ, -0.1, 0.07, 0.02], [Я(0.03, 0.03, 0.02), ТЁМН, 0.07, 0.07, 0.17], [Я(0.03, 0.03, 0.02), ТЁМН, -0.07, 0.07, 0.17]]), точки: [[0, 0.78, 0.36]] },
+    ноги: { г: слить([[Я(0.06, 0.48, 0.06), БЕЛ, 0, -0.24, 0], [Я(0.065, 0.05, 0.07), '#2E2620', 0, -0.46, 0]]), точки: [[0.1, 0.48, 0.24], [-0.1, 0.48, 0.24], [0.1, 0.48, -0.24], [-0.1, 0.48, -0.24]] },
+    хвост: { г: слить([[Я(0.05, 0.12, 0.05), БЕЛ, 0, 0.06, 0]]), точки: [[0, 0.74, -0.34]] },
+  }, 10);
+  // гусь: белый, оранжевые клюв и лапы; шея — отдельно (вытягивает, когда шипит)
+  const ГУСЬ = Вид({
+    тело: { г: слить([[Ш(0.2, 10, 8), БЕЛ, 0, 0, 0], [К(0.12, 0.22, 6), БЕЛ, 0, 0.04, -0.24, -1.9, 0, 0]]).scale(1, 0.85, 1.45), точки: [[0, 0.36, 0]] },
+    шея: { г: слить([[Ц(0.045, 0.06, 0.36, 6), БЕЛ, 0, 0.18, 0], [Ш(0.07, 8, 6), БЕЛ, 0, 0.38, 0.03], [К(0.035, 0.12, 5), '#F08A20', 0, 0.37, 0.14, Math.PI / 2, 0, 0], [Я(0.025, 0.025, 0.02), ТЁМН, 0.05, 0.4, 0.06], [Я(0.025, 0.025, 0.02), ТЁМН, -0.05, 0.4, 0.06]]), точки: [[0, 0.44, 0.22]] },
+    ноги: { г: слить([[Ц(0.018, 0.018, 0.22, 4), '#F08A20', 0, -0.11, 0], [Я(0.09, 0.015, 0.1), '#F08A20', 0, -0.22, 0.03]]), точки: [[0.07, 0.24, 0.02], [-0.07, 0.24, 0.02]] },
+    крылья: { г: слить([[Я(0.03, 0.14, 0.36), '#EEEAE4', 0, -0.07, -0.08]]), точки: [[0.17, 0.44, 0.02], [-0.17, 0.44, 0.02]] },
+  }, 16);
+  // кошка: ~0,25 м, длинный хвост; глаза ночью светятся
+  const КОШКА = Вид({
+    тело: { г: слить([[Я(0.13, 0.15, 0.36), БЕЛ, 0, 0, 0]]), точки: [[0, 0.24, 0]] },
+    голова: { г: слить([[Я(0.13, 0.12, 0.12), БЕЛ, 0, 0.04, 0.04], [К(0.035, 0.07, 4), БЕЛ, 0.04, 0.13, 0.02, 0, 0.78, 0], [К(0.035, 0.07, 4), БЕЛ, -0.04, 0.13, 0.02, 0, 0.78, 0],
+      [Я(0.025, 0.02, 0.02), '#E8B0A8', 0, 0.02, 0.11]]), точки: [[0, 0.3, 0.17]] },
+    глаза: { г: слить([[Я(0.028, 0.022, 0.01), '#FFFFFF', 0.032, 0.06, 0.105], [Я(0.028, 0.022, 0.01), '#FFFFFF', -0.032, 0.06, 0.105]]), точки: [[0, 0.3, 0.17]], свет: true },
+    ноги: { г: слить([[Я(0.04, 0.2, 0.04), БЕЛ, 0, -0.1, 0]]), точки: [[0.045, 0.2, 0.13], [-0.045, 0.2, 0.13], [0.045, 0.2, -0.13], [-0.045, 0.2, -0.13]] },
+    хвост: { г: слить([[Я(0.03, 0.03, 0.32), БЕЛ, 0, 0, -0.16]]), точки: [[0, 0.28, -0.18]] },
+  }, 10, глазаМ);
+  // ворона: серая с чёрными головой, крыльями и хвостом (серая ворона) или вся чёрная (грач); крылья складываются или машут
+  const ВОРОНА = Вид({
+    тело: { г: слить([[Я(0.12, 0.12, 0.26), БЕЛ, 0, 0, 0], [Я(0.1, 0.03, 0.14), '#24242A', 0, -0.02, -0.18, 0.25, 0, 0]]), точки: [[0, 0.11, 0]] },
+    голова: { г: слить([[Я(0.09, 0.09, 0.1), '#2A2A30', 0, 0.02, 0.02], [К(0.022, 0.08, 4), '#3A3A40', 0, 0.0, 0.1, Math.PI / 2, 0, 0], [Я(0.015, 0.015, 0.01), '#C8C8C8', 0.04, 0.035, 0.05], [Я(0.015, 0.015, 0.01), '#C8C8C8', -0.04, 0.035, 0.05]]), точки: [[0, 0.18, 0.13]] },
+    крылья: { г: слить([[Я(0.3, 0.012, 0.16), '#1E1E24', 0.15, 0, -0.02]]), точки: [[0.05, 0.15, 0.02], [-0.05, 0.15, 0.02]] },
+  }, 24);
+  // воробей: маленький бурый
+  const ВОРОБЕЙ = Вид({
+    тело: { г: слить([[Я(0.06, 0.06, 0.12), '#8A6A48', 0, 0, 0], [Я(0.05, 0.02, 0.07), '#6A5038', 0, 0, -0.09], [Я(0.05, 0.03, 0.06), '#D8CCB8', 0, -0.025, 0.02]]), точки: [[0, 0.06, 0]] },
+    голова: { г: слить([[Я(0.05, 0.05, 0.05), '#7A5A3C', 0, 0.01, 0.01], [К(0.012, 0.03, 4), '#3A3028', 0, 0, 0.045, Math.PI / 2, 0, 0], [Я(0.03, 0.015, 0.03), '#2A2420', 0, -0.012, 0.02]]), точки: [[0, 0.1, 0.06]] },
+    крылья: { г: слить([[Я(0.12, 0.008, 0.07), '#6A4E34', 0.06, 0, -0.01]]), точки: [[0.025, 0.08, 0.0], [-0.025, 0.08, 0.0]] },
+  }, 36);
+  for (const в of [ВОРОНА, ВОРОБЕЙ]) for (const м of Object.values(в.меши)) м.castShadow = false;     // от птичек тени не разглядеть — не считаем
+
+  // ===================== ЗВУКИ =====================
+  const А = () => window.__аудио;
+  function панГромк(x, z, дальность) {
+    const к = камера.position, dx = x - к.x, dz = z - к.z, d = Math.hypot(dx, dz);
+    const пр = new THREE.Vector3(); камера.getWorldDirection(пр);
+    const п = Math.max(-1, Math.min(1, (dx * -пр.z + dz * пр.x) / Math.max(1, d)));        // справа — плюс
+    return { гр: Math.max(0, 1 - d / дальность), п };
+  }
+  function выход(узел, п) {
+    const а = А(), c = а.ctx;
+    if (c.createStereoPanner) { const s = c.createStereoPanner(); s.pan.value = п; узел.connect(s); s.connect(а.фон || а.мастер); }
+    else узел.connect(а.фон || а.мастер);
+  }
+  const звукМожно = () => { const а = А(); return а && а.ctx && а.ctx.state === 'running'; };
+  function гав(x, z, злая) {
+    const { гр, п } = панГромк(x, z, 90); if (гр <= 0) return;
+    if (window.__звуки && window.__звуки.гав) { window.__звуки.гав(гр * 0.9, п, злая); return; }
+  }
+  function муу(x, z) {
+    if (!звукМожно()) return; const { гр, п } = панГромк(x, z, 140); if (гр <= 0) return;
+    const c = А().ctx, t = c.currentTime, д = 1.1 + сл() * 0.5, f = 105 + сл() * 30;
+    const о = c.createOscillator(), о2 = c.createOscillator(), ф = c.createBiquadFilter(), ф2 = c.createBiquadFilter(), g = c.createGain();
+    о.type = 'sawtooth'; о2.type = 'sawtooth'; о.frequency.setValueAtTime(f * 1.15, t); о.frequency.linearRampToValueAtTime(f, t + д * 0.3); о.frequency.linearRampToValueAtTime(f * 0.86, t + д);
+    о2.frequency.setValueAtTime(f * 1.16, t); о2.frequency.linearRampToValueAtTime(f * 0.87, t + д);
+    ф.type = 'bandpass'; ф.frequency.setValueAtTime(380, t); ф.frequency.linearRampToValueAtTime(720, t + д * 0.35); ф.frequency.linearRampToValueAtTime(420, t + д); ф.Q.value = 3;     // «м-у-у»: рот открывается и закрывается
+    ф2.type = 'lowpass'; ф2.frequency.value = 1400;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.16 * гр, t + 0.15); g.gain.setValueAtTime(0.16 * гр, t + д - 0.25); g.gain.exponentialRampToValueAtTime(0.0001, t + д);
+    о.connect(ф); о2.connect(ф); ф.connect(ф2); ф2.connect(g); выход(g, п); о.start(t); о2.start(t); о.stop(t + д + 0.05); о2.stop(t + д + 0.05);
+  }
+  function мээ(x, z) {
+    if (!звукМожно()) return; const { гр, п } = панГромк(x, z, 60); if (гр <= 0) return;
+    const c = А().ctx, t = c.currentTime, д = 0.55 + сл() * 0.25, f = 330 + сл() * 80;
+    const о = c.createOscillator(), лфо = c.createOscillator(), лг = c.createGain(), ф = c.createBiquadFilter(), g = c.createGain();
+    о.type = 'sawtooth'; о.frequency.value = f; лфо.frequency.value = 9; лг.gain.value = 0.5; лфо.connect(лг);
+    ф.type = 'bandpass'; ф.frequency.value = 1300; ф.Q.value = 2;
+    const тремоло = c.createGain(); тремоло.gain.value = 0.5; лг.connect(тремоло.gain);                    // дрожащее «мэ-э-э»
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.1 * гр, t + 0.05); g.gain.setValueAtTime(0.1 * гр, t + д - 0.15); g.gain.exponentialRampToValueAtTime(0.0001, t + д);
+    о.connect(ф); ф.connect(тремоло); тремоло.connect(g); выход(g, п); о.start(t); лфо.start(t); о.stop(t + д + 0.05); лфо.stop(t + д + 0.05);
+  }
+  function шум(c, сек) { const b = c.createBuffer(1, Math.floor(c.sampleRate * сек), c.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = сл() * 2 - 1; return b; }
+  function шшш(x, z) {        // гусь шипит
+    if (!звукМожно()) return; const { гр, п } = панГромк(x, z, 30); if (гр <= 0) return;
+    const c = А().ctx, t = c.currentTime, и = c.createBufferSource(), ф = c.createBiquadFilter(), g = c.createGain(); и.buffer = шум(c, 0.9);
+    ф.type = 'bandpass'; ф.frequency.value = 3200; ф.Q.value = 0.9;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12 * гр, t + 0.08); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.85);
+    и.connect(ф); ф.connect(g); выход(g, п); и.start(t); и.stop(t + 0.9);
+  }
+  function га(x, z) {         // гусь гогочет
+    if (!звукМожно()) return; const { гр, п } = панГромк(x, z, 80); if (гр <= 0) return;
+    const c = А().ctx, n = 2 + (сл() * 3 | 0);
+    for (let i = 0; i < n; i++) {
+      const t = c.currentTime + i * 0.22, о = c.createOscillator(), ф = c.createBiquadFilter(), g = c.createGain();
+      о.type = 'square'; о.frequency.setValueAtTime(520 + сл() * 60, t); о.frequency.exponentialRampToValueAtTime(400, t + 0.15);
+      ф.type = 'bandpass'; ф.frequency.value = 1100; ф.Q.value = 2.5;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06 * гр, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+      о.connect(ф); ф.connect(g); выход(g, п); о.start(t); о.stop(t + 0.18);
+    }
+  }
+  function кар(x, z) {
+    if (!звукМожно()) return; const { гр, п } = панГромк(x, z, 110); if (гр <= 0) return;
+    const c = А().ctx, n = 1 + (сл() * 3 | 0);
+    for (let i = 0; i < n; i++) {
+      const t = c.currentTime + i * 0.38, о = c.createOscillator(), и = c.createBufferSource(), ф = c.createBiquadFilter(), g = c.createGain();
+      о.type = 'sawtooth'; о.frequency.setValueAtTime(620 + сл() * 80, t); о.frequency.exponentialRampToValueAtTime(470, t + 0.24);
+      и.buffer = шум(c, 0.3); const гш = c.createGain(); гш.gain.value = 0.35;
+      ф.type = 'bandpass'; ф.frequency.value = 1500; ф.Q.value = 1.4;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.08 * гр, t + 0.03); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      о.connect(ф); и.connect(гш); гш.connect(ф); ф.connect(g); выход(g, п); о.start(t); и.start(t); о.stop(t + 0.3); и.stop(t + 0.3);
+    }
+  }
+  function мяу(x, z) {
+    if (!звукМожно()) return; const { гр, п } = панГромк(x, z, 30); if (гр <= 0) return;
+    const c = А().ctx, t = c.currentTime, д = 0.55, о = c.createOscillator(), ф = c.createBiquadFilter(), g = c.createGain();
+    о.type = 'triangle'; о.frequency.setValueAtTime(560, t); о.frequency.linearRampToValueAtTime(860, t + 0.18); о.frequency.linearRampToValueAtTime(520, t + д);
+    ф.type = 'bandpass'; ф.frequency.setValueAtTime(900, t); ф.frequency.linearRampToValueAtTime(1600, t + 0.2); ф.frequency.linearRampToValueAtTime(800, t + д); ф.Q.value = 2;
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.07 * гр, t + 0.06); g.gain.exponentialRampToValueAtTime(0.0001, t + д);
+    о.connect(ф); ф.connect(g); выход(g, п); о.start(t); о.stop(t + д + 0.05);
+  }
+  function фррр(x, z, сила = 1) {   // крылья — вспорхнули
+    if (!звукМожно()) return; const { гр, п } = панГромк(x, z, 40); if (гр <= 0) return;
+    const c = А().ctx, t = c.currentTime, и = c.createBufferSource(), ф = c.createBiquadFilter(), g = c.createGain(); и.buffer = шум(c, 0.6);
+    ф.type = 'lowpass'; ф.frequency.value = 900; const мод = c.createOscillator(), мг = c.createGain(); мод.frequency.value = 14; мг.gain.value = 0.5; мод.connect(мг);
+    const ам = c.createGain(); ам.gain.value = 0.5; мг.connect(ам.gain);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12 * гр * сила, t + 0.04); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.55);
+    и.connect(ф); ф.connect(ам); ам.connect(g); выход(g, п); и.start(t); мод.start(t); и.stop(t + 0.6); мод.stop(t + 0.6);
+  }
+
+  // ===================== КТО ГДЕ =====================
+  // машины рядом (свой ВАЗ, мопед, машины на дорогах): [x, z, скорость]
+  function машины() {
+    const л = [];
+    const Вз = window.__ваз; if (Вз && Вз.ез && Вз.ез.едет && Вз.машина) л.push([Вз.машина.x, Вз.машина.z, Math.abs(Вз.ез.v), Вз.машина]);
+    const М = window.__мопед; if (М && М.ст && М.ст.едет) л.push([М.ст.х, М.ст.z, Math.abs(М.ст.v), М.ст]);
+    const Мш = window.__машины; if (Мш && Мш.машины) for (const м of Мш.машины) if (м.кx !== null) л.push([м.кx, м.кz, м.v, м]);
+    return л;
+  }
+  const пеший = () => !window.__заРулём && !window.__поездка && !window.__летитЯша && !window.__игрокСкрыт;
+
+  // ---------- общая ходьба: повернуть к цели и шагать; препятствие — обойти ----------
+  function идти(з, tx, tz, ск, dt, поворот = 4) {
+    const dx = tx - з.x, dz = tz - з.z, d = Math.hypot(dx, dz);
+    if (d < 0.05) { з.ск = 0; return d; }
+    if (з.обходТ > 0) з.обходТ -= dt;
+    const хочу = з.обходТ > 0 ? з.обходК : Math.atan2(dx, dz), r = з.r || 0.3;
+    з.курс += Math.max(-поворот * dt, Math.min(поворот * dt, угл(хочу - з.курс)));
+    const ш = Math.min(d, ск * dt), nx = з.x + Math.sin(з.курс) * ш, nz = з.z + Math.cos(з.курс) * ш;
+    if (свободно(nx, nz, r)) { з.x = nx; з.z = nz; з.ск = ск; return d; }
+    // впереди дом или вода: ищем, куда свернуть (сначала туда же, куда обходили в прошлый раз), и сколько-то идём туда —
+    // иначе зверь, повернувшись к цели, снова упирался бы в ту же стену
+    з.ск = 0; const с = з.обходС || (сл() < 0.5 ? 1 : -1), к0 = Math.atan2(dx, dz);
+    for (const о of [0.7, 1.3, 1.9, 2.6]) for (const зн of [с, -с]) {
+      const кк = к0 + о * зн;
+      if (свободно(з.x + Math.sin(кк) * 0.7, з.z + Math.cos(кк) * 0.7, r)) { з.обходК = кк; з.обходТ = 0.8 + сл() * 0.7; з.обходС = зн; return d; }
+    }
+    з.курс += dt * 2.5;
+    return d;
+  }
+  // ноги: рысь (диагональные пары вместе) — для четвероногих; размах — от скорости
+  let кадрDt = 1 / 60;
+  function ногиЧетыре(з, шаг, размах) {
+    з.фаза = (з.фаза || 0) + кадрDt * (з.ск || 0) / шаг * Math.PI;
+    const a = Math.min(размах, (з.ск || 0) * 0.35) * Math.sin(з.фаза), b = -a;
+    return [[a, 0, 0], [b, 0, 0], [b, 0, 0], [a, 0, 0]];
+  }
+
+  // ===================== СОБАКИ НА ЦЕПИ =====================
+  const ОКРАС_СОБ = ['#C8A070', '#6A5040', '#2E2A26', '#D8CCB8', '#A07040', '#8A8478', '#B08850'];
+  const цепные = (window.__будки || []).slice(0, 80).map((б, i) => ({ б, x: б.x, z: б.z, курс: Math.atan2(б.fx, б.fz), ск: 0, лежит: true, злость: 0, лайТ: 1 + сл() * 3,
+    окрас: ц(ОКРАС_СОБ[i % ОКРАС_СОБ.length]), м: 0.9 + сл() * 0.25, хвост: 0, фаза: 0, r: 0.25, голова: 0 }));
+  function шагЦепных(dt, П, к, тачки) {
+    for (const с of цепные) {
+      const dc = Math.hypot(с.б.x - к.x, с.б.z - к.z); if (dc > 110) continue;
+      с.видно = true;
+      // кого облаивать: пеший игрок ближе 14 м, машина ближе 16 м
+      let цель = null, d0 = Infinity;
+      if (пеший()) { const d = Math.hypot(П.x - с.x, П.z - с.z); if (d < 14) { цель = [П.x, П.z]; d0 = d; } }
+      for (const [x, z, v] of тачки) { const d = Math.hypot(x - с.x, z - с.z); if (d < 16 && v > 1 && d < d0) { цель = [x, z]; d0 = d; } }
+      for (const к of стадо) { if (к.этап === 'дома' || режСтада === 'дома') continue; const d = Math.hypot(к.x - с.x, к.z - с.z); if (d < 10 && d < d0) { цель = [к.x, к.z]; d0 = d + 6; } }   // и на коров, идущих мимо
+      if (цель) с.злость = Math.min(1, с.злость + dt * 2); else с.злость = Math.max(0, с.злость - dt * 0.25);
+      с.лежит = с.злость < 0.05 && !цель;
+      if (цель) {
+        // рвётся к цели — цепь не пускает дальше 2,2 м от будки
+        let tx = цель[0], tz = цель[1]; const dx = tx - с.б.x, dz = tz - с.б.z, l = Math.hypot(dx, dz) || 1;
+        if (l > 2.2) { tx = с.б.x + dx / l * 2.2; tz = с.б.z + dz / l * 2.2; }
+        if (Math.hypot(tx - с.x, tz - с.z) > 0.2) идти(с, tx, tz, 2.6, dt, 7); else { с.ск = 0; с.курс += угл(Math.atan2(цель[0] - с.x, цель[1] - с.z) - с.курс) * Math.min(1, dt * 6); }
+        с.лайТ -= dt; if (с.лайТ <= 0) { с.лайТ = 0.7 + сл() * 1.1; гав(с.x, с.z, d0 < 6); с.гавк = 0.25; }
+      } else {
+        // успокоилась — к будке, ложится мордой наружу
+        if (Math.hypot(с.б.x - с.x, с.б.z - с.z) > 0.15) идти(с, с.б.x, с.б.z, 1.2, dt, 4); else { с.ск = 0; с.курс += угл(Math.atan2(с.б.fx, с.б.fz) - с.курс) * Math.min(1, dt * 2); }
+      }
+      if (с.гавк > 0) с.гавк -= dt;
+      с.хвост += dt * (с.злость > 0.5 ? 4 : 10);
+    }
+  }
+  function рисЦепных(t) {
+    for (const с of цепные) {
+      if (!с.видно) continue; с.видно = false;
+      const лёжа = с.лежит && с.ск < 0.1, ноги = лёжа ? [[-1.45, 0, 0.1], [-1.45, 0, -0.1], [1.45, 0, 0.1], [1.45, 0, -0.1]] : ногиЧетыре(с, 0.4, 0.6);
+      нарисовать(СОБАКА, { x: с.x, y: В(с.x, с.z) - (лёжа ? 0.3 * с.м : 0), z: с.z, курс: с.курс, м: с.м, окрас: с.окрас,
+        позы: { ноги, голова: [[лёжа ? 0.35 + Math.sin(t * 0.3 + с.м * 9) * 0.05 : с.гавк > 0 ? -0.35 : -0.1, Math.sin(t * 0.7 + с.м * 5) * (лёжа ? 0.3 : 0.15), 0]],
+          хвост: [[с.злость > 0.5 ? 0.9 : лёжа ? -0.2 : 0.6, Math.sin(с.хвост) * (с.злость > 0.5 ? 0.25 : 0.6), 0]] } });
+    }
+  }
+
+  // ===================== ДВОРНЯГИ =====================
+  const дворняги = [0, 1, 2].map(i => ({ x: 0, z: 0, курс: 0, ск: 0, реж: 'нет', т: 0, цель: null, кого: null, окрас: ц(['#B89060', '#3A3430', '#D8D0C0'][i]), м: 0.95 + i * 0.08, хвост: 0, фаза: 0, r: 0.25, лайТ: 0, гавк: 0 }));
+  function точкаНаДороге(x, z, R) {
+    for (let k = 0; k < 20; k++) {
+      const а = сл() * 6.283, r = R * (0.3 + сл() * 0.7), px = x + Math.cos(а) * r, pz = z + Math.sin(а) * r, д = API.ближайшаяДорога(px, pz);
+      if (!д) continue; const ox = д.px + (сл() - 0.5) * 2, oz = д.pz + (сл() - 0.5) * 2;
+      if (свободно(ox, oz)) return [ox, oz];
+    }
+    return null;
+  }
+  function шагДворняг(dt, П, тачки) {
+    if (сезон() === 'зима' && темно()) { for (const с of дворняги) с.реж = 'нет'; return; }
+    for (const с of дворняги) {
+      const dП = Math.hypot(П.x - с.x, П.z - с.z);
+      if (с.реж === 'нет' || dП > 170) { const т = точкаНаДороге(П.x, П.z, 90); if (т && Math.hypot(т[0] - П.x, т[1] - П.z) > 45) { [с.x, с.z] = т; с.реж = 'бродит'; с.цель = null; с.т = 0; } else { с.реж = 'нет'; continue; } }
+      с.т -= dt; с.гавк = Math.max(0, с.гавк - dt);
+      if (с.реж === 'бродит' || с.реж === 'нюхает') {
+        // едет машина — за ней с лаем
+        for (const [x, z, v, кто] of тачки) if (v > 4 && Math.hypot(x - с.x, z - с.z) < 11 && сл() < dt * 3) { с.реж = 'гонится'; с.кого = кто; с.т = 4 + сл() * 3; break; }
+        if (с.реж === 'бродит' && пеший() && dП < 5 && сл() < dt * 0.5) { с.реж = 'дружит'; с.т = 10 + сл() * 10; }
+      }
+      if (с.реж === 'бродит') {
+        if (!с.цель || Math.hypot(с.цель[0] - с.x, с.цель[1] - с.z) < 0.6) { с.цель = точкаНаДороге(с.x, с.z, 35) || [с.x, с.z]; if (сл() < 0.4) { с.реж = 'нюхает'; с.т = 2 + сл() * 4; } }
+        идти(с, с.цель[0], с.цель[1], 1.3, dt);
+      } else if (с.реж === 'нюхает') { с.ск = 0; if (с.т <= 0) с.реж = 'бродит'; }
+      else if (с.реж === 'гонится') {
+        const кто = с.кого, x = кто.кx !== undefined ? кто.кx : кто.х !== undefined ? кто.х : кто.x, z = кто.кz !== undefined ? кто.кz : кто.z;
+        // бежит сбоку, чуть сзади
+        const к2 = кто.ккурс !== undefined ? кто.ккурс : кто.курс || 0, tx = x - Math.sin(к2) * 2 + Math.cos(к2) * 2.2, tz = z - Math.cos(к2) * 2 + -Math.sin(к2) * 2.2;
+        идти(с, tx, tz, 8.5, dt, 8);
+        с.лайТ -= dt; if (с.лайТ <= 0) { с.лайТ = 0.35 + сл() * 0.4; гав(с.x, с.z, true); с.гавк = 0.2; }
+        if (с.т <= 0 || Math.hypot(x - с.x, z - с.z) > 30) { с.реж = 'бродит'; с.цель = null; }
+      } else if (с.реж === 'дружит') {
+        if (!пеший() || dП > 25 || с.т <= 0) { с.реж = 'бродит'; с.цель = null; }
+        else if (dП > 2.2) идти(с, П.x, П.z, dП > 6 ? 3.5 : 1.4, dt, 6); else { с.ск = 0; с.курс += угл(Math.atan2(П.x - с.x, П.z - с.z) - с.курс) * Math.min(1, dt * 4); }
+      }
+      с.хвост += dt * (с.реж === 'дружит' ? 16 : 8);
+    }
+  }
+  function рисДворняг(t) {
+    for (const с of дворняги) {
+      if (с.реж === 'нет') continue;
+      const бег = с.ск > 3;
+      нарисовать(СОБАКА, { x: с.x, y: В(с.x, с.z) + (бег ? Math.abs(Math.sin(с.фаза)) * 0.05 : 0), z: с.z, курс: с.курс, м: с.м, окрас: с.окрас,
+        позы: { ноги: ногиЧетыре(с, бег ? 0.55 : 0.35, бег ? 0.9 : 0.5), голова: [[с.реж === 'нюхает' ? 0.7 : с.гавк > 0 ? -0.35 : 0, Math.sin(t * 0.9 + с.м * 7) * 0.2, 0]],
+          хвост: [[с.реж === 'дружит' ? 0.7 : 0.4, Math.sin(с.хвост) * (с.реж === 'дружит' ? 0.7 : 0.35), 0]] } });
+    }
+  }
+
+  // ===================== СТАДО =====================
+  // пастбище — луг на краю посёлка: не пашня, не сад и не огород, без домов вокруг, в сотне метров от улицы, лучше у воды;
+  // путь домой — кратчайший по улицам до середины посёлка (мимо твоего дома), по дороге коровы расходятся по дворам
+  // граф улиц для стада: все дороги, и полевые тоже; тупик в паре метров от другой дороги (на карте не сошлись
+  // в одну точку) сшиваем — врезаем узел в ближний отрезок, иначе посёлок распадался бы на куски
+  const узлыУлиц = (() => {
+    const узлы = new Map(), ключ = (x, z) => Math.round(x * 2) + ',' + Math.round(z * 2);
+    const узел = (x, z) => { const k = ключ(x, z); let у = узлы.get(k); if (!у) узлы.set(k, у = { x, z, к: [] }); return у; };
+    const связать = (а, б) => { if (а !== б && !а.к.includes(б)) { а.к.push(б); б.к.push(а); } };
+    const концы = [];
+    for (const д of API.дороги || []) {
+      if (!д.п || д.п.length < 2) continue;
+      for (let i = 1; i < д.п.length; i++) связать(узел(...д.п[i - 1]), узел(...д.п[i]));
+      концы.push(узел(...д.п[0]), узел(...д.п[д.п.length - 1]));
+    }
+    for (const у of концы) {
+      if (у.к.length !== 1) continue;
+      let лучш = null, d0 = 8;
+      for (const а of узлы.values()) for (const б of а.к) {
+        if (а === у || б === у || у.к.includes(а) || у.к.includes(б)) continue;
+        const ux = б.x - а.x, uz = б.z - а.z, L2 = ux * ux + uz * uz || 1, t = Math.max(0, Math.min(1, ((у.x - а.x) * ux + (у.z - а.z) * uz) / L2));
+        const d = Math.hypot(у.x - а.x - ux * t, у.z - а.z - uz * t); if (d < d0) { d0 = d; лучш = [а, б, t]; }
+      }
+      if (!лучш) continue;
+      const [а, б, t] = лучш;
+      if (t < 0.05) связать(у, а); else if (t > 0.95) связать(у, б);
+      else { const н = узел(а.x + (б.x - а.x) * t, а.z + (б.z - а.z) * t); а.к = а.к.filter(u => u !== б); б.к = б.к.filter(u => u !== а); связать(а, н); связать(н, б); связать(у, н); }
+    }
+    return [...узлы.values()].filter(у => у.к.length);
+  })();
+  const центр = (() => { const Д = API.КАРТА.дом_игрока; return Д ? Д.о : [0, 0]; })();
+  const ближУзел = (x, z) => { let у = null, d0 = Infinity; for (const u of узлыУлиц) { const d = Math.hypot(u.x - x, u.z - z); if (d < d0) { d0 = d; у = u; } } return [у, d0]; };
+  const пастбище = (() => {
+    const воды = (API.воды || []).filter(в => в.п.length >= 3);
+    const угодья = (API.угодья || []).filter(у => у.т === 'farmland' || у.т === 'orchard' || у.т === 'cemetery' || у.т === 'allotments' || у.т === 'pitch');
+    const деревья = (API.ДЕРЕВЬЯ && API.ДЕРЕВЬЯ.деревья) || [], Сп = API.сплат;
+    const доВоды = (x, z) => { let d = Infinity; for (const в of воды) for (const [wx, wz] of в.п) d = Math.min(d, Math.hypot(wx - x, wz - z)); return d; };
+    // пашня по снимку: красный канал карты земли
+    const пашня = (x, z) => { try { const д = Сп.сп.getImageData(Math.round(Сп.СX(x)) - 8, Math.round(Сп.СZ(z)) - 8, 16, 16).data; let r = 0; for (let i = 0; i < д.length; i += 4) r += д[i]; return r / (д.length / 4) / 255; } catch (e) { return 0; } };
+    const канд = [];
+    for (const в of воды) { let cx = 0, cz = 0; for (const [x, z] of в.п) { cx += x; cz += z; } cx /= в.п.length; cz /= в.п.length;
+      for (const [bx, bz] of в.п) { const l = Math.hypot(bx - cx, bz - cz) || 1; канд.push([bx + (bx - cx) / l * 24, bz + (bz - cz) / l * 24]); } }
+    let сид = 777; const гсч = () => { сид = (сид * 16807) % 2147483647; return сид / 2147483647; };   // одно и то же пастбище у всех
+    for (let k = 0; k < 500 && узлыУлиц.length; k++) { const у = узлыУлиц[Math.floor(гсч() * узлыУлиц.length)], а = гсч() * 6.283, r = 35 + гсч() * 80; канд.push([у.x + Math.cos(а) * r, у.z + Math.sin(а) * r]); }
+    let лучш = null;
+    for (const [x, z] of канд) {
+      if (!свободно(x, z, 5) || угодья.some(у => API.внутри(x, z, у.п))) continue;
+      if ((API.дома || []).some(д => Math.hypot(д.cx - x, д.cz - z) < 50)) continue;
+      const [, dу] = ближУзел(x, z); if (dу > 130) continue;
+      let дер = 0; for (const т of деревья) if (Math.abs(т[0] - x) < 18 && Math.abs(т[1] - z) < 18) дер++;
+      const д = Math.hypot(x - центр[0], z - центр[1]);
+      const оценка = Math.abs(д - 260) + Math.max(0, dу - 50) * 1.5 + Math.min(доВоды(x, z), 250) * 0.3 + дер * 12;
+      if (лучш && оценка >= лучш.оценка) continue;
+      if (пашня(x, z) > 0.35) continue;
+      лучш = { x, z, оценка };
+    }
+    return лучш;
+  })();
+  // путь домой: от пастбища к ближайшему перекрёстку, дальше кратчайшим путём по улицам к середине посёлка (не длиннее 520 м)
+  const путьДомой = (() => {
+    if (!пастбище || !узлыУлиц.length) return null;
+    const [у0, d0] = ближУзел(пастбище.x, пастбище.z), [у1] = ближУзел(центр[0], центр[1]);
+    if (!у0 || !у1 || d0 > 160) return null;
+    const дист = new Map([[у0, 0]]), откуда = new Map(), готов = new Set();
+    for (;;) {
+      let у = null, du = Infinity; for (const [u, d] of дист) if (!готов.has(u) && d < du) { du = d; у = u; }
+      if (!у || у === у1) break; готов.add(у);
+      for (const р of у.к) { const d = du + Math.hypot(р.x - у.x, р.z - у.z); if (d < (дист.has(р) ? дист.get(р) : Infinity)) { дист.set(р, d); откуда.set(р, у); } }
+    }
+    // до середины посёлка не дойти (кусок улиц сам по себе) — до ближнего к ней перекрёстка, куда дойти можно
+    let конец = у1; if (!дист.has(у1)) { let лд = Infinity; for (const u of дист.keys()) { const d = Math.hypot(u.x - центр[0], u.z - центр[1]); if (d < лд) { лд = d; конец = u; } } }
+    const узлыП = []; for (let у = конец; у; у = откуда.get(у)) узлыП.unshift(у);
+    const п = [[пастбище.x, пастбище.z]]; let L = 0;
+    for (const у of узлыП) { const [px, pz] = п[п.length - 1]; L += Math.hypot(у.x - px, у.z - pz); п.push([у.x, у.z]); if (L > 520) break; }
+    return п.length > 2 ? п : null;
+  })();
+  const ОКРАС_КОР = ['#FFFFFF', '#FFFFFF', '#9A5A34', '#B87A48', '#FFFFFF', '#7A4A2C', '#C89060'];
+  const стадо = пастбище ? ОКРАС_КОР.map((о, i) => ({ x: пастбище.x + (сл() - 0.5) * 20, z: пастбище.z + (сл() - 0.5) * 20, курс: сл() * 6.28, ск: 0, окрас: ц(о), м: 0.92 + сл() * 0.14,
+    цель: null, ест: 0, хвост: сл() * 6, фаза: 0, r: 0.6, муТ: 10 + сл() * 40, i, этап: 'в стаде', кал: null, точки: null, тч: 0, т: 0 })) : [];
+  let режСтада = null, путьS = 0, фазаСтада = null;          // режСтада: 'пасётся' | 'домой' | 'дома' | 'на выпас'
+  function точкаПути(s) {
+    const п = путьДомой; let L = 0;
+    for (let i = 1; i < п.length; i++) { const [ax, az] = п[i - 1], [bx, bz] = п[i], d = Math.hypot(bx - ax, bz - az); if (L + d >= s) { const k = (s - L) / d; return [ax + (bx - ax) * k, az + (bz - az) * k, Math.atan2(bx - ax, bz - az)]; } L += d; }
+    const [x, z] = п[п.length - 1]; return [x, z, 0];
+  }
+  const длинаПути = () => { let L = 0; const п = путьДомой; for (let i = 1; i < п.length; i++) L += Math.hypot(п[i][0] - п[i - 1][0], п[i][1] - п[i - 1][1]); return L; };
+  // у каждой коровы свой двор: калитка у улицы, по которой стадо идёт домой; вечером корова сворачивает в неё сама
+  // (калиток у пути меньше, чем коров, — в один двор по две)
+  if (путьДомой) {
+    const L = длинаПути(), п = путьДомой;
+    const наПути = (x, z) => {
+      let L0 = 0, лучш = [0, Infinity];
+      for (let i = 1; i < п.length; i++) {
+        const [ax, az] = п[i - 1], [bx, bz] = п[i], ux = bx - ax, uz = bz - az, l = Math.hypot(ux, uz) || 1;
+        const t = Math.max(0, Math.min(l, ((x - ax) * ux + (z - az) * uz) / l)), d = Math.hypot(x - ax - ux / l * t, z - az - uz / l * t);
+        if (d < лучш[1]) лучш = [L0 + t, d];
+        L0 += l;
+      }
+      return лучш;
+    };
+    const кал = (window.__калитки || []).map(к => { const [s, d] = наПути(к.x, к.z); return { ...к, s, d }; })
+      .filter(к => к.d < 16 && к.s > L * 0.25 && к.s < L - 3).sort((a, b) => a.s - b.s);
+    const выбор = []; for (const к of кал) if (!выбор.length || к.s - выбор[выбор.length - 1].s > 9) выбор.push(к);
+    if (выбор.length) for (const к of стадо) к.кал = выбор[Math.floor(к.i * выбор.length / стадо.length)];
+  }
+  // калитка: wx, wz — от улицы во двор
+  const заКалитку = (к, во) => { const к2 = к.кал; к.этап = во ? 'во двор' : 'со двора'; к.тч = 0; к.т = 0;
+    к.точки = во ? [[к2.x - к2.wx * 1.6, к2.z - к2.wz * 1.6], [к2.x + к2.wx * 3, к2.z + к2.wz * 3]] : [[к2.x + к2.wx * 1.0, к2.z + к2.wz * 1.0], [к2.x - к2.wx * 2.2, к2.z - к2.wz * 2.2]]; };
+  function шагСтада(dt, П) {
+    if (!стадо.length) return;
+    // время дня сменилось: вечер — домой, ночь — по сараям, утро — на выпас, день — пасутся. Кто в пути — доходит
+    // (ночь застала по дороге домой — всё равно идут до своих калиток); зимой коровы в сараях
+    const ф = сезон() === 'зима' ? 'ночь' : фазаДня();
+    if (ф !== фазаСтада) {
+      фазаСтада = ф;
+      const наПастбище = () => { for (const к of стадо) { к.x = пастбище.x + (сл() - 0.5) * 20; к.z = пастбище.z + (сл() - 0.5) * 20; к.этап = 'в стаде'; к.цель = null; } };
+      if (ф === 'вечер' && режСтада !== 'дома' && режСтада !== 'домой') {
+        if (!путьДомой) режСтада = 'дома';
+        else { if (режСтада !== 'пасётся') наПастбище(); for (const к of стадо) к.этап = 'в стаде'; путьS = 0; режСтада = 'домой'; }
+      } else if (ф === 'ночь' && режСтада !== 'домой') режСтада = 'дома';
+      else if (ф === 'утро' && режСтада !== 'пасётся' && режСтада !== 'на выпас') {
+        if (!путьДомой) { наПастбище(); режСтада = 'пасётся'; }
+        else {
+          const L = длинаПути(), [ex, ez] = точкаПути(L); путьS = L + 10;
+          for (const к of стадо) { к.этап = к.кал ? 'дома' : 'в стаде'; if (!к.кал) { к.x = ex + (сл() - 0.5) * 6; к.z = ez + (сл() - 0.5) * 6; } }
+          режСтада = 'на выпас';
+        }
+      } else if (ф === 'день' && режСтада !== 'на выпас' && режСтада !== 'пасётся') { наПастбище(); режСтада = 'пасётся'; }
+    }
+    if (режСтада === 'дома') return;
+    const dП = Math.hypot(пастбище.x - П.x, пастбище.z - П.z);
+    if (режСтада === 'пасётся') {
+      if (dП > 400) return;
+      for (const к of стадо) {
+        к.ест -= dt;
+        if (к.ест > 0) { к.ск = 0; continue; }
+        if (!к.цель || Math.hypot(к.цель[0] - к.x, к.цель[1] - к.z) < 0.5) {
+          if (к.цель) { к.ест = 5 + сл() * 12; к.цель = null; continue; }
+          for (let k = 0; k < 8; k++) { const x = пастбище.x + (сл() - 0.5) * 34, z = пастбище.z + (сл() - 0.5) * 34; if (свободно(x, z, 1)) { к.цель = [x, z]; break; } }
+          if (!к.цель) к.цель = [пастбище.x, пастбище.z];
+        }
+        идти(к, к.цель[0], к.цель[1], 0.7, dt, 1.2);
+      }
+    } else {
+      // идут гурьбой по улице: путь — общий, у каждой — своё место в колонне, чуть вбок; поравнялась со своей калиткой — во двор
+      const L = длинаПути(), ск = 1.15, домой = режСтада === 'домой';
+      путьS += (домой ? 1 : -1) * ск * dt;
+      let всеНаМесте = true;
+      for (const к of стадо) {
+        const s = Math.max(0, Math.min(L, путьS + к.i * 3.2 * (домой ? -1 : 1)));
+        if (к.этап === 'дома') {
+          // утром: стадо поравнялось с калиткой — выходит со двора
+          if (!домой && к.кал && s <= к.кал.s + 2) { к.x = к.кал.x + к.кал.wx * 3; к.z = к.кал.z + к.кал.wz * 3; к.курс = Math.atan2(-к.кал.wx, -к.кал.wz); заКалитку(к, false); }
+          else { if (!домой) всеНаМесте = false; continue; }
+        }
+        всеНаМесте = всеНаМесте && !домой && к.этап === 'в стаде';
+        if (к.этап === 'в стаде') {
+          const [x, z, у] = точкаПути(s), бок = ((к.i % 3) - 1) * 1.1, tx = x + Math.cos(у) * бок, tz = z - Math.sin(у) * бок, d = Math.hypot(tx - к.x, tz - к.z);
+          идти(к, tx, tz, ск * (d > 4 ? 1.7 : 1.2), dt, 2);
+          if (домой && к.кал && s >= к.кал.s - 1.5) заКалитку(к, true);
+          else if (домой && !к.кал && s >= L && d < 2) к.этап = 'дома';            // калитки нет — дошла до конца улицы
+        } else {
+          // в калитку или из неё: по точкам, не спеша
+          к.т += dt; const [tx, tz] = к.точки[к.тч];
+          if (идти(к, tx, tz, 0.9, dt, 2.5) < 0.6 || к.т > 20) { к.тч++; к.т = 0; }
+          if (к.тч >= к.точки.length) к.этап = к.этап === 'во двор' ? 'дома' : 'в стаде';
+        }
+      }
+      if (домой && стадо.every(к => к.этап === 'дома')) режСтада = 'дома';
+      if (!домой && всеНаМесте && путьS + стадо.length * 3.2 < -2) { режСтада = 'пасётся'; for (const к of стадо) к.цель = null; }
+    }
+    for (const к of стадо) { if (к.этап === 'дома') continue; к.хвост += dt * 1.5; к.муТ -= dt; if (к.муТ <= 0) { к.муТ = 15 + сл() * 45; if (Math.hypot(к.x - П.x, к.z - П.z) < 120) муу(к.x, к.z); } }
+  }
+  function рисСтада(t) {
+    if (режСтада === 'дома' || !стадо.length) return;
+    const к0 = камера.position;
+    for (const к of стадо) {
+      if (к.этап === 'дома' || Math.hypot(к.x - к0.x, к.z - к0.z) > 420) continue;
+      const ест = к.ест > 0 && режСтада === 'пасётся';
+      нарисовать(КОРОВА, { x: к.x, y: В(к.x, к.z), z: к.z, курс: к.курс, м: к.м, окрас: к.окрас,
+        позы: { ноги: ногиЧетыре(к, 0.7, 0.32), голова: [[ест ? 0.95 + Math.sin(t * 2 + к.i) * 0.06 : 0.1, Math.sin(t * 0.4 + к.i * 3) * 0.2, 0]], хвост: [[0.1, Math.sin(к.хвост + к.i) * 0.35, 0]] } });
+    }
+  }
+
+  // ===================== КОЗЫ НА ПРИВЯЗИ =====================
+  const колышекГ = Ц(0.03, 0.03, 0.5, 5), колышекМ = new THREE.MeshStandardMaterial({ color: ц('#6A5038'), roughness: 1 });
+  const верёвкаМ = new THREE.LineBasicMaterial({ color: 0xC8B890 });
+  const козы = (() => {
+    const л = [], дома = (API.дома || []).filter(д => д.вид === 'дом');
+    let s = 4242; const гсч = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+    for (let k = 0; k < 60 && л.length < 6; k++) {
+      const д = дома[Math.floor(гсч() * дома.length)]; if (!д) break;
+      const дор = API.ближайшаяДорога(д.cx, д.cz); if (!дор || дор.d > 40) continue;
+      const ш = (API.ШИРИНА[дор.д.т] || 4) / 2 + 2.5, сторона = Math.sign((д.cx - дор.px) * -дор.uz + (д.cz - дор.pz) * дор.ux) || 1;
+      const x = дор.px - дор.uz * ш * сторона, z = дор.pz + дор.ux * ш * сторона;
+      if (!свободно(x, z, 1.5) || л.some(к => Math.hypot(к.кx - x, к.кz - z) < 60)) continue;
+      const кол = new THREE.Mesh(колышекГ, колышекМ); кол.position.set(x, В(x, z) + 0.15, z); кол.visible = false; сцена.add(кол);
+      const гв = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), вер = new THREE.Line(гв, верёвкаМ); вер.frustumCulled = false; вер.visible = false; сцена.add(вер);
+      л.push({ кx: x, кz: z, x: x + 1, z, курс: гсч() * 6.28, ск: 0, цель: null, ест: 0, окрас: ц(['#F2F0EA', '#D8D0C0', '#8A7A68', '#E8E4DC', '#5A4E44', '#C8B8A0'][л.length]), м: 0.9 + гсч() * 0.2, кол, вер, мэТ: 8 + гсч() * 30, фаза: 0, r: 0.3, хвост: 0 });
+    }
+    return л;
+  })();
+  function шагКоз(dt, П, к) {
+    const нет = сезон() === 'зима' || темно() || дождь();
+    for (const г of козы) {
+      const d = Math.hypot(г.кx - к.x, г.кz - к.z), видно = !нет && d < 120;
+      г.кол.visible = г.вер.visible = видно; г.видно = видно; if (!видно) continue;
+      г.ест -= dt;
+      if (г.ест <= 0) {
+        if (!г.цель || Math.hypot(г.цель[0] - г.x, г.цель[1] - г.z) < 0.15) {
+          if (г.цель) { г.ест = 3 + сл() * 8; г.цель = null; }
+          else { const а = сл() * 6.283, r = 0.5 + сл() * 1.6; г.цель = [г.кx + Math.cos(а) * r, г.кz + Math.sin(а) * r]; }
+        }
+        if (г.цель) идти(г, г.цель[0], г.цель[1], 0.5, dt, 3);
+      } else г.ск = 0;
+      г.хвост += dt * 6;
+      г.мэТ -= dt; if (г.мэТ <= 0) { г.мэТ = 12 + сл() * 30; if (Math.hypot(г.x - П.x, г.z - П.z) < 30) мээ(г.x, г.z); }
+      const а = г.вер.geometry.attributes.position.array, fx = Math.sin(г.курс), fz = Math.cos(г.курс), ш = г.м;
+      а[0] = г.кx; а[1] = В(г.кx, г.кz) + 0.38; а[2] = г.кz; а[3] = г.x + fx * 0.36 * ш; а[4] = В(г.x, г.z) + 0.66 * ш; а[5] = г.z + fz * 0.36 * ш; г.вер.geometry.attributes.position.needsUpdate = true;
+    }
+  }
+  function рисКоз(t) {
+    for (const г of козы) {
+      if (!г.видно) continue;
+      нарисовать(КОЗА, { x: г.x, y: В(г.x, г.z), z: г.z, курс: г.курс, м: г.м, окрас: г.окрас,
+        позы: { ноги: ногиЧетыре(г, 0.3, 0.45), голова: [[г.ест > 0 ? 0.9 + Math.sin(t * 3 + г.м * 7) * 0.08 : 0, Math.sin(t * 0.6 + г.м * 11) * 0.3, 0]], хвост: [[0.3 + Math.sin(г.хвост) * 0.3, 0, 0]] } });
+    }
+  }
+
+  // ===================== ГУСИ =====================
+  const гуси = (() => {
+    // у пруда, если на берегу есть дома (гусей держат у воды); пруды далеко от жилья — пасутся на травке у чьей-то калитки
+    const воды = (API.воды || []).filter(в => в.п.length >= 3);
+    let лучш = null;
+    for (const в of воды) {
+      let cx = 0, cz = 0; for (const [x, z] of в.п) { cx += x; cz += z; } cx /= в.п.length; cz /= в.п.length;
+      for (let i = 0; i < в.п.length; i += 2) {
+        const [bx, bz] = в.п[i], l = Math.hypot(bx - cx, bz - cz) || 1, x = bx + (bx - cx) / l * 5, z = bz + (bz - cz) / l * 5;
+        if (!свободно(x, z, 1)) continue;
+        if (Math.hypot(x - центр[0], z - центр[1]) > 350) continue;              // пруд далеко от твоего дома — гусей там не увидишь
+        let домов = 0; for (const д of API.дома || []) if (Math.hypot(д.cx - x, д.cz - z) < 60) домов++;
+        if (!лучш || домов > лучш.домов) лучш = { x, z, домов, nx: (bx - cx) / l, nz: (bz - cz) / l };
+      }
+    }
+    if (!лучш || лучш.домов < 3) {
+      let сид = 4321; const гсч = () => { сид = (сид * 16807) % 2147483647; return сид / 2147483647; };
+      const кал = (window.__калитки || []).filter(к => { const d = Math.hypot(к.x - центр[0], к.z - центр[1]); return d > 90 && d < 260; });
+      for (let k = 0; k < 30 && кал.length; k++) {
+        const к = кал[Math.floor(гсч() * кал.length)], x = к.x - к.wx * 1.8, z = к.z - к.wz * 1.8;
+        if (свободно(x, z, 0.6)) { лучш = { x, z, домов: 0, nx: -к.wz, nz: к.wx, улица: к }; break; }
+      }
+    }
+    if (!лучш) return [];
+    return [0, 1, 2, 3, 4, 5].map(i => ({ x: лучш.x - лучш.nx * i * 0.7, z: лучш.z - лучш.nz * i * 0.7, курс: 0, ск: 0, i, дом: лучш, фаза: сл() * 6, м: i === 0 ? 1.1 : 0.9 + сл() * 0.15, r: 0.2,
+      шея: 0, крылья: 0, окрас: ц(i === 4 ? '#B8B0A4' : '#FFFFFF'), бег: 0, шипТ: 0 }));
+  })();
+  let гусиЦель = null, гусиТ = 0, гаТ = 20;
+  function шагГусей(dt, П, к) {
+    if (!гуси.length) return;
+    const нет = сезон() === 'зима' || фазаДня() === 'ночь';
+    const вож = гуси[0], d = Math.hypot(вож.дом.x - к.x, вож.дом.z - к.z);
+    гуси.видно = !нет && d < 200; if (!гуси.видно) return;
+    const dП = Math.hypot(П.x - вож.x, П.z - вож.z);
+    гусиТ -= dt;
+    if (!гусиЦель || гусиТ <= 0 || Math.hypot(гусиЦель[0] - вож.x, гусиЦель[1] - вож.z) < 0.5) {
+      гусиТ = 8 + сл() * 10;
+      const у = вож.дом.улица;            // у калитки — вдоль забора по обочине, к дороге не выходят
+      for (let k = 0; k < 10; k++) {
+        const a = (сл() - 0.5) * (у ? 20 : 24), b = (сл() - 0.5) * (у ? 1.6 : 24);
+        const x = вож.дом.x + (у ? -у.wz * a + у.wx * b : a), z = вож.дом.z + (у ? у.wx * a + у.wz * b : b);
+        if (свободно(x, z, 0.6)) { гусиЦель = [x, z]; break; }
+      }
+    }
+    for (const г of гуси) {
+      const dг = Math.hypot(П.x - г.x, П.z - г.z);
+      if (г.бег > 0) {          // разбегаются от игрока, хлопая крыльями
+        г.бег -= dt; const а = Math.atan2(г.x - П.x, г.z - П.z); идти(г, г.x + Math.sin(а) * 3, г.z + Math.cos(а) * 3, 3.2, dt, 8); г.крылья += dt * 22;
+        continue;
+      }
+      if (пеший() && dг < 2.6) { for (const о of гуси) о.бег = 2 + сл(); га(г.x, г.z); фррр(г.x, г.z, 1.4); continue; }
+      if (г.i === 0) {
+        if (пеший() && dП < 6.5) {     // вожак шипит: голову вниз-вперёд, на игрока
+          г.ск = 0; г.курс += угл(Math.atan2(П.x - г.x, П.z - г.z) - г.курс) * Math.min(1, dt * 5);
+          г.шея += (1 - г.шея) * Math.min(1, dt * 6); г.шипТ -= dt; if (г.шипТ <= 0) { г.шипТ = 1.5 + сл(); шшш(г.x, г.z); }
+        } else { г.шея += (0 - г.шея) * Math.min(1, dt * 3); if (гусиЦель) идти(г, гусиЦель[0], гусиЦель[1], 0.55, dt, 2.5); }
+      } else {
+        // гуськом: каждый — за предыдущим, в метре
+        const пред = гуси[г.i - 1], dx = пред.x - г.x, dz = пред.z - г.z, l = Math.hypot(dx, dz);
+        if (l > 0.95) идти(г, пред.x - dx / l * 0.85, пред.z - dz / l * 0.85, Math.min(1.6, 0.55 + (l - 0.95) * 1.5), dt, 4); else г.ск = 0;
+        г.шея += ((пеший() && dг < 4 ? 0.5 : 0) - г.шея) * Math.min(1, dt * 3);
+      }
+      г.крылья = 0;
+    }
+    гаТ -= dt; if (гаТ <= 0) { гаТ = 18 + сл() * 40; if (dП < 90) га(вож.x, вож.z); }
+  }
+  function рисГусей(t) {
+    if (!гуси.length || !гуси.видно) return;
+    for (const г of гуси) {
+      г.фаза += (г.ск || 0) * кадрDt * 9;
+      const ш = г.шея, кр = г.бег > 0 ? Math.sin(г.крылья) * 0.9 - 0.3 : 0;
+      нарисовать(ГУСЬ, { x: г.x, y: В(г.x, г.z), z: г.z, курс: г.курс, м: г.м, окрас: г.окрас, крен: Math.sin(г.фаза) * 0.08 * Math.min(1, г.ск),
+        позы: { шея: [[0.15 + ш * 1.1, 0, 0]], ноги: [[Math.sin(г.фаза) * 0.5 * Math.min(1, г.ск), 0, 0], [-Math.sin(г.фаза) * 0.5 * Math.min(1, г.ск), 0, 0]],
+          крылья: [[0, 0, -кр], [0, 0, кр]] } });
+    }
+  }
+
+  // ===================== ВОРОНЫ НА ПРОВОДАХ =====================
+  // провода — между соседними столбами одной улицы (не дальше 45 м), высота 7,6 м и провис 0,8 м — как их рисует посёлок
+  const пролёты = [];
+  { const ст = API.СТОЛБЫ || []; for (let i = 0; i < ст.length - 1; i++) { const a = ст[i], b = ст[i + 1]; if (Math.hypot(a.x - b.x, a.z - b.z) <= 45) пролёты.push([a, b]); } }
+  const наПроводе = (п, t) => { const [a, b] = п; return [a.x + (b.x - a.x) * t, В(a.x, a.z) * (1 - t) + В(b.x, b.z) * t + 7.6 - Math.sin(t * Math.PI) * 0.8 + 0.01, a.z + (b.z - a.z) * t]; };
+  const вороны = Array.from({ length: 14 }, (_, i) => ({ i, x: 0, y: 0, z: 0, курс: 0, реж: 'нет', т: 0, мах: 0, полёт: null, карТ: 5 + сл() * 20, голова: 0, м: 1.12 + сл() * 0.14, окрас: ц(i % 3 === 2 ? '#2C2C32' : '#8E8E8A') }));
+  function сесть(в, близко) {
+    // свободный пролёт рядом с точкой
+    const кандидаты = пролёты.filter(п => Math.hypot((п[0].x + п[1].x) / 2 - близко[0], (п[0].z + п[1].z) / 2 - близко[1]) < 110);
+    if (!кандидаты.length) return null;
+    const п = кандидаты[Math.floor(сл() * кандидаты.length)], t = 0.15 + сл() * 0.7, [x, y, z] = наПроводе(п, t);
+    const вдоль = Math.atan2(п[1].x - п[0].x, п[1].z - п[0].z);
+    return { x, y, z, курс: вдоль + (сл() < 0.5 ? Math.PI / 2 : -Math.PI / 2) };
+  }
+  function шагВорон(dt, П, к, тачки) {
+    if (!пролёты.length) return;
+    for (const в of вороны) {
+      if (в.реж === 'нет' || Math.hypot(в.x - к.x, в.z - к.z) > 180) {
+        const м = сесть(в, [к.x + (сл() - 0.5) * 140, к.z + (сл() - 0.5) * 140]); if (!м) continue;
+        Object.assign(в, м, { реж: 'сидит', т: 0 });
+      }
+      if (в.реж === 'сидит') {
+        в.голова += (Math.sin(в.т * 0.7 + в.i) * 0.6 - в.голова) * Math.min(1, dt * 2); в.т += dt;
+        // спугнуть: пеший игрок близко под проводом, машина сигналит/проносится, взрыв
+        const dП = Math.hypot(П.x - в.x, П.z - в.z), пугает = (пеший() && dП < 9) || тачки.some(([x, z, v]) => v > 8 && Math.hypot(x - в.x, z - в.z) < 10) || (window.__вспышкаУровень || 0) > 0.3;
+        if (пугает && сл() < dt * 6) {
+          const куда = сесть(в, [в.x + (сл() - 0.5) * 160, в.z + (сл() - 0.5) * 160]);
+          if (куда) { в.полёт = { x0: в.x, y0: в.y, z0: в.z, ...куда, t: 0, T: Math.max(2, Math.hypot(куда.x - в.x, куда.z - в.z) / 9) }; в.реж = 'летит'; фррр(в.x, в.z, 0.8); if (сл() < 0.6) кар(в.x, в.z); }
+        }
+        в.карТ -= dt; if (в.карТ <= 0) { в.карТ = 12 + сл() * 40; if (Math.hypot(в.x - к.x, в.z - к.z) < 90) кар(в.x, в.z); в.кричит = 0.5; }
+        if (в.кричит > 0) в.кричит -= dt;
+      } else if (в.реж === 'летит') {
+        const п = в.полёт; п.t += dt; const k = Math.min(1, п.t / п.T);
+        в.x = п.x0 + (п.x - п.x0) * k; в.z = п.z0 + (п.z - п.z0) * k; в.y = п.y0 + (п.y - п.y0) * k + Math.sin(k * Math.PI) * (6 + п.T * 2);
+        в.курс = Math.atan2(п.x - п.x0, п.z - п.z0) + (k > 0.9 ? (k - 0.9) * 10 * угл(п.курс - Math.atan2(п.x - п.x0, п.z - п.z0)) : 0);
+        в.мах += dt * (k < 0.85 ? 16 : 6);
+        if (k >= 1) { в.реж = 'сидит'; в.курс = п.курс; в.т = 0; }
+      }
+    }
+  }
+  function рисВорон() {
+    for (const в of вороны) {
+      if (в.реж === 'нет') continue;
+      const летит = в.реж === 'летит', мах = летит ? Math.sin(в.мах) * 0.85 : 0;
+      нарисовать(ВОРОНА, { x: в.x, y: в.y, z: в.z, курс: в.курс, м: в.м, окрас: в.окрас, наклон: летит ? 0.15 : 0,
+        позы: { голова: [[в.кричит > 0 ? -0.4 : 0, в.голова, 0]], крылья: летит ? [[0, 0, -мах], [0, Math.PI, мах]] : [[0, -1.35, -0.2], [0, Math.PI + 1.35, 0.2]] } });
+    }
+  }
+
+  // ===================== ВОРОБЬИ =====================
+  const воробьи = [];
+  for (let s = 0; s < 3; s++) for (let i = 0; i < 8; i++) воробьи.push({ s, x: 0, z: 0, y: 0, курс: сл() * 6.28, прыг: 0, мах: 0, реж: 'нет', т: сл(), полёт: null, клюёт: 0, м: 0.9 + сл() * 0.25, окрас: ц('#FFFFFF') });
+  const стайкиВ = [0, 1, 2].map(() => ({ x: 0, z: 0, реж: 'нет', т: 0 }));
+  function шагВоробьёв(dt, П, к) {
+    const нет = дождь() || темно();
+    for (const с of стайкиВ) {
+      if (нет) { с.реж = 'нет'; continue; }
+      if (с.реж === 'нет' || Math.hypot(с.x - к.x, с.z - к.z) > 90) {
+        for (let k = 0; k < 12; k++) { const а = сл() * 6.283, r = 20 + сл() * 50, x = П.x + Math.cos(а) * r, z = П.z + Math.sin(а) * r; if (свободно(x, z, 1) && API.ближайшаяДорога(x, z) && API.ближайшаяДорога(x, z).d < 14) { с.x = x; с.z = z; с.реж = 'на земле'; break; } }
+        if (с.реж === 'нет') continue;
+        for (const в of воробьи) if (в.s === стайкиВ.indexOf(с)) { в.x = с.x + (сл() - 0.5) * 3; в.z = с.z + (сл() - 0.5) * 3; в.y = В(в.x, в.z); в.реж = 'на земле'; }
+      }
+      // спугнули — вся стайка вспархивает и садится метров за 12–20
+      if (с.реж === 'на земле' && пеший() && Math.hypot(П.x - с.x, П.z - с.z) < 5) {
+        let x = с.x, z = с.z; for (let k = 0; k < 10; k++) { const а = Math.atan2(с.x - П.x, с.z - П.z) + (сл() - 0.5) * 1.5, r = 12 + сл() * 8, nx = с.x + Math.sin(а) * r, nz = с.z + Math.cos(а) * r; if (свободно(nx, nz, 0.5)) { x = nx; z = nz; break; } }
+        фррр(с.x, с.z, 1); с.x = x; с.z = z;
+        for (const в of воробьи) if (в.s === стайкиВ.indexOf(с)) { const tx = x + (сл() - 0.5) * 3, tz = z + (сл() - 0.5) * 3; в.полёт = { x0: в.x, y0: в.y, z0: в.z, x: tx, z: tz, y: В(tx, tz), t: -сл() * 0.3, T: 1.2 + сл() * 0.5 }; в.реж = 'летит'; }
+      }
+    }
+    for (const в of воробьи) {
+      const с = стайкиВ[в.s]; if (с.реж === 'нет') { в.реж = 'нет'; continue; }
+      if (в.реж === 'летит') {
+        const п = в.полёт; п.t += dt; const k = Math.max(0, Math.min(1, п.t / п.T));
+        в.x = п.x0 + (п.x - п.x0) * k; в.z = п.z0 + (п.z - п.z0) * k; в.y = п.y0 + (п.y - п.y0) * k + Math.sin(k * Math.PI) * 2.5; в.курс = Math.atan2(п.x - п.x0, п.z - п.z0); в.мах += dt * 30;
+        if (k >= 1) в.реж = 'на земле';
+      } else if (в.реж === 'на земле') {
+        в.т -= dt; в.клюёт = Math.max(0, в.клюёт - dt);
+        if (в.т <= 0) {
+          в.т = 0.4 + сл() * 1.6;
+          if (сл() < 0.5) в.клюёт = 0.3;
+          else { в.курс += (сл() - 0.5) * 2; const nx = в.x + Math.sin(в.курс) * 0.25, nz = в.z + Math.cos(в.курс) * 0.25; if (Math.hypot(nx - с.x, nz - с.z) < 3 && свободно(nx, nz, 0.2)) { в.x = nx; в.z = nz; в.прыг = 0.18; } }
+        }
+        в.прыг = Math.max(0, в.прыг - dt); в.y = В(в.x, в.z) + Math.sin(в.прыг / 0.18 * Math.PI) * 0.06;
+      }
+    }
+  }
+  function рисВоробьёв() {
+    for (const в of воробьи) {
+      if (в.реж === 'нет') continue;
+      const летит = в.реж === 'летит', мах = летит ? Math.sin(в.мах) * 0.9 : 0;
+      нарисовать(ВОРОБЕЙ, { x: в.x, y: в.y, z: в.z, курс: в.курс, м: в.м, окрас: в.окрас,
+        позы: { голова: [[в.клюёт > 0 ? 0.9 : 0, 0, 0]], крылья: летит ? [[0, 0, -мах], [0, Math.PI, мах]] : [[0, -1.4, -0.15], [0, Math.PI + 1.4, 0.15]] } });
+    }
+  }
+
+  // ===================== КОШКИ =====================
+  const ОКРАС_КОШ = ['#E09040', '#2A2622', '#8A8680', '#F0ECE4', '#B87838', '#5A5048'];
+  const заборы = (API.ЗАБОРЫ || []).filter(п => п.h >= 1.0 && п.h <= 2.2);
+  const кошки = ОКРАС_КОШ.map((о, i) => ({ i, x: 0, z: 0, y: 0, курс: 0, реж: 'нет', т: 0, окрас: ц(о), м: 0.95 + сл() * 0.15, хвост: сл() * 6, фаза: 0, r: 0.15, на: null, прыжок: null, ск: 0, мяуТ: 10 + сл() * 20 }));
+  // заборы — по клеткам 20 м: ищем только рядом, а не перебором всего посёлка
+  const заборСетка = new Map(), ЯЧ = 20;
+  for (const п of заборы) { const к = Math.floor(п.x / ЯЧ) + ',' + Math.floor(п.z / ЯЧ); if (!заборСетка.has(к)) заборСетка.set(к, []); заборСетка.get(к).push(п); }
+  function заборРядом(x, z, rmin, rmax) {
+    const л = [], r = Math.ceil(rmax / ЯЧ), cx = Math.floor(x / ЯЧ), cz = Math.floor(z / ЯЧ);
+    for (let i = -r; i <= r; i++) for (let j = -r; j <= r; j++) {
+      const я = заборСетка.get((cx + i) + ',' + (cz + j)); if (!я) continue;
+      for (const п of я) { const d = Math.hypot(п.x - x, п.z - z); if (d > rmin && d < rmax) л.push(п); }
+    }
+    return л.length ? л[Math.floor(сл() * л.length)] : null;
+  }
+  const вдольЗабора = п => п.угол + Math.PI / 2 + (сл() < 0.5 ? 0 : Math.PI);          // сидит вдоль забора, мордой в одну из сторон
+  function шагКошек(dt, П, к) {
+    const нет = дождь();                                   // в дождь кошки по домам
+    for (const с of кошки) {
+      if (нет) { с.реж = 'нет'; continue; }
+      if (с.реж === 'нет' || Math.hypot(с.x - к.x, с.z - к.z) > 120) {
+        if ((с.ждать = (с.ждать || 0) - dt) > 0) continue;
+        const п = заборРядом(к.x, к.z, 25, 100); if (!п) { с.реж = 'нет'; с.ждать = 2; continue; }
+        с.на = п; с.x = п.x; с.z = п.z; с.y = В(п.x, п.z) + п.h; с.курс = вдольЗабора(п); с.реж = 'сидит'; с.т = 0;
+      }
+      const dП = Math.hypot(П.x - с.x, П.z - с.z);
+      с.хвост += dt * (с.реж === 'бежит' ? 6 : 1.4);
+      if (с.реж === 'сидит') {
+        с.ск = 0;
+        if (dП < 10) с.голова = угл(Math.atan2(П.x - с.x, П.z - с.z) - с.курс); else с.голова = Math.sin(с.хвост * 0.5) * 0.5;
+        с.голова = Math.max(-1.2, Math.min(1.2, с.голова));
+        с.мяуТ -= dt; if (dП < 6 && с.мяуТ <= 0) { с.мяуТ = 8 + сл() * 15; мяу(с.x, с.z); }
+        if (пеший() && dП < 3.6) {
+          // спрыгнуть и убежать к другому забору
+          const п = заборРядом(с.x, с.z, 12, 30); if (!п) continue;
+          const а = Math.atan2(с.x - П.x, с.z - П.z), x1 = с.x + Math.sin(а) * 1.2, z1 = с.z + Math.cos(а) * 1.2;
+          с.прыжок = { x0: с.x, y0: с.y, z0: с.z, x1, z1, y1: В(x1, z1), t: 0, T: 0.45 }; с.реж = 'прыгает'; с.цель = п; с.курс = а;
+        }
+      } else if (с.реж === 'прыгает') {
+        const п = с.прыжок; п.t += dt; const k = Math.min(1, п.t / п.T);
+        с.x = п.x0 + (п.x1 - п.x0) * k; с.z = п.z0 + (п.z1 - п.z0) * k; с.y = п.y0 + (п.y1 - п.y0) * k + Math.sin(k * Math.PI) * 0.35;
+        if (k >= 1) { if (п.наверх) { с.реж = 'сидит'; с.курс = вдольЗабора(с.на); } else { с.реж = 'бежит'; с.т = 0; } }
+      } else if (с.реж === 'бежит') {
+        const п = с.цель, d = идти(с, п.x, п.z, 4.8, dt, 9); с.y = В(с.x, с.z); с.т += dt;
+        // не добежать (за домом, за прудом) — на ближайший забор
+        if (с.т > 10) { const б = заборРядом(с.x, с.z, 0, 7); с.т = 0; if (б) с.цель = б; else { с.реж = 'нет'; continue; } }
+        if (d < 0.9) { с.на = п; с.прыжок = { x0: с.x, y0: с.y, z0: с.z, x1: п.x, z1: п.z, y1: В(п.x, п.z) + п.h, t: 0, T: 0.4, наверх: true }; с.реж = 'прыгает'; }
+      }
+    }
+  }
+  function рисКошек(t) {
+    const ночь = темно();
+    for (const с of кошки) {
+      if (с.реж === 'нет') continue;
+      const сидит = с.реж === 'сидит', прыг = с.реж === 'прыгает';
+      const ноги = сидит ? [[-0.25, 0, 0], [-0.25, 0, 0], [1.2, 0, 0], [1.2, 0, 0]] : прыг ? [[-0.8, 0, 0], [-0.8, 0, 0], [0.8, 0, 0], [0.8, 0, 0]] : ногиЧетыре(с, 0.22, 0.9);
+      нарисовать(КОШКА, { x: с.x, y: с.y - (сидит ? 0.04 : 0), z: с.z, курс: с.курс, м: с.м, окрас: с.окрас, наклон: сидит ? -0.35 : 0,
+        позы: { голова: [[сидит ? 0.35 : 0, с.голова || 0, 0]], глаза: [ночь ? [сидит ? 0.35 : 0, с.голова || 0, 0] : 'нет'], ноги, хвост: [[сидит ? -0.9 : 0.5, Math.sin(с.хвост) * 0.5, 0]] } });
+    }
+  }
+
+  // ===================== КАДР =====================
+  let т = 0;
+  API.каждыйКадр.push((dt, ms, П) => {
+    if (!dt || !П) return;
+    dt = Math.min(dt, 0.1); т += dt; кадрDt = dt;
+    const к = камера.position, тачки = машины();
+    шагЦепных(dt, П, к, тачки); шагДворняг(dt, П, тачки); шагСтада(dt, П); шагКоз(dt, П, к); шагГусей(dt, П, к); шагВорон(dt, П, к, тачки); шагВоробьёв(dt, П, к); шагКошек(dt, П, к);
+    for (const в of [СОБАКА, КОРОВА, КОЗА, ГУСЬ, КОШКА, ВОРОНА, ВОРОБЕЙ]) начатьКадр(в);
+    рисЦепных(т); рисДворняг(т); рисСтада(т); рисКоз(т); рисГусей(т); рисВорон(); рисВоробьёв(); рисКошек(т);
+    for (const в of [СОБАКА, КОРОВА, КОЗА, ГУСЬ, КОШКА, ВОРОНА, ВОРОБЕЙ]) закончитьКадр(в);
+  });
+  window.__животные = { цепные, дворняги, стадо, пастбище, путьДомой, козы, гуси, вороны, воробьи, кошки, режСтада: () => режСтада };
 }]);
 
 // ===================== ГОНКИ =====================
