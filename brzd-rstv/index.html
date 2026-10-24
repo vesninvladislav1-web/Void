@@ -14562,7 +14562,8 @@ window.ДЕТАЛИ.push(['итоги', function (API) {
     ['оператор', 'Оператор', 'Выбить врага своим дроном.'],
     ['лётчик', 'Лётчик', 'Поразить мишень на полигоне с вертолёта или самолёта.'],
     ['стрелок', 'Отличник боевой', 'Поразить 20 мишеней на полигоне.'],
-    ['clawd', 'Кто это тут сидит?', 'Найти Clawd во всех четырёх тайниках посёлка.', true],     // секретная: до получения — «???»
+    ['clawd', 'Кто это тут сидит?', 'Найти Clawd во всех четырёх тайниках посёлка.', true],
+    ['лимитоед', 'Покормил жука', 'Тебя навестил жук-лимитоед.', true],     // секретная: до получения — «???»
   ];
   const КЛЮЧ_А = 'бороздиновский.ачивки';
   let есть = {}; try { есть = JSON.parse(хран.взять(КЛЮЧ_А, '{}')) || {}; } catch (e) { есть = {}; }
@@ -23497,7 +23498,70 @@ window.ДЕТАЛИ.push(['clawd', function (API) {
       б.addEventListener('click', () => { хр.питомец = !хр.питомец; сохранить(); обн(); });
       с.append(п, б); меню.insertBefore(с, меню.lastElementChild); обн();
       window.__подписка && window.__подписка('clawd-найден', обн); } }
-  window.__clawd = { хр, ТАЙНИКИ, поставить, пойман, к, пит, сказать };
+  // ===================== ЖУК-ЛИМИТОЕД =====================
+  // Жук-лимитоед (лат. Claudus limitophagus) — сородич Clawd с глазами «> <». Раз в день, минут через 15 прогулки
+  // пешком, выбегает из-за спины, жуёт у ног — и на экране тает «лимит использования». Потом «шучу» — и убегает.
+  // Ничего не отнимает.
+  const жук = сделать(0.42); жук.г.visible = false; сцена.add(жук.г);
+  for (const [гл, зн] of [[жук.глаза[0], 1], [жук.глаза[1], -1]]) {          // глаза щёлочками: «>» и «<»
+    гл.visible = false;
+    for (const s of [1, -1]) {
+      const п = new THREE.Mesh(new THREE.BoxGeometry(0.11 * 0.42, 0.025 * 0.42, 0.02 * 0.42), ЧЁРН);
+      п.position.set(гл.position.x, гл.position.y + s * 0.03 * 0.42, гл.position.z); п.rotation.z = -s * зн * 0.6; жук.тело.add(п);
+    }
+  }
+  жук.г.traverse(о => { о.userData.clawd = true; });
+  const стильЖ = document.createElement('style');
+  стильЖ.textContent = `
+    #лимитоед { position: fixed; left: 50%; top: calc(70px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 9; pointer-events: none; display: none;
+                width: min(330px, 86vw); background: rgba(20,16,12,0.92); border: 1px solid #E8823A; border-radius: 12px; padding: 10px 12px; color: #F2E6CC; font: 600 12px ui-monospace, monospace; }
+    #лимитоед .п { height: 9px; border-radius: 5px; background: #3A2E24; margin: 7px 0 5px; overflow: hidden; }
+    #лимитоед .п i { display: block; height: 100%; width: 100%; background: #E8823A; }
+    #лимитоед .м { color: #B8AC94; font-size: 11px; }
+  `;
+  document.head.appendChild(стильЖ);
+  const панельЖ = document.createElement('div'); панельЖ.id = 'лимитоед'; панельЖ.setAttribute('role', 'status');
+  панельЖ.innerHTML = '⚠ ЛИМИТ ИСПОЛЬЗОВАНИЯ <span class="н">100%</span><div class="п"><i></i></div><div class="м">Жук-лимитоед (Claudus limitophagus) обедает…</div>';
+  document.body.appendChild(панельЖ);
+  const ж = { эт: null, t: 0, x: 0, z: 0, курс: 0 };
+  const сегодня = () => new Date().toISOString().slice(0, 10);
+  function лимитоед() {
+    const П = window.__мир && window.__мир.поз; if (!П || ж.эт) return;
+    const а = (П.угол || 0) + Math.PI + (сл() - 0.5) * 0.8;               // из-за спины
+    ж.x = П.x + Math.sin(а) * 11; ж.z = П.z + Math.cos(а) * 11; ж.эт = 'бежит'; ж.t = 0;
+    жук.г.visible = true; хр.лимитоед = сегодня(); сохранить();
+  }
+  function шагЖука(dt, поз) {
+    const пешком = !window.__заРулём && !window.__поездка && !window.__летитЯша && !document.body.classList.contains('кино');
+    if (!ж.эт) { if (игра > 900 && хр.лимитоед !== сегодня() && пешком && !window.__онлайнРоль) лимитоед(); return; }
+    ж.t += dt;
+    const dx = поз.x - ж.x, dz = поз.z - ж.z, d = Math.hypot(dx, dz);
+    if (ж.эт === 'бежит') {
+      ж.курс = Math.atan2(dx, dz);
+      if (d > 1.0) { const ш = Math.min(d - 1.0, 4.2 * dt); ж.x += dx / d * ш; ж.z += dz / d * ш; }
+      else { ж.эт = 'ест'; ж.t = 0; панельЖ.style.display = 'block'; панельЖ.querySelector('i').style.width = '100%'; писк(true); }
+      if (ж.t > 12) ж.эт = 'уходит';                                      // не догнал — и ладно
+    } else if (ж.эт === 'ест') {
+      ж.курс = Math.atan2(dx, dz);
+      const доля = Math.max(0, 1 - ж.t / 3.4); панельЖ.querySelector('.н').textContent = Math.round(доля * 100) + '%'; панельЖ.querySelector('i').style.width = доля * 100 + '%';
+      if (ж.t > 3.8) {
+        панельЖ.querySelector('.м').textContent = 'Лимит обновится через 4 ч 59 мин. …шучу. Всё на месте 🙂';
+        сказать('ням. Спасибо, было вкусно. Лимиты у тебя целы — это я понарошку.', 5);
+        window.__итоги && window.__итоги.дать && window.__итоги.дать('лимитоед');
+        ж.эт = 'уходит'; ж.t = 0; ж.курс = Math.atan2(-dx, -dz);
+      }
+    } else if (ж.эт === 'уходит') {
+      ж.x += Math.sin(ж.курс) * 5 * dt; ж.z += Math.cos(ж.курс) * 5 * dt;
+      if (ж.t > 2.5) панельЖ.style.display = 'none';
+      if (ж.t > 5) { ж.эт = null; жук.г.visible = false; панельЖ.style.display = 'none'; return; }
+    }
+    const бег = ж.эт !== 'ест';
+    жук.г.position.set(ж.x, В(ж.x, ж.z), ж.z); жук.г.rotation.y = ж.курс;
+    жук.тело.position.y = бег ? Math.abs(Math.sin(ж.t * 18)) * 0.04 : Math.abs(Math.sin(ж.t * 26)) * 0.025;
+    жук.тело.rotation.x = бег ? 0 : 0.25 + Math.sin(ж.t * 26) * 0.12;          // жуёт: кивает
+  }
+  API.каждыйКадр.push((dt, ms, поз) => { if (dt && поз && document.getElementById('старт').hidden) шагЖука(Math.min(dt, 0.1), поз); });
+  window.__clawd = { хр, ТАЙНИКИ, поставить, пойман, к, пит, сказать, лимитоед, жук: ж };
 }]);
 
 </script>
