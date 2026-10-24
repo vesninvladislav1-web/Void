@@ -26676,6 +26676,19 @@ const САДЫ_РЯДЫ = { 0: [7.74, 4.3], 2: [7.98, 3.6], 3: [8.0, 1.8], 4: [8
   }
   const матКарт = мягкийСвет(new THREE.MeshStandardMaterial({ map: листТекстура, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.9 }), 0.035);
   const матСерд = мягкийСвет(new THREE.MeshStandardMaterial({ map: текс('listva'), roughness: 1, color: цвет('#8A9A78') }), 0.035);
+  // ель: четыре яруса-конуса, каждый шире и ниже предыдущего; высота 1, радиус низа 0.5 (дальше — масштабом дерева).
+  // Хвоя своим материалом: осенью не желтеет, зимой остаётся зелёной под снегом
+  function ельГеом(грани) {
+    const ярусы = [[0.5, 0.0, 0.42], [0.4, 0.26, 0.36], [0.3, 0.48, 0.3], [0.18, 0.68, 0.32]], p = [], nrm = [], uv = [];
+    for (const [r, y0, h] of ярусы) {
+      const г = new THREE.ConeGeometry(r, h, грани, 1, true).toNonIndexed(); г.translate(0, y0 + h / 2, 0);
+      p.push(...г.attributes.position.array); nrm.push(...г.attributes.normal.array); uv.push(...г.attributes.uv.array); г.dispose();
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(p, 3)); g.setAttribute('normal', new THREE.Float32BufferAttribute(nrm, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    return g;
+  }
+  const матЕли = мягкийСвет(new THREE.MeshStandardMaterial({ map: текс('listva'), roughness: 1, color: цвет('#7FA276'), side: THREE.DoubleSide }), 0.035);
   const теньКарт = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: листТекстура, alphaTest: 0.5 });
   // кора — фото коры ивы (Poly Haven, CC0), повтор вокруг ствола и вверх
   const кора = (() => { const т = текс('kora', ':ствол'); т.repeat.set(1, 3); return т; })();
@@ -26714,23 +26727,49 @@ const САДЫ_РЯДЫ = { 0: [7.74, 4.3], 2: [7.98, 3.6], 3: [8.0, 1.8], 4: [8
       все.push(д); рядовые.push(д);
     }
   }
+  // ---- породы: место по снимку, а порода — по месту и случаю. Во дворах яблони, вишни, берёзы, клёны, орех, изредка ель;
+  // у воды — ивы; в лесу и лесополосах — берёза, клён, дуб, изредка ель; тополя — по высоте со снимка, как и было ----
+  const ПОРОДЫ = {
+    яблоня: { sx: 1.0, sy: 0.85, тон: '#E6EED6', ствол: '#A89480' }, вишня: { sx: 0.85, sy: 0.8, тон: '#DCE8C4', ствол: '#8A6A5A' },
+    берёза: { sx: 0.72, sy: 1.35, тон: '#F4FAD0', ствол: '#F2F0EA' }, ива: { sx: 1.3, sy: 0.78, тон: '#D8E2CC', ствол: '#9A8C7C' },
+    клён: { sx: 1.1, sy: 1.0, тон: '#CCDCB2', ствол: '#9A8A78' }, дуб: { sx: 1.2, sy: 0.95, тон: '#BCCCA2', ствол: '#7E6E5E' },
+    орех: { sx: 1.25, sy: 0.9, тон: '#C6D4AA', ствол: '#A09484' }, ель: { тон: '#C4D8C4', ствол: '#6A5240' },
+  };
+  const уВоды = (x, z) => воды.some(в => в.п.some(([wx, wz]) => Math.abs(wx - x) < 16 && Math.abs(wz - z) < 16));
+  for (const д of все) {
+    if (д.тополь) { д.порода = 'тополь'; continue; }
+    if (д.ряд) { д.порода = 'яблоня'; continue; }
+    const r = случай(д.x * 0.71 + д.z * 1.37 + 5);
+    д.порода = уВоды(д.x, д.z) && r < 0.55 ? 'ива'
+      : д.класс === 'лес' || д.класс === 'полоса' ? (r < 0.3 ? 'берёза' : r < 0.62 ? 'клён' : r < 0.9 ? 'дуб' : 'ель')
+      : д.класс === 'сад' ? (r < 0.6 ? 'яблоня' : 'вишня')
+      : r < 0.3 ? 'яблоня' : r < 0.48 ? 'вишня' : r < 0.64 ? 'берёза' : r < 0.82 ? 'клён' : r < 0.93 ? 'орех' : 'ель';
+    д.ель = д.порода === 'ель';
+  }
   // заранее считаем положение кроны и ствола каждого дерева
   const м = new THREE.Matrix4(), q = new THREE.Quaternion(), ось = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), sc = new THREE.Vector3();
-  const N = все.length, мКроны = new Float32Array(N * 16), мСтвола = new Float32Array(N * 16), тона = new Float32Array(N * 3);
+  const N = все.length, мКроны = new Float32Array(N * 16), мСтвола = new Float32Array(N * 16), тона = new Float32Array(N * 3), тонаСтв = new Float32Array(N * 3);
   все.forEach((д, i) => {
     const y = землиВысота(д.x, д.z);
     q.setFromAxisAngle(ось, случай(д.x * 1.7 + д.z) * 6.28);
-    if (д.тополь) {
+    const П = ПОРОДЫ[д.порода];
+    if (д.ель) {                          // ель: конус ярусами от самой земли, короткий ствол
+      const H = Math.max(д.h, 2.4 * д.r + 2), w = д.r * 2;
+      м.compose(v.set(д.x, y + 0.35, д.z), q, sc.set(w, H, w)); м.toArray(мКроны, i * 16);
+      м.compose(v.set(д.x, y + 0.3, д.z), q, sc.set(1.3, 0.9, 1.3)); м.toArray(мСтвола, i * 16);
+    } else if (д.тополь) {
       const в = д.h - 2.2, s = в * 0.95;
       м.compose(v.set(д.x, y + 2.2 + в / 2, д.z), q, sc.set(s, s, s)); м.toArray(мКроны, i * 16);
       м.compose(v.set(д.x, y + 2, д.z), q, sc.set(1.4, 4, 1.4)); м.toArray(мСтвола, i * 16);
     } else {
       // в лесу и лесополосе кроны смыкаются (на снимке — сплошной полог), во дворах — как есть
-      const s = д.r / (д.класс === 'лес' ? 0.9 : д.класс === 'полоса' ? 1.0 : 1.15), sy = s * 0.92, yc = y + д.h - sy * 1.1, ствол = Math.max(0.8, yc - y + 0.2);
+      const s0 = д.r / (д.класс === 'лес' ? 0.9 : д.класс === 'полоса' ? 1.0 : 1.15), s = s0 * (П ? П.sx : 1), sy = s0 * 0.92 * (П ? П.sy : 1);
+      const yc = y + д.h - sy * 1.1, ствол = Math.max(0.8, yc - y + 0.2);
       м.compose(v.set(д.x, yc, д.z), q, sc.set(s, sy, s)); м.toArray(мКроны, i * 16);
       м.compose(v.set(д.x, y - 0.2 + ствол / 2, д.z), q, sc.set(1 + д.r * 0.1, ствол, 1 + д.r * 0.1)); м.toArray(мСтвола, i * 16);
     }
-    const тон = д.тополь ? цвет('#C8D8BC') : цвет(ТОНА[д.класс] || ТОНА.двор);
+    const тон = д.тополь ? цвет('#C8D8BC') : П ? цвет(П.тон) : цвет(ТОНА[д.класс] || ТОНА.двор);
+    const тс = цвет(П && П.ствол || '#B8A898'); тонаСтв.set([тс.r, тс.g, тс.b], i * 3);
     тон.offsetHSL((случай(д.x) - 0.5) * 0.05, 0, (случай(д.x + д.z) - 0.5) * 0.12);
     тона.set([тон.r, тон.g, тон.b], i * 3);
     if (!д.ряд) затенитьПятно(д.x, д.z, (д.тополь ? 1.6 : д.r) * (д.класс === 'лес' ? 1.6 : 1.2), д.класс === 'лес' ? 0.42 : 0.28);      // под пологом леса — сумрак
@@ -26740,7 +26779,7 @@ const САДЫ_РЯДЫ = { 0: [7.74, 4.3], 2: [7.98, 3.6], 3: [8.0, 1.8], 4: [8
   // рядом (до 80 м) — пышная крона из десятков пучков листьев;
   // дальше (до 260 м) — пучков меньше; у горизонта — просто объёмный силуэт.
   let БЛИЖЕ = УР > 1 ? 80 : УР ? 60 : 40, СРЕДНЕ = УР > 1 ? 260 : УР ? 180 : 120, ДАЛЬШЕ = УР > 1 ? 1100 : УР ? 700 : 450;
-  const nКругл = все.filter(д => !д.тополь).length || 1, nТоп = все.filter(д => д.тополь).length || 1;
+  const nКругл = все.filter(д => !д.тополь && !д.ель).length || 1, nТоп = все.filter(д => д.тополь).length || 1, nЕль = все.filter(д => д.ель).length || 1;
   const сделать = (г, мат, n, тени) => { const о = new THREE.InstancedMesh(г, мат, n); о.count = 0; о.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3); о.castShadow = тени; о.receiveShadow = true; о.frustumCulled = false; if (мат === матКарт) о.customDepthMaterial = теньКарт; сцена.add(о); return о; };
   const матДаль = new THREE.MeshStandardMaterial({ map: текс('listva'), roughness: 1, color: цвет('#9AAA88') });
   const уровни = {
@@ -26749,8 +26788,11 @@ const САДЫ_РЯДЫ = { 0: [7.74, 4.3], 2: [7.98, 3.6], 3: [8.0, 1.8], 4: [8
     кругДаль: [сделать(сердцевина(0, 1, 0.95), матДаль, nКругл, false)],
     топБлиз: [сделать(кронаГеом(УЛЬТРА ? 60 : УР < 2 ? 28 : 40, 0.07, 3, 5.5, 0.1), матКарт, nТоп, true), сделать(сердцевина(1, 5.5, 0.085), матСерд, nТоп, true)],
     топДаль: [сделать(сердцевина(0, 5.5, 0.11), матДаль, nТоп, false)],
+    ельБлиз: [сделать(ельГеом(8), матЕли, nЕль, true)],
+    ельДаль: [сделать(ельГеом(5), матЕли, nЕль, false)],
   };
-  const стволы = сделать(new THREE.CylinderGeometry(0.1, 0.17, 1, 7, 1, true), new THREE.MeshStandardMaterial({ map: кора, normalMap: кораН, color: цвет('#B8A898'), roughness: 1 }), N || 1, true);
+  const стволы = сделать(new THREE.CylinderGeometry(0.1, 0.17, 1, 7, 1, true), new THREE.MeshStandardMaterial({ map: кора, normalMap: кораН, color: цвет('#FFFFFF'), roughness: 1 }), N || 1, true);   // цвет коры — у каждой породы свой
+  const положитьСтвол = i => { const k = стволы.count++; стволы.instanceMatrix.array.set(мСтвола.subarray(i * 16, i * 16 + 16), k * 16); стволы.instanceColor.array.set(тонаСтв.subarray(i * 3, i * 3 + 3), k * 3); };
   // ---- сады вдали: ряд — одной «живой изгородью» (8 треугольников на 11 м), вблизи её сменяют деревья ----
   const рядыДо = () => Math.min(СРЕДНЕ * 0.6, 150);
   let изгородь = null;
@@ -26832,19 +26874,19 @@ const САДЫ_РЯДЫ = { 0: [7.74, 4.3], 2: [7.98, 3.6], 3: [8.0, 1.8], 4: [8
       if (д.ряд) {                       // дерево в ряду сада: рядом — пышное, дальше — силуэт, ещё дальше — изгородь
         if (d > дРяды) continue;
         for (const о of (d < БЛИЖЕ ? уровни.кругБлиз : уровни.кругДаль)) положить(о, i);
-        if (d < БЛИЖЕ) { стволы.instanceMatrix.array.set(мСтвола.subarray(i * 16, i * 16 + 16), стволы.count * 16); стволы.count++; }
+        if (d < БЛИЖЕ) положитьСтвол(i);
         continue;
       }
-      const ур = д.тополь ? (d < СРЕДНЕ ? уровни.топБлиз : уровни.топДаль) : (d < БЛИЖЕ ? уровни.кругБлиз : d < СРЕДНЕ ? уровни.кругСред : уровни.кругДаль);
+      const ур = д.ель ? (d < СРЕДНЕ ? уровни.ельБлиз : уровни.ельДаль) : д.тополь ? (d < СРЕДНЕ ? уровни.топБлиз : уровни.топДаль) : (d < БЛИЖЕ ? уровни.кругБлиз : d < СРЕДНЕ ? уровни.кругСред : уровни.кругДаль);
       for (const о of ур) положить(о, i);
-      if (d < СРЕДНЕ) { стволы.instanceMatrix.array.set(мСтвола.subarray(i * 16, i * 16 + 16), стволы.count * 16); стволы.count++; }
+      if (d < СРЕДНЕ) положитьСтвол(i);
     }
     for (const у of Object.values(уровни)) for (const о of у) { о.instanceMatrix.needsUpdate = true; if (о.instanceColor) о.instanceColor.needsUpdate = true; }
-    стволы.instanceMatrix.needsUpdate = true;
+    стволы.instanceMatrix.needsUpdate = true; стволы.instanceColor.needsUpdate = true;
   }
   const дальность = (б, с, д) => { БЛИЖЕ = б; СРЕДНЕ = с; ДАЛЬШЕ = д; обновитьДеревья(tx0, tz0, true); };
   window.__деревья = { обновить: обновитьДеревья, все, дальность, мат: { карт: матКарт, серд: матСерд, даль: матДаль, кора: стволы.material, сад: изгородь && изгородь.меш.material }, изгородь };
-  Object.assign(window.__счёт, { деревьев: все.filter(д => !д.тополь).length, тополей: все.filter(д => д.тополь).length, поСнимку: !!ДЕРЕВЬЯ });
+  Object.assign(window.__счёт, { породы: все.reduce((с, д) => (с[д.порода] = (с[д.порода] || 0) + 1, с), {}), деревьев: все.filter(д => !д.тополь).length, тополей: все.filter(д => д.тополь).length, поСнимку: !!ДЕРЕВЬЯ });
 }
 
 await этап('Строю посёлок: почти всё…');
