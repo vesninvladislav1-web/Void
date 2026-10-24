@@ -91,12 +91,38 @@ const server = http.createServer((req, res) => {
 });
 
 // ===== WEBSOCKET =====
-const wss = new WebSocketServer({ server });
-const rooms = {};    // LAN сигналинг: roomId -> { peerId: ws }
-const online = {};   // Личные чаты: nick -> ws
+// maxPayload: игра шлёт пакеты по сотне байт — мегабайтный «пакет» не принимаем
+const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
+// LAN сигналинг: roomId -> Map(peerId -> ws). Map, а не {} — ник «__proto__» или «constructor» не ломает сервер
+const rooms = new Map();
+const online = new Map();   // Личные чаты: nick -> ws
+const okId = s => typeof s === 'string' && s.length > 0 && s.length <= 64;
+
+// Живы ли соединения: раз в 30 с ping; кто не ответил pong — обрыв (телефон потерял сеть, вкладку убили).
+// Без этого «мёртвые» соединения висели бы часами, и другие игроки видели бы призраков.
+setInterval(() => {
+  for (const ws of wss.clients) {
+    if (ws.isAlive === false) { ws.terminate(); continue; }
+    ws.isAlive = false;
+    try { ws.ping(); } catch (e) {}
+  }
+}, 30000);
 
 wss.on('connection', ws => {
   let roomId = null, peerId = null, nick = null;
+  ws.isAlive = true;
+  ws.on('pong', () => { ws.isAlive = true; });
+  // выйти из комнаты: только если в комнате под этим ид — именно это соединение
+  // (иначе закрытие старого, оборванного соединения выкинуло бы из комнаты новое, с тем же ид)
+  const leave = () => {
+    const room = roomId !== null && rooms.get(roomId);
+    if (room && room.get(peerId) === ws) {
+      room.delete(peerId);
+      broadcast(roomId, peerId, { type: 'peer-left', peer: peerId });
+      if (!room.size) rooms.delete(roomId);
+    }
+    roomId = null; peerId = null;
+  };
 
   ws.on('message', raw => {
     try {
@@ -108,7 +134,7 @@ wss.on('connection', ws => {
           .get(msg.nick, hashPw(msg.nick, msg.password));
         if (!user) { ws.send(JSON.stringify({ type: 'auth-fail' })); return; }
         nick = user.nick;
-        online[nick] = ws;
+        online.set(nick, ws);
         ws.send(JSON.stringify({ type: 'auth-ok', nick }));
         // Доставить накопленные сообщения
         const pending = db.prepare(
@@ -129,8 +155,9 @@ wss.on('connection', ws => {
         if (!to || !text) return;
         const timestamp = Date.now();
         const payload = JSON.stringify({ type: 'dm', from: nick, text, timestamp });
-        if (online[to]?.readyState === 1) {
-          online[to].send(payload);
+        const dst = online.get(to);
+        if (dst && dst.readyState === 1) {
+          dst.send(payload);
           db.prepare('INSERT INTO messages (from_nick, to_nick, text, timestamp, delivered) VALUES (?, ?, ?, ?, 1)')
             .run(nick, to, text, timestamp);
         } else {
@@ -142,35 +169,41 @@ wss.on('connection', ws => {
 
       // --- LAN сигналинг ---
       if (msg.type === 'join') {
-        roomId = msg.room;
-        peerId = msg.peer || Math.random().toString(36).slice(2, 8);
-        if (!rooms[roomId]) rooms[roomId] = {};
-        rooms[roomId][peerId] = ws;
-        ws.send(JSON.stringify({ type: 'joined', peer: peerId, peers: Object.keys(rooms[roomId]).filter(p => p !== peerId) }));
+        if (!okId(msg.room)) return;
+        leave();                                   // повторный join с того же соединения — из прежней комнаты выходим
+        let room = rooms.get(msg.room);
+        if (!room) rooms.set(msg.room, room = new Map());
+        // ид занят живым соединением — даём новый (игра возьмёт его из ответа 'joined'); чужой ид так не перехватить
+        let id = okId(msg.peer) ? msg.peer : null;
+        const was = id && room.get(id);
+        if (!id || (was && was !== ws && was.readyState === 1)) id = Math.random().toString(36).slice(2, 12);
+        else if (was && was !== ws) { try { was.terminate(); } catch (e) {} }   // висело мёртвое — убираем
+        roomId = msg.room; peerId = id;
+        room.set(peerId, ws);
+        ws.send(JSON.stringify({ type: 'joined', peer: peerId, peers: [...room.keys()].filter(p => p !== peerId) }));
         broadcast(roomId, peerId, { type: 'peer-joined', peer: peerId });
         return;
       }
-      if (msg.to && roomId && rooms[roomId]?.[msg.to]) {
-        rooms[roomId][msg.to].send(JSON.stringify({ ...msg, from: peerId }));
+      if (okId(msg.to) && roomId !== null) {
+        const dst = rooms.get(roomId)?.get(msg.to);
+        if (dst && dst !== ws && dst.readyState === 1) dst.send(JSON.stringify({ ...msg, from: peerId }));
       }
     } catch(e) {}
   });
 
   ws.on('close', () => {
-    if (roomId && peerId && rooms[roomId]) {
-      delete rooms[roomId][peerId];
-      broadcast(roomId, peerId, { type: 'peer-left', peer: peerId });
-      if (!Object.keys(rooms[roomId]).length) delete rooms[roomId];
-    }
-    if (nick && online[nick] === ws) delete online[nick];
+    leave();
+    if (nick && online.get(nick) === ws) online.delete(nick);
   });
+  ws.on('error', () => {});                        // обрыв посреди пакета — не роняем сервер
 });
 
 function broadcast(roomId, fromPeer, msg) {
-  if (!rooms[roomId]) return;
-  Object.entries(rooms[roomId]).forEach(([id, client]) => {
-    if (id !== fromPeer && client.readyState === 1) client.send(JSON.stringify(msg));
-  });
+  const room = rooms.get(roomId);
+  if (!room) return;
+  const data = JSON.stringify(msg);
+  for (const [id, client] of room) if (id !== fromPeer && client.readyState === 1) client.send(data);
 }
 
-server.listen(3000, () => console.log('VOID server running on :3000'));
+const PORT = Number(process.env.PORT) || 3000;
+server.listen(PORT, () => console.log('VOID server running on :' + PORT));

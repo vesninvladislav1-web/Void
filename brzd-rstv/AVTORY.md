@@ -44,3 +44,41 @@
 - toigo_halter_dress_midi — MargaretToigo, http://www.makehumancommunity.org/node/1854
 - toigo_light_skin_female_ginger — MargaretToigo, http://www.makehumancommunity.org/node/1130
 - young_caucasian_male — makehuman_system, http://www.makehumancommunity.org
+
+# Военная техника (война за времянку, папка tehnika/)
+
+Модели переведены в glb (масштаб, ориентация, текстуры 512 px); сами модели не менялись.
+
+## CC-BY (обязательно указать автора)
+- Ударный вертолёт (vertolyot_zel, vertolyot_cher) — «Attack Chopper», Geibu3D / Cheese Animal Productions, CC-BY 4.0, https://opengameart.org/content/attack-chopper
+
+## CC0 (автор просил упомянуть — упоминаем)
+- Самолёт-невидимка F-117 (samolyot_f117) — «Stealth Bomber», Eric Buisson (MNDV.ecb), CC0, https://opengameart.org/content/stealth-bomber
+- Самолёт Ан-2 (samolyot_an) — «An-2 airplane lowpoly», Mehozavr, CC0, https://opengameart.org/content/an-2-airplane-lowpoly
+- Грузовик (gruzovik) — «Free Low Poly Vehicles Pack», Raphael Gonçalves (rgsdev), CC0, https://opengameart.org/content/free-low-poly-vehicles-pack
+- УАЗ (uaz) — «Soviet military off-road vehicle», artie31, CC0, https://opengameart.org/content/soviet-military-off-road-vehicle
+
+## Шрифты (SIL Open Font License 1.1) — папка fonts/
+- Ruslan Display — Oleg Pospelov (название в меню)
+- Rubik — Hubert & Fischer (кнопки меню)
+- PT Serif — ParaType (подзаголовки, курсив)
+
+# Озвучка (папка golos/)
+
+Живые голоса записали сами ребята — каждый своего героя, по своему желанию.
+
+- Люба — Люба (реплики в сцене у магазина: lyuba_01–03)
+- Шторм — Шторм, автор игры (shtorm_01–11, 15; голос понижен, команды на войне — «рация»)
+
+# ВАЗ-2114 (tehnika/vaz2114.js)
+
+- «Lada Vaz 2114» — DR1KING100K, https://sketchfab.com/3d-models/lada-vaz-2114-ab33547cdfb040e6b90279e659674b1a — CC BY 4.0. Изменено: убраны салон, двигатель, полицейское оборудование и наклейки, геометрия упрощена, кузов перекрашен в белый.
+
+# Сканы (папка skany/)
+
+- Школьный туалет (skany/tualet.js) — отсканирован автором игры (Polycam). Выпрямлен, упрощён, дыры закрыты заплатками.
+- Голова Дениса (skany/denis_golova.js) — 3D-скан, с согласия Дениса. Выпрямлена, макушка закрыта куском его же волос с затылка, упрощена.
+
+# Мелочи посёлка (папка meloch/)
+
+- Вёдра, лейка, шина, канистра, газовый баллон, стул, лавка, ящик, бочка, корзина, лопата, садовый гном; крапива, сорняки, щавель, одуванчики, папоротник, кусты, цветы — Poly Haven (polyhaven.com), CC0. Упрощены, текстуры уменьшены.
