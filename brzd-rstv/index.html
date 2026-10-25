@@ -4718,7 +4718,7 @@ window.ДЕТАЛИ.push(['сортир взлетает', function (API) {
     if (!dt) return;
     dt *= window.__сортирСкорость || 1;             // только для проверок на медленном стенде
     // само: погулял секунд 8 — и когда оказался рядом, бахает
-    if (!сц && document.getElementById('старт').hidden && !window.__летитЯша && !window.__онлайнРоль) {   // в онлайне сюжет на паузе — у всех свои задачи
+    if (!сц && document.getElementById('старт').hidden && !window.__летитЯша && !window.__онлайнРоль && !window.__безСюжета) {   // в онлайне сюжет на паузе — у всех свои задачи
       прогулка += dt;
       if (прогулка > 8 && Math.hypot(поз.x - первый.x, поз.z - первый.z) < 70) бах(первый);
     }
@@ -13198,6 +13198,21 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   const адресКомнаты = () => 'brzd-rstv-' + (комната === ОБЩАЯ ? '1' : комната);
   if (комната !== ОБЩАЯ) setTimeout(() => !я.роль && window.__подсказки && window.__подсказки.совет(`Тебя позвали в комнату ${комната}. Жми «👥 ОНЛАЙН».`, 6), 4000);
   const АДРЕС = вЛокалке && qs.get('ws') ? qs.get('ws') : 'wss://voidm.site/signal';
+  // В онлайне сюжета нет: у каждого он шёл бы свой (сортир взорвался только у одного, телефон «Мама» и стульчак
+  // в заборе — только у него). Нажал «Онлайн» — сюжет выключен; если он уже начался, посёлок один раз
+  // перезагружается начисто (?онлайн=1) и сам подключается.
+  let онлСразу = qs.get('онлайн') === '1', сюжетБыл = false;
+  if (онлСразу) window.__безСюжета = true;
+  window.__подписка && window.__подписка('сортир-взорвался', () => { if (!window.__безСюжета) сюжетБыл = true; });
+  function безСюжета() {
+    window.__безСюжета = true;
+    const Ш = window.__шторм; try { if (Ш && Ш.посадка && Ш.посадка.этап !== 'сел') Ш.сразуНаМесте(); } catch (e) {}
+  }
+  function начисто() {
+    const п = new URLSearchParams(location.search); п.set('онлайн', '1');
+    window.__подсказки && window.__подсказки.совет('🌐 Онлайн — без сюжета. Перезагружаю посёлок начисто…', 3);
+    setTimeout(() => { location.href = location.pathname + '?' + п.toString() + location.hash; }, 900);
+  }
   const хран = { взять: к => { try { return localStorage.getItem(к); } catch (e) { return null; } }, положить: (к, з) => { try { localStorage.setItem(к, з); } catch (e) {} } };
 
   // ===================== РОЛИ =====================
@@ -13671,6 +13686,8 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
   }
   function подключиться() {
     if (ws && ws.readyState <= 1) return;                       // уже подключаемся / подключены
+    if (сюжетБыл && !window.__безСюжета) { начисто(); return; }
+    безСюжета();
     if (таймерПереподкл) { clearTimeout(таймерПереподкл); таймерПереподкл = null; }
     let s;
     // каждый раз — новый ид: если сервер ещё держит старое (оборванное) соединение с прежним ид, оно не
@@ -14205,13 +14222,43 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
     выполнить(м.cmd, { x: п.x, z: п.z }, false, доп);
   }
   const призванные = [];
+  API.каждыйКадр.push(() => {
+    if (!онлСразу || !document.getElementById('старт').hidden) return;
+    онлСразу = false; безСюжета(); подключиться(); выборРоли();
+  });
+  API.каждыйКадр.push((dt, ms, поз) => {
+    if (!dt || !призванные.length) return; dt = Math.min(dt, 0.1);
+    const угл = a => Math.atan2(Math.sin(a), Math.cos(a));
+    for (const г of призванные) {
+      const гр = г.группа; if (!гр || !гр.parent) continue;
+      const x = гр.position.x, z = гр.position.z, dП = поз ? Math.hypot(поз.x - x, поз.z - z) : 99;
+      г.болтает = dП < 3.5 && !window.__заРулём;
+      if (г.болтает) { гр.rotation.y += угл(Math.atan2(поз.x - x, поз.z - z) - гр.rotation.y) * Math.min(1, dt * 4); г.цель = null; г.ждать = 1.5; continue; }
+      if (!г.цель) {
+        if ((г.ждать -= dt) > 0) continue;
+        for (let k = 0; k < 8 && !г.цель; k++) {
+          const а = Math.random() * 6.283, r = 2 + Math.random() * 9, tx = г.дом[0] + Math.cos(а) * r, tz = г.дом[1] + Math.sin(а) * r;
+          if (!API.вДоме(tx, tz, 0.5) && !API.вВоде(tx, tz)) г.цель = [tx, tz];
+        }
+        if (!г.цель) { г.ждать = 2; continue; }
+      }
+      const dx = г.цель[0] - x, dz = г.цель[1] - z, d = Math.hypot(dx, dz);
+      if (d < 0.3) { г.цель = null; г.ждать = 2 + Math.random() * 6; continue; }
+      гр.rotation.y += угл(Math.atan2(dx, dz) - гр.rotation.y) * Math.min(1, dt * 5);
+      const ш = Math.min(d, 1.2 * dt), nx = x + dx / d * ш, nz = z + dz / d * ш;
+      if (API.вДоме(nx, nz, 0.3) || API.вВоде(nx, nz)) { г.цель = null; г.ждать = 1; continue; }
+      гр.position.set(nx, В(nx, nz), nz);
+    }
+  });
   function призватьСущество(где, доп) {
     if (!доп || !доп.вид || где.x === null) return;
     const гр = new API.THREE.Group();
     гр.position.set(где.x, В(где.x, где.z), где.z);
     гр.rotation.y = Math.random() * Math.PI * 2;
     сцена.add(гр);
-    const г = { группа: гр, мх: доп.вид, аним: () => 'Idle_Loop' };
+    // не стоит столбом: бродит вокруг места, где появился, постоит — пойдёт дальше; подойдёшь — повернётся и «заговорит»
+    const г = { группа: гр, мх: доп.вид, дом: [где.x, где.z], цель: null, ждать: 1 + Math.random() * 3, болтает: false,
+      аним: ск => г.болтает ? 'Idle_Talking_Loop' : ск > 0.4 ? 'Walk_Loop' : 'Idle_Loop' };
     (window.__герои3д = window.__герои3д || []).push(г);
     призванные.push(г);
     if (призванные.length > 16) { const старый = призванные.shift(); window.__люди3д && window.__люди3д.убратьГероя ? window.__люди3д.убратьГероя(старый) : сцена.remove(старый.группа); }
@@ -14796,7 +14843,7 @@ window.ДЕТАЛИ.push(['сохранение', function (API) {
   function обновитьКнопки() {
     const с = читать(), г = с && главаПо(с.глава);
     кнДальше.textContent = г ? 'ПРОДОЛЖИТЬ · ' + г.имя.toUpperCase() : '';
-    кнДальше.hidden = кнЗаново.hidden = !г || !гулять || гулять.hidden;
+    кнДальше.hidden = кнЗаново.hidden = !г || !гулять || гулять.hidden || !!window.__безСюжета;
   }
   кнЗаново.addEventListener('click', () => { try { localStorage.removeItem(КЛЮЧ); } catch (e) {} обновитьКнопки(); });
   кнДальше.addEventListener('click', () => {
@@ -16564,7 +16611,7 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
     пас.ид = null; кнПасВыйти.style.display = 'none';
   }
   function чужойЗанят(x, z) {
-    for (const ч of чужие.values()) { const dx = x - ч.x, dz = z - ч.z, fx = Math.sin(ч.курс), fz = Math.cos(ч.курс); if (Math.abs(dx * fx + dz * fz) < ДЛИНА / 2 && Math.abs(dx * fz - dz * fx) < ШИР_М) return true; }
+    for (const ч of чужие.values()) { if (!ч.гр.visible) continue; const dx = x - ч.x, dz = z - ч.z, fx = Math.sin(ч.курс), fz = Math.cos(ч.курс); if (Math.abs(dx * fx + dz * fz) < ДЛИНА / 2 && Math.abs(dx * fz - dz * fx) < ШИР_М) return true; }
     return false;
   }
   API.каждыйКадр.push((dt, ms, поз) => {
@@ -16595,7 +16642,10 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
         for (const кл of ч.колёса) { кл.ось.rotation.x = ч.спин / кл.R; кл.ось.rotation.y = кл.перед ? ч.руль : 0; }
       }
     }
-    for (const [ид, ч] of чужие) { const п = пиры && пиры.get(ид); if (!п || п.невидим) { сцена.remove(ч.гр); чужие.delete(ид); } }      // ушёл из игры — и машина с ним
+    for (const [ид, ч] of чужие) { const п = пиры && пиры.get(ид); if (!п || п.невидим) { сцена.remove(ч.гр); чужие.delete(ид); } }
+    // ВАЗ у каждого свой, а стоят они в одном дворе: чужой, пока он на месте моей стоящей машины, не показываем
+    // (иначе две машины друг в друге) и не считаем препятствием — выезжает и появляется
+    if (машина) for (const ч of чужие.values()) ч.гр.visible = ез.едет || Math.hypot(ч.x - машина.x, ч.z - машина.z) > 3.4;      // ушёл из игры — и машина с ним
     // пассажир: сидим справа от водителя; водитель вышел — выходим и мы
     if (пас.ид) {
       const ч = чужие.get(пас.ид); if (!ч || !ч.едет) { выйтиПассажиру(); return; }
@@ -23317,12 +23367,12 @@ window.ДЕТАЛИ.push(['главы', function (API) {
     const пред = н - 1, г = ГЛАВЫ[н];
     const к = { номер: г.номер, имя: г.имя, под: г.под, итог: пред >= 1 ? итог(пред) : '' };
     начатьГлаву(н);
-    if (window.__перемотка || window.__онлайнРоль) return;          // в онлайне свои задачи — заставки глав не мешают
+    if (window.__перемотка || window.__онлайнРоль || window.__безСюжета) return;          // в онлайне свои задачи — заставки глав не мешают
     показать(к, Object.assign({ фон: г.поверх ? 'поверх' : 'полный', сек: г.поверх ? 3 : 3.6 }, опц));
   }
   // пролог — когда начинаешь с самого начала (не «продолжить»)
   { const г = document.getElementById('гулять');
-    if (г) г.addEventListener('click', () => setTimeout(() => { if (!window.__перемотка && !window.__онлайнРоль && ст.глава < 0) глава(0, { сек: 3.2 }); }, 600)); }
+    if (г) г.addEventListener('click', () => setTimeout(() => { if (!window.__перемотка && !window.__онлайнРоль && !window.__безСюжета && ст.глава < 0) глава(0, { сек: 3.2 }); }, 600)); }
   подписка('апокалипсис-начался', () => глава(1));
   подписка('уборка-кончилась', () => setTimeout(() => глава(2), 1200));
   подписка('акт2-кончился', () => setTimeout(() => глава(3), 1200));
