@@ -18405,6 +18405,113 @@ window.ДЕТАЛИ.push(['школьный туалет', function (API) {
   window.__туалет = { войти, выйти, внутри: () => !!внутри, место: () => место };
 }]);
 
+// ===================== ЗАЛ ДОМА (3D-скан) =====================
+// Настоящий зал в доме автора игры, отсканированный телефоном (Polycam). У дома — «🏠 ЗАЙТИ ДОМОЙ»: игрока
+// переносит внутрь, камера — от глаз, ходить можно между стенами; «🚪 ВЫЙТИ» — обратно во двор.
+// Как и школьный туалет, комната висит высоко над пустым полем (её прячет туман). Потолок скан не поймал
+// (ровный белый) — он свой: белый, с плинтусом и люстрой на пять бежевых абажуров. Дыры пола — заплаткой.
+window.ДЕТАЛИ.push(['зал дома', function (API) {
+  const { THREE, сцена } = API;
+  const ШИР = 4.95 / 2, ДЛ = 2.66 / 2, ВЫС = 2.5, ЗАПАС = 0.35, НАД = 360;
+  const Д = window.__домИгрока; if (!Д) return;
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #залКн { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
+      height: 46px; padding: 0 20px; border-radius: 23px; border: 0; background: #F2E6CC; color: #1A140E; font: 800 13px system-ui, sans-serif; letter-spacing: 1px; box-shadow: 0 4px 14px rgba(0,0,0,.4); cursor: pointer; }
+    body.кино #залКн { display: none !important; }
+  `;
+  document.head.appendChild(стиль);
+  const кн = document.createElement('button'); кн.id = 'залКн'; document.body.appendChild(кн);
+  let место = null, модель = null, грузится = null, внутри = null;
+  const [вx, вz] = Д.старт;                                          // крыльцо: откуда игра начинается
+  function найтиМесто() {
+    for (let r = 60; r < 500; r += 20) for (let у = 0; у < 6.28; у += 0.4) {
+      const x = вx + Math.cos(у) * r, z = вz + Math.sin(у) * r;
+      let ок = true;
+      for (const [dx, dz] of [[-ШИР, -ДЛ], [ШИР, -ДЛ], [-ШИР, ДЛ], [ШИР, ДЛ], [0, 0]]) if (API.вДоме(x + dx, z + dz, 1) || API.вВоде(x + dx, z + dz)) { ок = false; break; }
+      if (ок) return { x, z, y: API.землиВысота(x, z) + НАД };
+    }
+    return null;
+  }
+  const БЕЗ = { fog: false, toneMapped: false };
+  function люстра() {
+    const г = new THREE.Group(), металл = new THREE.MeshBasicMaterial({ color: '#4A3E32', ...БЕЗ }), абажур = new THREE.MeshBasicMaterial({ color: '#D8B48C', side: THREE.DoubleSide, ...БЕЗ });
+    const стерж = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.35, 6), металл); стерж.position.y = -0.17; г.add(стерж);
+    const чаша = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 6), металл); чаша.position.y = -0.36; г.add(чаша);
+    for (let i = 0; i < 5; i++) {
+      const а = i / 5 * Math.PI * 2, x = Math.cos(а) * 0.3, z = Math.sin(а) * 0.3;
+      const рука = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.01, 0.3, 5), металл); рука.position.set(x / 2, -0.36, z / 2); рука.rotation.z = Math.PI / 2; рука.rotation.y = -а; г.add(рука);
+      const ш = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.14, 12, 1, true), абажур); ш.position.set(x, -0.3, z); г.add(ш);
+    }
+    return г;
+  }
+  function загрузить() {
+    if (грузится) return грузится;
+    грузится = new Promise(ок => {
+      const с = document.createElement('script'); с.src = 'skany/zal.js';
+      с.onload = () => {
+        const д = window.__glb && window.__glb.zal; if (!д) return ок(null);
+        const с2 = atob(д.b), б = new Uint8Array(с2.length); for (let i = 0; i < с2.length; i++) б[i] = с2.charCodeAt(i);
+        delete window.__glb.zal;
+        new THREE.GLTFLoader().parse(б.buffer, '', г => {
+          const гр = new THREE.Group();
+          г.scene.traverse(о => { if (!о.isMesh) return;
+            const м = new THREE.MeshBasicMaterial({ map: о.material.map, side: THREE.DoubleSide, ...БЕЗ }); о.material.dispose(); о.material = м; о.frustumCulled = false; });   // свет в скане уже «запечён»
+          гр.add(г.scene);
+          const заплатка = (w, d, цв, y, вниз) => { const п = new THREE.Mesh(new THREE.PlaneGeometry(w, d).rotateX(вниз ? Math.PI / 2 : -Math.PI / 2), new THREE.MeshBasicMaterial({ color: цв, ...БЕЗ })); п.position.y = y; гр.add(п); };
+          заплатка(ШИР * 2 + 0.3, ДЛ * 2 + 0.3, '#B8AA98', -0.01, false);           // под дырами пола — в цвет ковра
+          заплатка(ШИР * 2 + 0.3, ДЛ * 2 + 0.3, '#F1F0EC', ВЫС, true);              // натяжной потолок — белый матовый
+          const короб = new THREE.Mesh(new THREE.BoxGeometry(ШИР * 2 + 0.35, ВЫС + 0.1, ДЛ * 2 + 0.35), new THREE.MeshBasicMaterial({ color: '#DCD4C6', side: THREE.BackSide, ...БЕЗ }));
+          короб.position.y = ВЫС / 2; гр.add(короб);                               // в дырах стен — цвет обоев, а не небо
+          const л = люстра(); л.position.set(0, ВЫС, 0); гр.add(л);
+          гр.visible = false; сцена.add(гр); модель = гр; ок(гр);
+        }, () => ок(null));
+      };
+      с.onerror = () => ок(null);
+      document.head.appendChild(с);
+    });
+    return грузится;
+  }
+  const занят = () => document.body.classList.contains('кино') || document.body.classList.contains('кабина') || window.__заРулём || window.__поездка || window.__перемотка || window.__летитЯша ||
+    (window.__туалет && window.__туалет.внутри());
+  async function войти() {
+    if (внутри || занят()) return;
+    if (!место) место = найтиМесто(); if (!место) return;
+    кн.textContent = 'ЗАГРУЖАЮ…';
+    const м = await загрузить(); if (!м) { кн.textContent = 'НЕ ЗАГРУЗИЛОСЬ'; return; }
+    const П = window.__мир.поз, К = window.__мир.кам;
+    внутри = { x: П.x, z: П.z, угол: П.угол, даль: К.даль, высота: К.высота, тангаж: К.тангаж, скрыт: window.__игрокСкрыт };
+    м.position.set(место.x, место.y, место.z); м.visible = true;
+    window.__полКомнаты = место.y;
+    П.x = место.x; П.z = место.z; П.угол = 0;
+    К.даль = 0.05; К.высота = 1.5; К.тангаж = 0.12; К.рыск = Math.PI; window.__игрокСкрыт = true;
+    API.камера.position.set(П.x, место.y + 1.5, П.z - 0.05);
+    window.__подсказки && window.__подсказки.совет('🏠 Зал. Настоящий — отсканирован телефоном.', 4);
+  }
+  function выйти() {
+    if (!внутри) return;
+    const П = window.__мир.поз, К = window.__мир.кам;
+    window.__полКомнаты = undefined; if (модель) модель.visible = false;
+    Object.assign(П, { x: внутри.x, z: внутри.z, угол: внутри.угол }); Object.assign(К, { даль: внутри.даль, высота: внутри.высота, тангаж: внутри.тангаж }); window.__игрокСкрыт = внутри.скрыт;
+    внутри = null;
+  }
+  кн.addEventListener('click', () => { if (внутри) выйти(); else войти(); });
+  API.каждыйКадр.push((dt, ms, П) => {
+    if (!П) return;
+    if (внутри) {
+      if (занят()) { выйти(); return; }
+      П.x = Math.max(место.x - ШИР + ЗАПАС, Math.min(место.x + ШИР - ЗАПАС, П.x));
+      П.z = Math.max(место.z - ДЛ + ЗАПАС, Math.min(место.z + ДЛ - ЗАПАС, П.z));
+      кн.textContent = '🚪 ВЫЙТИ'; кн.style.display = 'block';
+      return;
+    }
+    const рядом = Math.hypot(П.x - вx, П.z - вz) < 6 && !занят() && document.getElementById('старт').hidden && !(window.__туалет && window.__туалет.внутри());
+    if (рядом) { if (!грузится) загрузить(); if (кн.textContent !== 'ЗАГРУЖАЮ…') кн.textContent = '🏠 ЗАЙТИ ДОМОЙ'; }
+    кн.style.display = рядом ? 'block' : 'none';
+  });
+  window.__зал = { войти, выйти, внутри: () => !!внутри, место: () => место };
+}]);
+
 // ===================== СКАНЫ ГОЛОВ =====================
 // Настоящая голова вместо головы модели: 3D-скан (с согласия человека). У модели кость головы сжимаем
 // почти в ноль (пропадают голова, фото-лицо, волосы, глаза), а скан каждый кадр ставим на её место
