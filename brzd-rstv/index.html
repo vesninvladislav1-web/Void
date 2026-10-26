@@ -18355,6 +18355,12 @@ window.ДЕТАЛИ.push(['школьный туалет', function (API) {
           заплатка(ШИР * 2 + 0.2, ДЛ * 2 + 0.2, '#E8E8E4', ВЫС, true);
           const короб = new THREE.Mesh(new THREE.BoxGeometry(ШИР * 2 + 0.25, ВЫС + 0.1, ДЛ * 2 + 0.25), new THREE.MeshBasicMaterial({ color: '#E2E2DE', side: THREE.BackSide, fog: false, toneMapped: false }));   // в тон белому верху стен — прорехи не бросаются в глаза
           короб.position.y = ВЫС / 2; гр.add(короб);
+          // на стене — плакат «РАЗЫСКИВАЕТСЯ: опасный преступник» (автор игры 4 года назад; лицо под полосой «ЗАСЕКРЕЧЕНО»)
+          new THREE.TextureLoader().load('meloch/rozysk.jpg', т => {
+            т.encoding = THREE.sRGBEncoding;
+            const пл = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.65), new THREE.MeshBasicMaterial({ map: т, fog: false, toneMapped: false }));
+            пл.position.set(-ШИР + 0.08, 1.5, -0.25); пл.rotation.y = Math.PI / 2; гр.add(пл);
+          });
           гр.visible = false; сцена.add(гр); модель = гр; ок(гр);
         }, () => ок(null));
       };
