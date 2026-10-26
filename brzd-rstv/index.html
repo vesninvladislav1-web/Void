@@ -1782,14 +1782,6 @@ window.ДЕТАЛИ.push(['дом игрока', function (API) {
         стена(гр, [lx - 0.5, SZ0 - 0.02], [lx + 0.5, SZ0 - 0.02], сп, сп + 1.95, тёмДоскиМ, 1.1);
         куб(lx + 0.35, SZ0 - 0.05, сп + 0.95, 0.05, 0.05, 0.14, '#1C1C1E');
       }
-      // баскетбольное кольцо под крышей: щит, обод, сетка
-    // баскетбольное кольцо под крышей: щит, обод, сетка
-    { const к = new THREE.Group(), [x0, z0] = W(2.6, SZ0 - 0.05); к.position.set(x0, св - 0.6, z0); к.rotation.y = Math.atan2(-nx, -nz); гр.add(к);
-      const щит = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.62, 0.04), мат(null, '#8A3A2C', { roughness: 0.7 })); щит.position.z = 0.02; щит.castShadow = true; к.add(щит);
-      const обод = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.012, 6, 28).rotateX(Math.PI / 2), мат(null, '#E04A2A', { roughness: 0.4, metalness: 0.4 })); обод.position.set(0, -0.2, 0.27); к.add(обод);
-      const вп = []; for (let i = 0; i < 12; i++) { const а = i / 12 * 6.283, а2 = а + 0.4; вп.push(Math.cos(а) * 0.21, -0.2, 0.27 + Math.sin(а) * 0.21, Math.cos(а2) * 0.13, -0.5, 0.27 + Math.sin(а2) * 0.13); }
-      const гс = new THREE.BufferGeometry(); гс.setAttribute('position', new THREE.Float32BufferAttribute(вп, 3));
-      к.add(new THREE.LineSegments(гс, new THREE.LineBasicMaterial({ color: 0xE8E8F0 }))); }
       API.добавитьПрепятствие([W(SX0, SZ0), W(SX1, SZ0), W(SX1, SZ1), W(SX0, SZ1)], 'сарай');
     }
 
@@ -1823,6 +1815,13 @@ window.ДЕТАЛИ.push(['дом игрока', function (API) {
       скат(гр, [AX0 - 0.35, AZ0 - 0.3, авП - 0.05], [AX0 - 0.35, AZ1 + 1.0, авП - 0.05], [AX1, AZ1 + 1.0, авЗ], [AX1, AZ0 - 0.3, авЗ], шиферСтМ, 1.7);
       куб(AX0 - 0.35, (AZ0 + AZ1) / 2 + 0.35, авП - 0.22, AZ1 - AZ0 + 1.3, 0.05, 0.16, '#3A3026', false);   // лобовая доска
       палка([AX0 + 0.12, AZ1 + 0.03, ап + 0.9], [AX0 + 0.12, AZ1 + 0.95, авП - 0.12], 0.1, '#4A3A2C');   // подкос
+      // баскетбольное кольцо — над кирпичным торцом вольера, на краю шиферного навеса, щитом во двор
+    { const к = new THREE.Group(), [x0, z0] = W((AX0 + AX1) / 2, AZ0 - 0.32); к.position.set(x0, ап + 2.6, z0); к.rotation.y = Math.atan2(-nx, -nz); гр.add(к);
+      const щит = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.62, 0.04), мат(null, '#8A3A2C', { roughness: 0.7 })); щит.position.z = 0.02; щит.castShadow = true; к.add(щит);
+      const обод = new THREE.Mesh(new THREE.TorusGeometry(0.21, 0.012, 6, 28).rotateX(Math.PI / 2), мат(null, '#E04A2A', { roughness: 0.4, metalness: 0.4 })); обод.position.set(0, -0.2, 0.27); к.add(обод);
+      const вп = []; for (let i = 0; i < 12; i++) { const а = i / 12 * 6.283, а2 = а + 0.4; вп.push(Math.cos(а) * 0.21, -0.2, 0.27 + Math.sin(а) * 0.21, Math.cos(а2) * 0.13, -0.5, 0.27 + Math.sin(а2) * 0.13); }
+      const гс = new THREE.BufferGeometry(); гс.setAttribute('position', new THREE.Float32BufferAttribute(вп, 3));
+      к.add(new THREE.LineSegments(гс, new THREE.LineBasicMaterial({ color: 0xE8E8F0 }))); }
       API.добавитьПрепятствие([W(AX0, AZ0), W(AX1, AZ0), W(AX1, AZ1), W(AX0, AZ1)], 'вольер');
     }
     // ---------- фасад времянки (по фото): крыльцо с синими столбиками, дверь, окно в синих наличниках, красные углы ----------
