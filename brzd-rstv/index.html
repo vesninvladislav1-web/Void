@@ -16056,6 +16056,420 @@ window.ДЕТАЛИ.push(['крик вайбкодера', function (API) {
   window.__крик = { заорать, идёт: () => !!ст };
 }]);
 
+// ===================== БОЛЬШАЯ КАРТА =====================
+// Отдельное окно поверх игры: карта слева, справа — что показывать, места и игроки.
+// Палец — двигать, два пальца или колёсико — масштаб, тап — поставить или убрать метку.
+// Вблизи дома и дороги рисуются заново (чёткие на любом масштабе), издалека — готовая подложка.
+window.ДЕТАЛИ.push(['большая карта', function (API) {
+  const мини = document.getElementById('миникарта');
+  if (!мини) return;                                   // подложку (мини.подложка) ядро рисует позже — берём при открытии
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #миникарта:not(.большая) { border-radius: 50%; border: 2px solid rgba(232,200,74,0.75); box-shadow: 0 0 0 3px rgba(26,18,12,0.7), 0 4px 14px rgba(0,0,0,0.45); cursor: pointer; }
+    #карта2 { position: fixed; inset: 0; z-index: 26; display: none; padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
+      background: rgba(8,5,3,0.6); box-sizing: border-box; }
+    #карта2.видно { display: flex; }
+    #карта2 .к2-лист { flex: 1; display: flex; min-width: 0; border-radius: 20px; overflow: hidden; border: 1px solid rgba(232,200,74,0.35);
+      background: linear-gradient(#2A1E14, #1A120C); box-shadow: 0 20px 60px rgba(0,0,0,0.6); font-family: Rubik, system-ui, sans-serif; color: #F2E6CC; }
+    #карта2 .к2-поле { position: relative; flex: 1; min-width: 0; background: #56663A; }
+    #карта2 canvas { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+    #карта2 canvas:active { cursor: grabbing; }
+    #карта2 .к2-рамка { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 1px rgba(26,18,12,0.6), inset 0 0 40px rgba(26,18,12,0.45); }
+    #карта2 .к2-кнопки { position: absolute; right: 10px; bottom: 10px; display: flex; flex-direction: column; gap: 6px; }
+    #карта2 .к2-кнопки button, #карта2 .к2-закр { width: 42px; height: 42px; border-radius: 14px; border: 1px solid rgba(232,200,74,0.45); background: rgba(26,18,12,0.85);
+      color: #F4D35E; font: 800 20px Rubik, system-ui, sans-serif; cursor: pointer; padding: 0; box-shadow: 0 3px 10px rgba(0,0,0,0.4); }
+    #карта2 .к2-кнопки button.да { background: #E8C84A; color: #1E140A; }
+    #карта2 .к2-закр { position: absolute; left: 10px; top: 10px; border-radius: 50%; font-size: 17px; color: #F2E6CC; }
+    #карта2 .к2-подск { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); padding: 6px 12px; border-radius: 12px; background: rgba(26,18,12,0.8);
+      color: #E8D6A8; font: 600 11.5px system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
+    #карта2 .к2-бок { flex: none; width: 236px; display: flex; flex-direction: column; border-left: 1px solid rgba(242,230,204,0.1); min-height: 0; }
+    #карта2 .к2-заг { padding: 12px 14px 8px; border-bottom: 1px solid rgba(242,230,204,0.08); }
+    #карта2 .к2-заг b { display: block; color: #F3E1B0; font: 400 19px/1.1 'Ruslan Display', Georgia, serif; text-shadow: 0 2px 0 #3B2208; }
+    #карта2 .к2-заг small { color: #B9A887; font: italic 11px 'PT Serif', Georgia, serif; letter-spacing: .08em; }
+    #карта2 .к2-список { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 6px 10px 12px; }
+    #карта2 h4 { margin: 10px 4px 6px; color: #B9A887; font: 800 10.5px Rubik, system-ui, sans-serif; letter-spacing: 1.5px; text-transform: uppercase; }
+    #карта2 .к2-фильтры { display: flex; flex-wrap: wrap; gap: 5px; }
+    #карта2 .к2-фильтры button { height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid rgba(242,230,204,0.22); background: rgba(242,230,204,0.05);
+      color: #B9A887; font: 700 11px Rubik, system-ui, sans-serif; cursor: pointer; }
+    #карта2 .к2-фильтры button.да { background: #E8C84A; border-color: #E8C84A; color: #1E140A; }
+    #карта2 .к2-место { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 8px; margin: 1px 0; border: 0; border-radius: 11px; background: none;
+      color: #F2E6CC; font: 600 12.5px Rubik, system-ui, sans-serif; text-align: left; cursor: pointer; }
+    #карта2 .к2-место:active, #карта2 .к2-место:hover { background: rgba(232,200,74,0.12); }
+    #карта2 .к2-место i { font-style: normal; width: 26px; height: 26px; flex: none; display: grid; place-items: center; border-radius: 50%; background: #F2E6CC; font-size: 14px;
+      box-shadow: 0 0 0 2px #2A1E14, 0 0 0 3px rgba(232,200,74,0.6); }
+    #карта2 .к2-место span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #карта2 .к2-место em { font-style: normal; color: #B9A887; font: 600 10.5px system-ui, sans-serif; }
+    #карта2 .к2-пусто { color: #8E806A; font: 12px system-ui, sans-serif; padding: 2px 6px; }
+    @media (max-width: 700px) { #карта2 .к2-бок { width: 184px; } #карта2 .к2-подск { display: none; } }
+    @media (max-height: 380px) { #карта2 .к2-заг { display: none; } }
+  `;
+  document.head.appendChild(стиль);
+  const окно = document.createElement('div'); окно.id = 'карта2';
+  окно.innerHTML = `<div class="к2-лист"><div class="к2-поле"><canvas aria-label="Карта посёлка"></canvas><div class="к2-рамка"></div>
+      <button class="к2-закр" aria-label="Закрыть карту">✕</button><div class="к2-подск">Тапни — метка · двумя пальцами — масштаб</div>
+      <div class="к2-кнопки"><button data-д="+" aria-label="Приблизить">+</button><button data-д="-" aria-label="Отдалить">−</button><button data-д="я" aria-label="Ко мне">◎</button></div></div>
+    <aside class="к2-бок"><div class="к2-заг"><b>Бороздиновский</b><small>Новохопёрский район</small></div><div class="к2-список">
+      <h4>Показывать</h4><div class="к2-фильтры"></div>
+      <h4>Игроки</h4><div class="к2-игроки"></div>
+      <h4>Места</h4><div class="к2-места"></div></div></aside></div>`;
+  document.body.appendChild(окно);
+  const cv = окно.querySelector('canvas'), с = cv.getContext('2d'), поле = окно.querySelector('.к2-поле');
+  const местаЭл = окно.querySelector('.к2-места'), игрокиЭл = окно.querySelector('.к2-игроки'), подск = окно.querySelector('.к2-подск');
+  const кнЯ = окно.querySelector('[data-д="я"]');
+
+  // ---------- что показывать (запоминаем) ----------
+  const ФИЛЬТРЫ = [['улицы', 'Улицы'], ['места', 'Места'], ['игроки', 'Игроки'], ['метки', 'Метки'], ['дома', 'Крыши']];
+  const вкл = (() => { try { return Object.assign({ улицы: true, места: true, игроки: true, метки: true, дома: true }, JSON.parse(localStorage.getItem('бороздиновский.картаФильтры')) || {}); } catch (e) { return { улицы: true, места: true, игроки: true, метки: true, дома: true }; } })();
+  { const ряд = окно.querySelector('.к2-фильтры');
+    for (const [к, т] of ФИЛЬТРЫ) { const б = document.createElement('button'); б.textContent = т; б.classList.toggle('да', !!вкл[к]); б.setAttribute('aria-pressed', String(!!вкл[к]));
+      б.addEventListener('click', () => { вкл[к] = !вкл[к]; б.classList.toggle('да', вкл[к]); б.setAttribute('aria-pressed', String(вкл[к]));
+        try { localStorage.setItem('бороздиновский.картаФильтры', JSON.stringify(вкл)); } catch (e) {} рисовать(); }); ряд.appendChild(б); } }
+
+  // ---------- места: значки и список ----------
+  const ЗНАК = { 'Школа': '🏫', 'Полигон': '🎯', 'Пруд': '💧', 'Стадион': '⚽', 'Ozon': '📦', 'Остановка': '🚌' };
+  function места() {
+    const м = [], Д = window.__домИгрока;
+    if (Д) { const [x, z] = Д.W(5, 4); м.push({ имя: 'Мой дом', знак: '🏠', x, z }); }
+    const Ш = window.__шторм; if (Ш && Ш.SX != null) м.push({ имя: 'Спутник «Шторм-1»', знак: '📡', x: Ш.SX, z: Ш.SZ });
+    const ваз = window.__ваз && window.__ваз.машина; if (ваз && ваз.x != null) м.push({ имя: 'ВАЗ', знак: '🚗', x: ваз.x, z: ваз.z });
+    for (const п of window.__подписиКарты || []) if (п.вид === 'место' && п.текст !== 'Кладбище') м.push({ имя: п.текст, знак: ЗНАК[п.текст] || (/двор/i.test(п.текст) ? '🏚' : '📍'), x: п.x, z: п.z });
+    return м;
+  }
+  function список() {
+    const п = window.__мир.поз, м = места(), видел = new Map();
+    for (const т of м) { const d = Math.hypot(т.x - п.x, т.z - п.z); const б = видел.get(т.имя); if (!б || d < б.d) видел.set(т.имя, { ...т, d }); }
+    местаЭл.textContent = '';
+    for (const т of видел.values()) {
+      const б = document.createElement('button'); б.className = 'к2-место';
+      б.innerHTML = '<i></i><span></span><em></em>'; б.querySelector('i').textContent = т.знак; б.querySelector('span').textContent = т.имя;
+      б.querySelector('em').textContent = т.d >= 1000 ? (т.d / 1000).toFixed(1) + ' км' : Math.round(т.d) + ' м';
+      б.addEventListener('click', () => { перелететь(т.x, т.z, 120); window.__метки && window.__метки.поставить({ x: т.x, z: т.z }); });
+      местаЭл.appendChild(б);
+    }
+  }
+  const О = () => window.__онлайн, онлайн = () => { const о = О(); return !!(о && о.я && о.я.роль); };
+  function игроки() {
+    const о = О(), л = []; if (онлайн()) for (const п of о.пиры.values()) if (п.x != null && п.роль && !п.невидим) л.push(п);
+    return л;
+  }
+  let игрокиКлюч = '';
+  function списокИгроков() {
+    const л = игроки(), о = О(), ключ = л.map(п => п.ид + о.подписьПира(п)).join('|') || '-';
+    if (ключ === игрокиКлюч) return; игрокиКлюч = ключ; игрокиЭл.textContent = '';
+    if (!л.length) { const д = document.createElement('div'); д.className = 'к2-пусто'; д.textContent = онлайн() ? 'Пока никого рядом' : 'Зайди в онлайн — друзья будут тут'; игрокиЭл.appendChild(д); return; }
+    for (const п of л) {
+      const б = document.createElement('button'); б.className = 'к2-место'; б.innerHTML = '<i></i><span></span>';
+      const цв = (о.РОЛИ[п.роль] || {}).цвет || '#F2E6CC'; б.querySelector('i').style.background = цв; б.querySelector('i').textContent = '🙂'; б.querySelector('span').textContent = о.подписьПира(п);
+      б.addEventListener('click', () => перелететь(п.x, п.z, 90)); игрокиЭл.appendChild(б);
+    }
+  }
+
+  // ---------- вид: центр и радиус (метры) ----------
+  const МАКС_R = Math.max(API.ШИР, API.ГЛУБ) / 2, МИН_R = 35;
+  const вид = { cx: 0, cz: 0, R: 260 };
+  let следить = true, открыта = false, пр = 1, cw = 1, ch = 1;
+  const м = () => Math.min(cw, ch) / (2 * вид.R);                  // css-пикселей на метр
+  function зажать() {
+    вид.R = Math.max(МИН_R, Math.min(МАКС_R, вид.R));
+    const hx = cw / м() / 2, hz = ch / м() / 2;
+    вид.cx = Math.max(-API.ШИР / 2 + Math.min(hx, API.ШИР / 2), Math.min(API.ШИР / 2 - Math.min(hx, API.ШИР / 2), вид.cx));
+    вид.cz = Math.max(-API.ГЛУБ / 2 + Math.min(hz, API.ГЛУБ / 2), Math.min(API.ГЛУБ / 2 - Math.min(hz, API.ГЛУБ / 2), вид.cz));
+  }
+  function масштаб(f, px = cw / 2, py = ch / 2) {
+    const s0 = м(), wx = вид.cx + (px - cw / 2) / s0, wz = вид.cz + (py - ch / 2) / s0;
+    вид.R *= f; зажать(); const s1 = м(); вид.cx = wx - (px - cw / 2) / s1; вид.cz = wz - (py - ch / 2) / s1; зажать(); рисовать();
+  }
+  let полёт = null;
+  function перелететь(x, z, R) { следить = false; кнЯ.classList.remove('да'); полёт = { x0: вид.cx, z0: вид.cz, R0: вид.R, x, z, R: R || вид.R, t: 0 }; }
+
+  // ---------- рисование ----------
+  const ДОР_ЦВ = (д) => (д.пк ? д.пк === 'асфальт' || д.пк === 'разбитый' : д.т === 'tertiary') ? '#A8A194' : д.т === 'track' ? '#9C8458' : '#B39A6E';
+  function рисовать() {
+    if (!открыта) return;
+    const w = cw * пр, h = ch * пр, s = м() * пр;
+    const X = x => (x - вид.cx) * s + w / 2, Z = z => (z - вид.cz) * s + h / 2;
+    с.setTransform(1, 0, 0, 1, 0, 0); с.fillStyle = '#56663A'; с.fillRect(0, 0, w, h);
+    // подложка: поля, вода, сады; издалека — и крыши
+    const п = мини.подложка, x0 = вид.cx - w / 2 / s, z0 = вид.cz - h / 2 / s;
+    с.imageSmoothingEnabled = true; с.imageSmoothingQuality = 'high';
+    if (п && п.холст) с.drawImage(п.холст, п.X(x0), п.Z(z0), w / s * п.м, h / s * п.м, 0, 0, w, h);
+    const вблизи = s / пр > 0.9;                                     // больше ~1 пикселя на метр — рисуем дороги и дома заново
+    const внутри = (x, z, r) => x + r > x0 && x - r < x0 + w / s && z + r > z0 && z - r < z0 + h / s;
+    if (вблизи) {
+      с.lineCap = 'round'; с.lineJoin = 'round';
+      for (const д of API.дороги) {
+        if (!д.п || д.п.length < 2) continue;
+        с.beginPath(); д.п.forEach(([x, z], i) => i ? с.lineTo(X(x), Z(z)) : с.moveTo(X(x), Z(z)));
+        с.strokeStyle = 'rgba(40,30,20,0.5)'; с.lineWidth = ((API.ШИРИНА && API.ШИРИНА[д.т]) || 4) * s + 2 * пр; с.stroke();
+        с.strokeStyle = ДОР_ЦВ(д); с.lineWidth = ((API.ШИРИНА && API.ШИРИНА[д.т]) || 4) * s; с.stroke();
+      }
+      if (вкл.дома) for (const д of API.дома) {
+        if (!д.п || д.cx === undefined || !внутри(д.cx, д.cz, д.r || 20)) continue;
+        с.beginPath(); д.п.forEach(([x, z], i) => i ? с.lineTo(X(x), Z(z)) : с.moveTo(X(x), Z(z))); с.closePath();
+        с.fillStyle = д.крышаHex || '#6A5A4A'; с.fill(); с.lineWidth = 1 * пр; с.strokeStyle = 'rgba(26,18,12,0.85)'; с.stroke();
+      }
+    }
+    // подписи улиц
+    с.textAlign = 'center'; с.textBaseline = 'middle';
+    const занято = [], свободно = (x, y, hw, hh) => { for (const q of занято) if (Math.abs(q[0] - x) < q[2] + hw && Math.abs(q[1] - y) < q[3] + hh) return false; return true; };
+    // значки мест — раньше подписей улиц, чтобы не терялись
+    if (вкл.места) {
+      for (const т of места()) {
+        const x = X(т.x), y = Z(т.z); if (x < -20 || y < -20 || x > w + 20 || y > h + 20) continue;
+        const r = 11 * пр; if (!свободно(x, y, r + 2 * пр, r + 2 * пр)) continue;
+        занято.push([x, y, r + 2 * пр, r + 2 * пр]);
+        с.beginPath(); с.arc(x, y, r, 0, Math.PI * 2); с.fillStyle = '#F2E6CC'; с.fill(); с.lineWidth = 2 * пр; с.strokeStyle = '#2A1E14'; с.stroke();
+        с.font = Math.round(12 * пр) + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; с.fillStyle = '#000'; с.fillText(т.знак, x, y + 1 * пр);
+        с.font = '700 ' + Math.round(10.5 * пр) + 'px Rubik, system-ui, sans-serif';
+        const tw = с.measureText(т.имя).width / 2 + 4 * пр, ty = y + r + 8 * пр;
+        if (свободно(x, ty, tw, 7 * пр)) { занято.push([x, ty, tw, 7 * пр]); с.lineWidth = 3 * пр; с.strokeStyle = 'rgba(26,18,12,0.9)'; с.strokeText(т.имя, x, ty); с.fillStyle = '#F4D35E'; с.fillText(т.имя, x, ty); }
+      }
+    }
+    if (вкл.улицы) for (const п2 of window.__подписиКарты || []) {
+      if (п2.вид !== 'улица') continue;
+      const x = X(п2.x), y = Z(п2.z); if (x < 20 || y < 20 || x > w - 20 || y > h - 20) continue;
+      с.font = '600 ' + Math.round(10 * пр) + 'px Rubik, system-ui, sans-serif';
+      const tw = с.measureText(п2.текст).width, th = 11 * пр, у = п2.угол || 0;
+      const hw = (Math.abs(Math.cos(у)) * tw + Math.abs(Math.sin(у)) * th) / 2 + 3 * пр, hh = (Math.abs(Math.sin(у)) * tw + Math.abs(Math.cos(у)) * th) / 2 + 3 * пр;
+      if (!свободно(x, y, hw, hh)) continue; занято.push([x, y, hw, hh]);
+      с.save(); с.translate(x, y); с.rotate(у); с.lineWidth = 3 * пр; с.strokeStyle = 'rgba(26,18,12,0.8)'; с.strokeText(п2.текст, 0, 0); с.fillStyle = '#F2E6CC'; с.fillText(п2.текст, 0, 0); с.restore();
+    }
+    // метки
+    const булавка = (x, y, цв, подпись) => {
+      const вне = x < 12 * пр || y < 22 * пр || x > w - 12 * пр || y > h - 12 * пр; x = Math.max(12 * пр, Math.min(w - 12 * пр, x)); y = Math.max(22 * пр, Math.min(h - 12 * пр, y));
+      с.save(); с.globalAlpha = вне ? 0.6 : 1; с.translate(x, y);
+      с.beginPath(); с.moveTo(0, 0); с.bezierCurveTo(-9 * пр, -11 * пр, -9 * пр, -21 * пр, 0, -21 * пр); с.bezierCurveTo(9 * пр, -21 * пр, 9 * пр, -11 * пр, 0, 0);
+      с.fillStyle = цв; с.fill(); с.lineWidth = 2 * пр; с.strokeStyle = '#1E1812'; с.stroke();
+      с.beginPath(); с.arc(0, -14 * пр, 3.2 * пр, 0, Math.PI * 2); с.fillStyle = '#1E1812'; с.fill();
+      if (подпись) { с.font = '700 ' + Math.round(10 * пр) + 'px Rubik, system-ui, sans-serif'; с.textBaseline = 'bottom'; с.lineWidth = 3 * пр; с.strokeStyle = 'rgba(18,12,8,0.9)'; с.strokeText(подпись, 0, -24 * пр); с.fillStyle = цв; с.fillText(подпись, 0, -24 * пр); с.textBaseline = 'middle'; }
+      с.restore();
+    };
+    const о = О();
+    if (вкл.метки) {
+      if (онлайн()) for (const п2 of о.пиры.values()) if (п2.метка && п2.роль) булавка(X(п2.метка.x), Z(п2.метка.z), (о.РОЛИ[п2.роль] || {}).цвет || '#F2E6CC', о.подписьПира(п2));
+      const моя = window.__метки && window.__метки.моя(); if (моя) булавка(X(моя.x), Z(моя.z), '#F4C430', 'метка');
+    }
+    // игроки онлайн
+    if (вкл.игроки) for (const п2 of игроки()) {
+      let x = X(п2.x), y = Z(п2.z); const вне = x < 8 * пр || y < 8 * пр || x > w - 8 * пр || y > h - 8 * пр;
+      x = Math.max(8 * пр, Math.min(w - 8 * пр, x)); y = Math.max(8 * пр, Math.min(h - 8 * пр, y));
+      const цв = п2.роль === 'шторм' && п2.шторм ? '#F4C430' : ((о.РОЛИ[п2.шторм && п2.облик ? п2.облик : п2.роль] || {}).цвет || '#F2E6CC');
+      с.save(); с.globalAlpha = вне ? 0.55 : 1; с.translate(x, y);
+      if (!вне) { с.save(); с.rotate(-п2.угол + Math.PI); с.beginPath(); с.moveTo(0, -12 * пр); с.lineTo(4 * пр, -5 * пр); с.lineTo(-4 * пр, -5 * пр); с.closePath(); с.fillStyle = цв; с.fill(); с.restore(); }
+      с.beginPath(); с.arc(0, 0, 6 * пр, 0, Math.PI * 2); с.fillStyle = цв; с.fill(); с.lineWidth = 2 * пр; с.strokeStyle = '#1E1812'; с.stroke();
+      const имя = о.подписьПира(п2); с.font = '700 ' + Math.round(10.5 * пр) + 'px Rubik, system-ui, sans-serif'; с.textBaseline = 'bottom';
+      с.lineWidth = 3 * пр; с.strokeStyle = 'rgba(18,12,8,0.9)'; с.strokeText(имя, 0, -9 * пр); с.fillStyle = цв; с.fillText(имя, 0, -9 * пр); с.restore();
+    }
+    // я
+    { const п2 = window.__мир.поз, x = X(п2.x), y = Z(п2.z);
+      с.save(); с.translate(x, y);
+      с.beginPath(); с.arc(0, 0, 15 * пр, 0, Math.PI * 2); с.fillStyle = 'rgba(232,200,74,0.18)'; с.fill();
+      с.rotate(-п2.угол + Math.PI); с.beginPath(); с.moveTo(0, -11 * пр); с.lineTo(7.5 * пр, 8 * пр); с.lineTo(0, 4 * пр); с.lineTo(-7.5 * пр, 8 * пр); с.closePath();
+      с.fillStyle = '#E8C84A'; с.fill(); с.lineWidth = 2 * пр; с.strokeStyle = '#1E1812'; с.stroke(); с.restore(); }
+    // север и масштаб
+    { const x = w - 74 * пр, y = 30 * пр; с.save(); с.translate(x, y);
+      с.beginPath(); с.arc(0, 0, 17 * пр, 0, Math.PI * 2); с.fillStyle = 'rgba(26,18,12,0.85)'; с.fill(); с.lineWidth = 1.5 * пр; с.strokeStyle = 'rgba(232,200,74,0.6)'; с.stroke();
+      с.beginPath(); с.moveTo(0, -12 * пр); с.lineTo(5 * пр, 2 * пр); с.lineTo(-5 * пр, 2 * пр); с.closePath(); с.fillStyle = '#E0503A'; с.fill();
+      с.beginPath(); с.moveTo(0, 12 * пр); с.lineTo(5 * пр, 2 * пр); с.lineTo(-5 * пр, 2 * пр); с.closePath(); с.fillStyle = '#F2E6CC'; с.fill();
+      с.restore(); с.font = '800 ' + Math.round(10 * пр) + 'px Rubik, system-ui, sans-serif'; с.fillStyle = '#F4D35E'; с.textBaseline = 'middle'; с.fillText('С', x, y + 25 * пр); }
+    { const шаги = [10, 20, 50, 100, 200, 500, 1000], цель = 90 / (s / пр); let мтр = шаги[0]; for (const к of шаги) if (к <= цель) мтр = к;
+      const дл = мтр * s, x = 14 * пр, y = h - 18 * пр;
+      с.fillStyle = 'rgba(26,18,12,0.82)'; с.beginPath(); с.roundRect ? с.roundRect(x - 6 * пр, y - 20 * пр, дл + 12 * пр, 28 * пр, 8 * пр) : с.rect(x - 6 * пр, y - 20 * пр, дл + 12 * пр, 28 * пр); с.fill();
+      с.strokeStyle = '#F2E6CC'; с.lineWidth = 2 * пр; с.beginPath(); с.moveTo(x, y - 4 * пр); с.lineTo(x, y); с.lineTo(x + дл, y); с.lineTo(x + дл, y - 4 * пр); с.stroke();
+      с.fillStyle = '#F2E6CC'; с.font = '700 ' + Math.round(10 * пр) + 'px Rubik, system-ui, sans-serif'; с.textBaseline = 'middle'; с.fillText(мтр >= 1000 ? мтр / 1000 + ' км' : мтр + ' м', x + дл / 2, y - 11 * пр); }
+  }
+
+  // ---------- жесты ----------
+  const пальцы = new Map(); let жест = null;
+  const точка = e => { const р = cv.getBoundingClientRect(); return { x: e.clientX - р.left, y: e.clientY - р.top }; };
+  cv.addEventListener('pointerdown', e => {
+    try { cv.setPointerCapture(e.pointerId); } catch (er) {}
+    пальцы.set(e.pointerId, точка(e)); полёт = null;
+    if (пальцы.size === 1) жест = { t: performance.now(), путь: 0, тап: true }; else if (жест) жест.тап = false;
+  });
+  cv.addEventListener('pointermove', e => {
+    const было = пальцы.get(e.pointerId); if (!было) return;
+    const стало = точка(e);
+    if (пальцы.size === 1) {
+      const dx = стало.x - было.x, dy = стало.y - было.y; if (жест) { жест.путь += Math.hypot(dx, dy); if (жест.путь > 8) жест.тап = false; }
+      if (!жест || !жест.тап) { вид.cx -= dx / м(); вид.cz -= dy / м(); следить = false; кнЯ.classList.remove('да'); зажать(); }
+    } else if (пальцы.size === 2) {
+      const [а, б] = [...пальцы.entries()], друг = а[0] === e.pointerId ? б[1] : а[1];
+      const d0 = Math.hypot(было.x - друг.x, было.y - друг.y), d1 = Math.hypot(стало.x - друг.x, стало.y - друг.y);
+      if (d0 > 4 && d1 > 4) масштаб(d0 / d1, (стало.x + друг.x) / 2, (стало.y + друг.y) / 2);
+      вид.cx -= (стало.x - было.x) / 2 / м(); вид.cz -= (стало.y - было.y) / 2 / м(); следить = false; кнЯ.classList.remove('да'); зажать();
+    }
+    пальцы.set(e.pointerId, стало); рисовать();
+  });
+  const отпустить = e => {
+    if (!пальцы.has(e.pointerId)) return; const т = пальцы.get(e.pointerId); пальцы.delete(e.pointerId);
+    if (e.type === 'pointerup' && жест && жест.тап && !пальцы.size && performance.now() - жест.t < 600) тап(т.x, т.y);
+    if (!пальцы.size) жест = null;
+  };
+  cv.addEventListener('pointerup', отпустить); cv.addEventListener('pointercancel', отпустить);
+  cv.addEventListener('wheel', e => { e.preventDefault(); const т = точка(e); масштаб(e.deltaY > 0 ? 1.18 : 1 / 1.18, т.x, т.y); }, { passive: false });
+  function тап(px, py) {
+    const s = м(), x = вид.cx + (px - cw / 2) / s, z = вид.cz + (py - ch / 2) / s, Мт = window.__метки; if (!Мт) return;
+    const моя = Мт.моя();
+    if (моя && Math.hypot((моя.x - x) * s, (моя.z - z) * s) < 22) { Мт.поставить(null); window.__подсказки && window.__подсказки.совет('Метка убрана', 1.5); }
+    else Мт.поставить({ x, z });
+    рисовать();
+  }
+  окно.querySelector('.к2-кнопки').addEventListener('click', e => {
+    const д = e.target.dataset && e.target.dataset.д; if (!д) return;
+    if (д === '+') масштаб(1 / 1.6); else if (д === '-') масштаб(1.6);
+    else { следить = true; кнЯ.classList.add('да'); const п = window.__мир.поз; перелететь(п.x, п.z, Math.min(вид.R, 260)); следить = true; кнЯ.classList.add('да'); }
+  });
+
+  // ---------- открыть / закрыть ----------
+  function размер() {
+    const р = поле.getBoundingClientRect(); пр = Math.min(devicePixelRatio || 1, 2); cw = Math.max(1, р.width); ch = Math.max(1, р.height);
+    cv.width = Math.round(cw * пр); cv.height = Math.round(ch * пр); зажать(); рисовать();
+  }
+  function открыть() {
+    if (открыта) return;
+    открыта = true; окно.classList.add('видно'); document.body.classList.add('карта2');
+    const п = window.__мир.поз; вид.cx = п.x; вид.cz = п.z; вид.R = 260; следить = true; кнЯ.classList.add('да');
+    подск.textContent = window.__метки && window.__метки.моя() ? 'Тап по метке — убрать · двумя пальцами — масштаб' : 'Тапни — поставить метку · двумя пальцами — масштаб';
+    список(); игрокиКлюч = ''; списокИгроков(); размер();
+  }
+  function закрыть() { открыта = false; окно.classList.remove('видно'); document.body.classList.remove('карта2'); пальцы.clear(); полёт = null; window.__рисоватьМини && window.__рисоватьМини(); }
+  окно.querySelector('.к2-закр').addEventListener('click', закрыть);
+  окно.addEventListener('pointerdown', e => { if (e.target === окно) закрыть(); });
+  addEventListener('keydown', e => { if (открыта && e.key === 'Escape') закрыть(); });
+  addEventListener('resize', () => { if (открыта) размер(); });
+  let т = 0, тСписок = 0;
+  API.каждыйКадр.push(dt => {
+    if (!открыта || !dt) return;
+    if (полёт) { полёт.t = Math.min(1, полёт.t + dt * 2.5); const k = 1 - Math.pow(1 - полёт.t, 3);
+      вид.cx = полёт.x0 + (полёт.x - полёт.x0) * k; вид.cz = полёт.z0 + (полёт.z - полёт.z0) * k; вид.R = полёт.R0 + (полёт.R - полёт.R0) * k; зажать(); рисовать(); if (полёт.t >= 1) полёт = null; }
+    т += dt; тСписок += dt;
+    if (т > 0.25) { т = 0; if (следить && !полёт) { const п = window.__мир.поз; вид.cx = п.x; вид.cz = п.z; зажать(); } рисовать(); }
+    if (тСписок > 2) { тСписок = 0; списокИгроков(); }
+  });
+  window.__карта2 = { открыть, закрыть, открыта: () => открыта, вид };
+}]);
+
+// ===================== НАСТРОЙКИ: ОФОРМЛЕНИЕ =====================
+// Меню ⚙ — окно по центру с вкладками. Строки в него добавляют десятки модулей (каждый — свою);
+// тут они раскладываются по вкладкам по своему названию, с иконкой и пояснением. Новые строки,
+// добавленные позже, раскладываются сами.
+window.ДЕТАЛИ.push(['настройки: оформление', function () {
+  const меню = document.getElementById('меню'); if (!меню) return;
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #шестерня { width: 40px; height: 40px; line-height: 38px; border: 2px solid rgba(232,200,74,0.75); background: rgba(26,18,12,0.85); color: #F4D35E; box-shadow: 0 0 0 2px rgba(26,18,12,0.6), 0 4px 12px rgba(0,0,0,0.4); }
+    #м2Фон { position: fixed; inset: 0; z-index: 29; display: none; background: rgba(8,5,3,0.6); }
+    body.м2открыто #м2Фон { display: block; }
+    #меню.м2 { left: 50%; top: 50%; right: auto; transform: translate(-50%, -50%); z-index: 30; width: min(780px, calc(100vw - 20px));
+      height: min(560px, calc(100vh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px))); max-height: none; min-width: 0; padding: 0; gap: 0;
+      border-radius: 20px; overflow: hidden; background: linear-gradient(#2A1E14, #1A120C); border: 1px solid rgba(232,200,74,0.35);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6); font-family: Rubik, system-ui, sans-serif; }
+    #меню.м2.открыто { display: flex; flex-direction: column; }
+    #меню.м2 .м2-шапка { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px 9px 18px; border-bottom: 1px solid rgba(242,230,204,0.1); background: rgba(0,0,0,0.18); }
+    #меню.м2 .м2-заг { color: #F3E1B0; font: 400 21px/1 'Ruslan Display', Georgia, serif; text-shadow: 0 2px 0 #3B2208; letter-spacing: .02em; }
+    #меню.м2 .м2-закр { width: 38px; height: 38px; border-radius: 50%; border: 1px solid rgba(242,230,204,0.25); background: rgba(242,230,204,0.06); color: #F2E6CC; font-size: 16px; cursor: pointer; padding: 0; }
+    #меню.м2 .м2-тело { flex: 1; display: flex; min-height: 0; }
+    #меню.м2 .м2-вкладки { flex: none; width: 172px; padding: 10px 8px; display: flex; flex-direction: column; gap: 4px; border-right: 1px solid rgba(242,230,204,0.08); background: rgba(0,0,0,0.12); overflow-y: auto; }
+    #меню.м2 .м2-вкладки button { display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 12px; border-radius: 12px; border: 0; background: none; color: #CDBF9C;
+      font: 700 13px Rubik, system-ui, sans-serif; text-align: left; cursor: pointer; letter-spacing: 0; }
+    #меню.м2 .м2-вкладки button i { font-style: normal; font-size: 18px; width: 22px; text-align: center; flex: none; }
+    #меню.м2 .м2-вкладки button.да { background: linear-gradient(90deg, rgba(232,200,74,0.24), rgba(232,200,74,0.05)); color: #F4D35E; box-shadow: inset 3px 0 0 #E8C84A; }
+    #меню.м2 .м2-разделы { flex: 1; min-width: 0; overflow-y: auto; overscroll-behavior: contain; padding: 12px 14px 16px; }
+    #меню.м2 .м2-раздел { display: none; flex-direction: column; gap: 8px; }
+    #меню.м2 .м2-раздел.да { display: flex; }
+    #меню.м2 .строка { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 10px 9px 10px; border-radius: 14px;
+      background: rgba(242,230,204,0.045); border: 1px solid rgba(242,230,204,0.07); color: #F2E6CC; font-size: 13px; letter-spacing: 0; }
+    #меню.м2 .строка.широкая { flex-wrap: wrap; }
+    #меню.м2 .строка.широкая > :last-child { flex: 1 1 100%; max-width: none !important; justify-content: flex-start !important; }
+    #меню.м2 .строка > .м2-стар { display: none; }
+    #меню.м2 .м2-подпись { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1 1 auto; }
+    #меню.м2 .м2-подпись i { font-style: normal; font-size: 18px; width: 32px; height: 32px; display: grid; place-items: center; border-radius: 10px; background: rgba(232,200,74,0.12); flex: none; }
+    #меню.м2 .м2-подпись b { display: block; font: 700 13.5px/1.2 Rubik, system-ui, sans-serif; color: #F2E6CC; }
+    #меню.м2 .м2-подпись small { display: block; margin-top: 2px; color: #B9A887; font: 400 11px/1.3 system-ui, sans-serif; }
+    #меню.м2 .кн { height: 34px; min-width: 0; padding: 0 14px; border-radius: 17px; border: 1px solid rgba(242,230,204,0.22); background: rgba(242,230,204,0.06);
+      color: #F2E6CC; font: 700 11.5px Rubik, system-ui, sans-serif; letter-spacing: .5px; opacity: 1; }
+    #меню.м2 .кн[aria-pressed="true"] { background: #E8C84A; border-color: #E8C84A; color: #1E140A; }
+    #меню.м2 .кн[aria-pressed="false"] { color: #B9A887; opacity: 1; }
+    #меню.м2 .м2-про { color: #B9A887; font: 12px/1.6 system-ui, sans-serif !important; max-width: none !important; padding: 4px 4px; }
+    #меню.м2 .м2-про b { color: #F3E1B0; font: 400 20px 'Ruslan Display', Georgia, serif; display: block; margin-bottom: 4px; }
+    @media (max-height: 420px), (max-width: 640px) { #меню.м2 .м2-вкладки { width: 58px; } #меню.м2 .м2-вкладки button span { display: none; } #меню.м2 .м2-вкладки button { justify-content: center; padding: 0; } }
+    @media (max-height: 360px) { #меню.м2 .м2-подпись small { display: none; } }
+  `;
+  document.head.appendChild(стиль);
+  const РАЗДЕЛЫ = [['игра', '🎮', 'Игра'], ['графика', '✨', 'Графика'], ['звук', '🔊', 'Звук и управление'], ['забавы', '🎉', 'Забавы'], ['про', '📜', 'Об игре']];
+  const ИНФО = {
+    'ГЛАВНОЕ МЕНЮ': ['игра', '🏠', 'Главное меню', 'Выйти на заставку'], 'КАК ИГРАТЬ': ['игра', '❓', 'Как играть', 'Шпаргалка по управлению'],
+    'ПОДПИСИ': ['игра', '🏷', 'Подписи', 'Названия улиц и мест над посёлком'], 'МАТ': ['игра', '🤬', 'Мат', 'Крепкие словечки в репликах'],
+    'ВЕСЬ ЭКРАН': ['игра', '⛶', 'Весь экран', 'Без панелей браузера'], 'АЧИВКИ': ['игра', '🏆', 'Ачивки', 'Что уже получилось'], 'ГАРДЕРОБ': ['игра', '👕', 'Гардероб', 'Одежда за ачивки'],
+    'ГАЗЕТА': ['игра', '📰', 'Газета', 'Новости посёлка'], 'ДОМА': ['игра', '🏡', 'Дома', 'Анкета: какие дома на самом деле'],
+    'ГРАФИКА': ['графика', '✨', 'Качество графики', 'Ниже — плавнее и меньше греется телефон'], 'СВЕТ': ['графика', '🌅', 'Время суток', 'По часам — как сейчас в Москве'],
+    'СЕЗОН': ['графика', '🍂', 'Время года', 'Авто — по календарю'], 'КАДРЫ': ['графика', '🎞', 'Кадров в секунду', '30 — меньше греется и бережёт батарею'],
+    'FPS': ['графика', '📈', 'Счётчик FPS', 'Табло сверху экрана'], 'ТЕСТ ТЕЛЕФОНА': ['графика', '📱', 'Тест телефона', '30 секунд — и совет, какую графику ставить'],
+    'ЗВУК': ['звук', '🔊', 'Звук', 'Все звуки и голоса'], 'УПРАВЛЕНИЕ И ЗВУК': ['звук', '🎛', 'Управление и громкость', 'Кнопки, левша, громкость'], 'ВИБРАЦИЯ': ['звук', '📳', 'Вибрация', 'Трясёт телефон при взрывах'],
+    'ФОТОРЕЖИМ': ['забавы', '📷', 'Фоторежим', 'Свободная камера и снимок'], 'ЛЕТУЧИЙ ЯША': ['забавы', '✈️', 'Летучий Яша', 'Полетать над посёлком'],
+    'ГОНКИ': ['забавы', '🏁', 'Гонки', 'Трассы по улицам'], 'КУРЫ': ['забавы', '🐔', 'Куры', 'Расставить кур где хочешь'], 'ВОЙНА ЗА ВРЕМЯНКУ': ['забавы', '⚔️', 'Война за времянку', 'Шторм против Никиты'],
+    'ПОЛИГОН': ['забавы', '🎯', 'Полигон', 'Стрельбище за посёлком'], 'CLAWD': ['забавы', '🤖', 'Clawd', 'Питомец-помощник'], 'МОПЕД': ['забавы', '🛵', 'Мопед', 'Позвать мопед к себе'],
+  };
+  const шапка = document.createElement('div'); шапка.className = 'м2-шапка';
+  шапка.innerHTML = '<div class="м2-заг">Настройки</div><button class="м2-закр" aria-label="Закрыть">✕</button>';
+  const тело = document.createElement('div'); тело.className = 'м2-тело';
+  const вкладки = document.createElement('nav'); вкладки.className = 'м2-вкладки';
+  const разделы = document.createElement('div'); разделы.className = 'м2-разделы';
+  тело.append(вкладки, разделы);
+  const секции = {}, кнопки = {};
+  let текущая = (() => { try { return localStorage.getItem('бороздиновский.вкладка') || 'игра'; } catch (e) { return 'игра'; } })();
+  for (const [к, знак, имя] of РАЗДЕЛЫ) {
+    const б = document.createElement('button'); б.innerHTML = '<i></i><span></span>'; б.querySelector('i').textContent = знак; б.querySelector('span').textContent = имя;
+    б.addEventListener('click', e => { e.stopPropagation(); показать(к); }); вкладки.appendChild(б); кнопки[к] = б;
+    const р = document.createElement('div'); р.className = 'м2-раздел'; разделы.appendChild(р); секции[к] = р;
+  }
+  function показать(к) {
+    if (!секции[к]) к = 'игра'; текущая = к;
+    for (const [кк] of РАЗДЕЛЫ) { кнопки[кк].classList.toggle('да', кк === к); секции[кк].classList.toggle('да', кк === к); }
+    try { localStorage.setItem('бороздиновский.вкладка', к); } catch (e) {}
+    разделы.scrollTop = 0;
+  }
+  // разложить строку по вкладке
+  let раскладываю = false;
+  function разложить(эл) {
+    if (!эл || эл.nodeType !== 1 || эл === шапка || эл === тело) return;
+    if (!эл.classList.contains('строка')) {
+      if (эл.parentElement !== меню) return;
+      эл.classList.add('м2-про'); if (!эл.querySelector('b')) { const з = document.createElement('b'); з.textContent = 'Авторы и лицензии'; эл.prepend(з); }
+      секции.про.appendChild(эл); return;
+    }
+    // подпись строки модули иногда добавляют уже после самой строки — ждём её
+    const сп = эл.querySelector(':scope > span'), ключ = сп ? сп.textContent.trim().toUpperCase() : '';
+    if (эл.querySelectorAll('button').length > 2) эл.classList.add('широкая');
+    const р0 = эл.parentElement;
+    if (эл.dataset.м2 === ключ && р0 && р0.classList.contains('м2-раздел')) return;
+    эл.dataset.м2 = ключ;
+    const и = ИНФО[ключ] || ['игра', '⚙', ключ ? ключ.charAt(0) + ключ.slice(1).toLowerCase() : '', ''];
+    if (сп) {
+      сп.classList.add('м2-стар');
+      let п = эл.querySelector(':scope > .м2-подпись');
+      if (!п) { п = document.createElement('div'); п.className = 'м2-подпись'; п.innerHTML = '<i></i><div><b></b><small></small></div>'; эл.insertBefore(п, сп); }
+      п.querySelector('i').textContent = и[1]; п.querySelector('b').textContent = и[2]; п.querySelector('small').textContent = и[3]; п.querySelector('small').hidden = !и[3];
+    }
+    const р = секции[и[0]];
+    if (ключ === 'ГЛАВНОЕ МЕНЮ') р.prepend(эл); else if (р0 !== р) р.appendChild(эл);
+  }
+  function всё() { if (раскладываю) return; раскладываю = true; for (const эл of [...меню.querySelectorAll('.строка'), ...меню.children]) разложить(эл); раскладываю = false; }
+  меню.classList.add('м2'); меню.prepend(шапка); меню.appendChild(тело);
+  // «Об игре»: коротко — что это за игра
+  { const п = document.createElement('div'); п.className = 'м2-про';
+    п.innerHTML = '<b>Бороздиновский</b>Настоящий посёлок в Новохопёрском районе Воронежской области — по картам, снимкам и фото жителей. Улицы, дома, сады и дворы — как в жизни.';
+    секции.про.appendChild(п); }
+  всё(); показать(текущая);
+  new MutationObserver(() => всё()).observe(меню, { childList: true, subtree: true });
+  const фон = document.createElement('div'); фон.id = 'м2Фон'; document.body.appendChild(фон);
+  const синхр = () => document.body.classList.toggle('м2открыто', меню.classList.contains('открыто'));
+  new MutationObserver(синхр).observe(меню, { attributes: true, attributeFilter: ['class'] });
+  шапка.querySelector('.м2-закр').addEventListener('click', e => { e.stopPropagation(); меню.classList.remove('открыто'); });
+  addEventListener('keydown', e => { if (e.key === 'Escape' && меню.classList.contains('открыто')) меню.classList.remove('открыто'); });
+}]);
+
 // ===================== ФОТОРЕЖИМ =====================
 // Мир замирает, камера свободная: слева — лететь, справа — смотреть, ▲▼ — выше/ниже, ползунок — приближение.
 // Фильтры, спрятать себя, 📸 — снимок: в приложении — в галерею, в браузере — скачать файл.
@@ -27536,7 +27950,7 @@ const П = 1600;
   с.lineCap = 'round'; с.lineJoin = 'round';
   дороги.forEach(д => { с.beginPath(); д.п.forEach(([x, z], i) => i ? с.lineTo(X(x), Z(z)) : с.moveTo(X(x), Z(z))); с.strokeStyle = (д.пк ? д.пк === 'асфальт' || д.пк === 'разбитый' : д.т === 'tertiary') ? '#9A9892' : '#D8C8A4'; с.lineWidth = Math.max(2, ШИРИНА[д.т] * м); с.stroke(); });
   дома.forEach(д => { полигон(д.п, д.крышаHex || '#1E1812'); с.strokeStyle = 'rgba(20,14,10,0.8)'; с.lineWidth = 1; с.stroke(); });
-  мини.подложка = { X, Z, м };
+  мини.подложка = { X, Z, м, холст: подложка };
 }
 // Подписи для большой карты: улицы — вдоль самого длинного отрезка, ориентиры — по центру
 const ПОДПИСИ_КАРТЫ = [];
@@ -27578,6 +27992,7 @@ const ПОДПИСИ_КАРТЫ = [];
   });
   for (const т of КАРТА.точки || []) ПОДПИСИ_КАРТЫ.push({ текст: т.т === 'ozon' ? 'Ozon' : 'Остановка', x: т.п[0], z: т.п[1], вид: 'место' });
 }
+window.__подписиКарты = ПОДПИСИ_КАРТЫ;                  // для большой карты (модуль «большая карта»)
 function рисоватьМини() {
   const большая = мини.classList.contains('большая');
   const р = мини.getBoundingClientRect(), пр = Math.min(devicePixelRatio || 1, 2);
@@ -27647,6 +28062,7 @@ function рисоватьМини() {
 }
 // маленькая → большая; на большой тап ставит метку (модуль «метка»), крестик в углу — закрыть
 мини.addEventListener('click', e => {
+  if (window.__карта2 && !мини.classList.contains('большая')) { window.__карта2.открыть(); return; }     // новая большая карта — отдельным окном
   if (мини.classList.contains('большая') && window.__метки && window.__метки.тап(e)) return;
   мини.classList.toggle('большая'); рисоватьМини();
 });
