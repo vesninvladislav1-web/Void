@@ -16099,6 +16099,17 @@ window.ДЕТАЛИ.push(['большая карта', function (API) {
       box-shadow: 0 0 0 2px #2A1E14, 0 0 0 3px rgba(232,200,74,0.6); }
     #карта2 .к2-место span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #карта2 .к2-место em { font-style: normal; color: #B9A887; font: 600 10.5px system-ui, sans-serif; }
+    #карта2 .к2-место i.к2-номер { color: #1E140A; font: 800 12px Rubik, system-ui, sans-serif; box-shadow: 0 0 0 2px #FFF8E6, 0 2px 4px rgba(0,0,0,0.4); }
+    #карта2 .к2-знаки { display: grid; grid-template-columns: 1fr; gap: 3px; padding: 0 6px; color: #E8D6A8; font: 600 11.5px Rubik, system-ui, sans-serif; }
+    #карта2 .к2-знаки div { display: flex; align-items: center; gap: 10px; min-height: 22px; }
+    #карта2 .к2-знаки i { flex: none; width: 26px; height: 14px; display: block; }
+    #карта2 .з-я { background: #E8C84A; clip-path: polygon(50% 0, 100% 100%, 50% 72%, 0 100%); width: 14px !important; margin: 0 6px; }
+    #карта2 .з-игрок { width: 12px !important; height: 12px !important; border-radius: 50%; background: #6FD08C; box-shadow: 0 0 0 2px #1E1812; margin: 0 7px; }
+    #карта2 .з-метка { width: 12px !important; height: 16px !important; margin: 0 7px; background: #F4C430; border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%; clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%); }
+    #карта2 .з-асф { height: 6px !important; border-radius: 3px; background: #A8A194; box-shadow: 0 0 0 1px rgba(40,30,20,0.6); }
+    #карта2 .з-грунт { height: 6px !important; border-radius: 3px; background: #B39A6E; box-shadow: 0 0 0 1px rgba(40,30,20,0.6); }
+    #карта2 .з-поле { border-radius: 3px; background: #6B5236; }
+    #карта2 .з-вода { border-radius: 3px; background: #4F7A92; }
     #карта2 .к2-пусто { color: #8E806A; font: 12px system-ui, sans-serif; padding: 2px 6px; }
     @media (max-width: 700px) { #карта2 .к2-бок { width: 184px; } #карта2 .к2-подск { display: none; } }
     @media (max-height: 380px) { #карта2 .к2-заг { display: none; } }
@@ -16111,14 +16122,17 @@ window.ДЕТАЛИ.push(['большая карта', function (API) {
     <aside class="к2-бок"><div class="к2-заг"><b>Бороздиновский</b><small>Новохопёрский район</small></div><div class="к2-список">
       <h4>Показывать</h4><div class="к2-фильтры"></div>
       <h4>Игроки</h4><div class="к2-игроки"></div>
-      <h4>Места</h4><div class="к2-места"></div></div></aside></div>`;
+      <h4>Обозначения</h4><div class="к2-места"></div>
+      <h4>Условные знаки</h4><div class="к2-знаки">
+        <div><i class="з-я"></i>Ты (куда смотришь)</div><div><i class="з-игрок"></i>Друг онлайн</div><div><i class="з-метка"></i>Метка</div>
+        <div><i class="з-асф"></i>Асфальт</div><div><i class="з-грунт"></i>Грунтовка</div><div><i class="з-поле"></i>Пашня</div><div><i class="з-вода"></i>Вода</div></div></div></aside></div>`;
   document.body.appendChild(окно);
   const cv = окно.querySelector('canvas'), с = cv.getContext('2d'), поле = окно.querySelector('.к2-поле');
   const местаЭл = окно.querySelector('.к2-места'), игрокиЭл = окно.querySelector('.к2-игроки'), подск = окно.querySelector('.к2-подск');
   const кнЯ = окно.querySelector('[data-д="я"]');
 
   // ---------- что показывать (запоминаем) ----------
-  const ФИЛЬТРЫ = [['улицы', 'Улицы'], ['места', 'Места'], ['игроки', 'Игроки'], ['метки', 'Метки'], ['дома', 'Крыши']];
+  const ФИЛЬТРЫ = [['улицы', 'Улицы'], ['места', 'Точки'], ['игроки', 'Игроки'], ['метки', 'Метки'], ['дома', 'Крыши']];
   const вкл = (() => { try { return Object.assign({ улицы: true, места: true, игроки: true, метки: true, дома: true }, JSON.parse(localStorage.getItem('бороздиновский.картаФильтры')) || {}); } catch (e) { return { улицы: true, места: true, игроки: true, метки: true, дома: true }; } })();
   { const ряд = окно.querySelector('.к2-фильтры');
     for (const [к, т] of ФИЛЬТРЫ) { const б = document.createElement('button'); б.textContent = т; б.classList.toggle('да', !!вкл[к]); б.setAttribute('aria-pressed', String(!!вкл[к]));
@@ -16127,6 +16141,11 @@ window.ДЕТАЛИ.push(['большая карта', function (API) {
 
   // ---------- места: значки и список ----------
   const ЗНАК = { 'Школа': '🏫', 'Полигон': '🎯', 'Пруд': '💧', 'Стадион': '⚽', 'Ozon': '📦', 'Остановка': '🚌' };
+  const ЦВЕТ = { 'Мой дом': '#E8C84A', 'Спутник «Шторм-1»': '#4FA3E8', 'ВАЗ': '#E0503A', 'Школа': '#9B6BE0', 'Пруд': '#2E9FC8', 'Стадион': '#4CB050',
+    'Полигон': '#C8643A', 'Ozon': '#2F6BEA', 'Остановка': '#8E959E' };
+  const цветМеста = имя => ЦВЕТ[имя] || (/двор/i.test(имя) ? '#B07A4A' : '#D8C8A0');
+  // номера: по порядку мест, одно название — один номер (все пруды — «4»)
+  function номера(м) { const н = new Map(); for (const т of м) if (!н.has(т.имя)) н.set(т.имя, н.size + 1); return н; }
   function места() {
     const м = [], Д = window.__домИгрока;
     if (Д) { const [x, z] = Д.W(5, 4); м.push({ имя: 'Мой дом', знак: '🏠', x, z }); }
@@ -16138,12 +16157,13 @@ window.ДЕТАЛИ.push(['большая карта', function (API) {
   function список() {
     const п = window.__мир.поз, м = места(), видел = new Map();
     for (const т of м) { const d = Math.hypot(т.x - п.x, т.z - п.z); const б = видел.get(т.имя); if (!б || d < б.d) видел.set(т.имя, { ...т, d }); }
-    местаЭл.textContent = '';
+    местаЭл.textContent = ''; const н = номера(м);
     for (const т of видел.values()) {
       const б = document.createElement('button'); б.className = 'к2-место';
-      б.innerHTML = '<i></i><span></span><em></em>'; б.querySelector('i').textContent = т.знак; б.querySelector('span').textContent = т.имя;
+      б.innerHTML = '<i class="к2-номер"></i><span></span><em></em>'; const к = б.querySelector('i'); к.textContent = н.get(т.имя); к.style.background = цветМеста(т.имя);
+      б.querySelector('span').textContent = т.знак + ' ' + т.имя;
       б.querySelector('em').textContent = т.d >= 1000 ? (т.d / 1000).toFixed(1) + ' км' : Math.round(т.d) + ' м';
-      б.addEventListener('click', () => { перелететь(т.x, т.z, 120); window.__метки && window.__метки.поставить({ x: т.x, z: т.z }); });
+      б.addEventListener('click', () => { перелететь(т.x, т.z, 120); подсветка = { имя: т.имя, t: 0 }; window.__метки && window.__метки.поставить({ x: т.x, z: т.z }); });
       местаЭл.appendChild(б);
     }
   }
@@ -16179,7 +16199,7 @@ window.ДЕТАЛИ.push(['большая карта', function (API) {
     const s0 = м(), wx = вид.cx + (px - cw / 2) / s0, wz = вид.cz + (py - ch / 2) / s0;
     вид.R *= f; зажать(); const s1 = м(); вид.cx = wx - (px - cw / 2) / s1; вид.cz = wz - (py - ch / 2) / s1; зажать(); рисовать();
   }
-  let полёт = null;
+  let полёт = null, подсветка = null;                              // подсветка: точка мигает 2 с после тапа в легенде
   function перелететь(x, z, R) { следить = false; кнЯ.classList.remove('да'); полёт = { x0: вид.cx, z0: вид.cz, R0: вид.R, x, z, R: R || вид.R, t: 0 }; }
 
   // ---------- рисование ----------
@@ -16214,15 +16234,20 @@ window.ДЕТАЛИ.push(['большая карта', function (API) {
     const занято = [], свободно = (x, y, hw, hh) => { for (const q of занято) if (Math.abs(q[0] - x) < q[2] + hw && Math.abs(q[1] - y) < q[3] + hh) return false; return true; };
     // значки мест — раньше подписей улиц, чтобы не терялись
     if (вкл.места) {
-      for (const т of места()) {
+      const все = места(), н = номера(все), сНазв = вид.R < 140;
+      for (const т of все) {
         const x = X(т.x), y = Z(т.z); if (x < -20 || y < -20 || x > w + 20 || y > h + 20) continue;
-        const r = 11 * пр; if (!свободно(x, y, r + 2 * пр, r + 2 * пр)) continue;
-        занято.push([x, y, r + 2 * пр, r + 2 * пр]);
-        с.beginPath(); с.arc(x, y, r, 0, Math.PI * 2); с.fillStyle = '#F2E6CC'; с.fill(); с.lineWidth = 2 * пр; с.strokeStyle = '#2A1E14'; с.stroke();
-        с.font = Math.round(12 * пр) + 'px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif'; с.fillStyle = '#000'; с.fillText(т.знак, x, y + 1 * пр);
-        с.font = '700 ' + Math.round(10.5 * пр) + 'px Rubik, system-ui, sans-serif';
-        const tw = с.measureText(т.имя).width / 2 + 4 * пр, ty = y + r + 8 * пр;
-        if (свободно(x, ty, tw, 7 * пр)) { занято.push([x, ty, tw, 7 * пр]); с.lineWidth = 3 * пр; с.strokeStyle = 'rgba(26,18,12,0.9)'; с.strokeText(т.имя, x, ty); с.fillStyle = '#F4D35E'; с.fillText(т.имя, x, ty); }
+        const r = 9.5 * пр; if (!свободно(x, y, r + 1.5 * пр, r + 1.5 * пр)) continue;
+        занято.push([x, y, r + 1.5 * пр, r + 1.5 * пр]);
+        const ярко = подсветка && подсветка.имя === т.имя ? 1 + 0.35 * Math.abs(Math.sin(подсветка.t * 6)) : 1;
+        с.save(); с.translate(x, y); с.scale(ярко, ярко);
+        с.beginPath(); с.arc(0, 1.5 * пр, r, 0, Math.PI * 2); с.fillStyle = 'rgba(0,0,0,0.35)'; с.fill();
+        с.beginPath(); с.arc(0, 0, r, 0, Math.PI * 2); с.fillStyle = цветМеста(т.имя); с.fill(); с.lineWidth = 2.2 * пр; с.strokeStyle = '#FFF8E6'; с.stroke();
+        с.font = '800 ' + Math.round(10.5 * пр) + 'px Rubik, system-ui, sans-serif'; с.fillStyle = '#1E140A'; с.fillText(String(н.get(т.имя)), 0, 0.5 * пр);
+        с.restore();
+        if (сНазв) { с.font = '700 ' + Math.round(10.5 * пр) + 'px Rubik, system-ui, sans-serif';
+          const tw = с.measureText(т.имя).width / 2 + 4 * пр, ty = y + r + 8 * пр;
+          if (свободно(x, ty, tw, 7 * пр)) { занято.push([x, ty, tw, 7 * пр]); с.lineWidth = 3 * пр; с.strokeStyle = 'rgba(26,18,12,0.9)'; с.strokeText(т.имя, x, ty); с.fillStyle = '#F4D35E'; с.fillText(т.имя, x, ty); } }
       }
     }
     if (вкл.улицы) for (const п2 of window.__подписиКарты || []) {
@@ -16344,6 +16369,7 @@ window.ДЕТАЛИ.push(['большая карта', function (API) {
     if (полёт) { полёт.t = Math.min(1, полёт.t + dt * 2.5); const k = 1 - Math.pow(1 - полёт.t, 3);
       вид.cx = полёт.x0 + (полёт.x - полёт.x0) * k; вид.cz = полёт.z0 + (полёт.z - полёт.z0) * k; вид.R = полёт.R0 + (полёт.R - полёт.R0) * k; зажать(); рисовать(); if (полёт.t >= 1) полёт = null; }
     т += dt; тСписок += dt;
+    if (подсветка) { подсветка.t += dt; if (подсветка.t > 2) подсветка = null; рисовать(); }
     if (т > 0.25) { т = 0; if (следить && !полёт) { const п = window.__мир.поз; вид.cx = п.x; вид.cz = п.z; зажать(); } рисовать(); }
     if (тСписок > 2) { тСписок = 0; списокИгроков(); }
   });
