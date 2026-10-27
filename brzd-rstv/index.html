@@ -15883,6 +15883,179 @@ window.ДЕТАЛИ.push(['эмоции', function (API) {
   window.__эмоции = { начать, стоп: () => стоп(true), сеть, моя: () => моя && моя.вид, ЭМО };
 }]);
 
+// ===================== КРИК «Я ВАЙБКОДЕР!» =====================
+// Пасхалка по мотивам ролика: в меню эмоций — 📢 КРИК, ползунок 60…440 дБ. Чем громче, тем хуже посёлку:
+// 90 — куры врассыпную, 120 — трясёт, 150 — лопаются стёкла, 194 — предел звука в воздухе, дальше ударная
+// волна, 250 — вспышка, 440 — стирает Солнечную систему. Через пару секунд всё возвращается: осколки
+// слетаются обратно в окна, трещины зарастают. Ничего не ломается насовсем.
+window.ДЕТАЛИ.push(['крик вайбкодера', function (API) {
+  const { THREE, сцена } = API, В = API.землиВысота, сл = Math.random;
+  const панельЭ = document.getElementById('эмоПанель'); if (!панельЭ) return;
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #крикПанель { position: fixed; left: 50%; bottom: calc(150px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 16; display: none;
+      width: min(340px, 92vw); padding: 12px 14px; border-radius: 14px; background: rgba(18,12,8,0.86); border: 1px solid rgba(242,230,204,0.25); color: #F2E6CC;
+      font: 600 13px system-ui, sans-serif; box-sizing: border-box; }
+    #крикПанель.видно { display: block; }
+    #крикПанель b { display: block; font-size: 14px; margin-bottom: 8px; letter-spacing: .5px; }
+    #крикПанель input { width: 100%; accent-color: #F4C430; }
+    #крикДб { font: 800 26px system-ui, sans-serif; color: #F4C430; }
+    #крикЧто { min-height: 34px; opacity: .85; font-size: 12px; margin: 2px 0 10px; }
+    #крикПанель .ряд { display: flex; gap: 8px; }
+    #крикПанель button { flex: 1; height: 42px; border-radius: 12px; border: 0; font: 800 14px system-ui, sans-serif; letter-spacing: 1px; cursor: pointer; }
+    #крикОрать { background: #E04A2A; color: #fff; } #крикЗакрыть { background: #3A2E24; color: #F2E6CC; flex: 0 0 52px !important; }
+    #крикВспышка { position: fixed; inset: 0; z-index: 40; pointer-events: none; background: #fff; opacity: 0; transition: opacity .25s; }
+    #крикКонец { position: fixed; inset: 0; z-index: 41; pointer-events: none; display: none; align-items: center; justify-content: center; text-align: center;
+      background: #000; color: #F2E6CC; font: 800 20px system-ui, sans-serif; line-height: 1.5; padding: 20px; opacity: 0; transition: opacity .4s; }
+    body.кино #крикПанель { display: none !important; }
+  `;
+  document.head.appendChild(стиль);
+  const б = document.createElement('button'); б.innerHTML = '<i>📢</i>КРИК';
+  const фото = [...панельЭ.children].find(к => к.textContent.includes('ФОТО')); панельЭ.insertBefore(б, фото || null);
+  const п = document.createElement('div'); п.id = 'крикПанель';
+  п.innerHTML = '<b>Заорать «Я ВАЙБКОДЕР!»</b><span id="крикДб">60 дБ</span><input id="крикПолз" type="range" min="60" max="440" step="10" value="60"><div id="крикЧто"></div>' +
+    '<div class="ряд"><button id="крикОрать">ОРАТЬ!</button><button id="крикЗакрыть">✕</button></div>';
+  document.body.appendChild(п);
+  const всп = document.createElement('div'); всп.id = 'крикВспышка'; document.body.appendChild(всп);
+  const конец = document.createElement('div'); конец.id = 'крикКонец'; document.body.appendChild(конец);
+  const полз = п.querySelector('#крикПолз'), дбТ = п.querySelector('#крикДб'), что = п.querySelector('#крикЧто');
+  const ОПИС = [[60, 'Обычный разговор. Никто даже не обернётся.'], [90, 'Сосед в огороде роняет тяпку. Куры — врассыпную.'], [120, 'Громче отбойного молотка. Больно ушам, земля дрожит.'],
+    [150, 'Лопаются стёкла во всей округе.'], [194, 'Предел звука в воздухе. Дальше — ударная волна.'], [250, 'Это уже взрыв. Бороздиновский слышно в Новохопёрске.'],
+    [440, 'В 10²⁴ раз мощнее взрыва. Солнечной системе — всё.']];
+  const описание = дБ => { let т = ОПИС[0][1]; for (const [г, с] of ОПИС) if (дБ >= г) т = с; return т; };
+  const обновить = () => { const д = +полз.value; дбТ.textContent = д + ' дБ'; что.textContent = описание(д); };
+  полз.addEventListener('input', обновить); обновить();
+  for (const у of ['pointerdown', 'click']) п.addEventListener(у, e => e.stopPropagation());
+  б.addEventListener('click', e => { e.stopPropagation(); панельЭ.classList.remove('видно'); п.classList.add('видно'); });
+  п.querySelector('#крикЗакрыть').addEventListener('click', () => п.classList.remove('видно'));
+  п.querySelector('#крикОрать').addEventListener('click', () => { п.classList.remove('видно'); заорать(+полз.value); });
+
+  // ---------- надпись над головой ----------
+  const надписьТ = (() => { const к = document.createElement('canvas'); к.width = 512; к.height = 128; const с = к.getContext('2d');
+    с.font = '900 64px system-ui, sans-serif'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.lineWidth = 12; с.strokeStyle = '#1A140E'; с.strokeText('Я ВАЙБКОДЕР!', 256, 66);
+    с.fillStyle = '#F4C430'; с.fillText('Я ВАЙБКОДЕР!', 256, 66); return new THREE.CanvasTexture(к); })();
+  const надпись = new THREE.Sprite(new THREE.SpriteMaterial({ map: надписьТ, transparent: true, depthWrite: false, depthTest: false }));
+  надпись.visible = false; надпись.renderOrder = 9; сцена.add(надпись);
+
+  // ---------- трещины на окнах (одним InstancedMesh) и осколки (точки) ----------
+  const ОКОН = 500, НА_ОКНО = 6;
+  const трещТ = (() => { const к = document.createElement('canvas'); к.width = к.height = 128; const с = к.getContext('2d');
+    // паутина трещин: тёмная линия с белой кромкой — видна и на тюле, и на тёмном стекле; дыра посередине
+    const лучи = [], кольца = [];
+    for (let i = 0; i < 10; i++) { let x = 64, y = 60, а = i / 10 * 6.283 + сл() * 0.5; const л = [[x, y]];
+      for (let k = 0; k < 6; k++) { а += (сл() - 0.5) * 0.7; x += Math.cos(а) * 13; y += Math.sin(а) * 13; л.push([x, y]); } лучи.push(л); }
+    for (let r = 12; r < 62; r += 15) { const л = []; for (let а = 0; а < 6.4; а += 0.55) { const rr = r * (0.8 + сл() * 0.4); л.push([64 + Math.cos(а) * rr, 60 + Math.sin(а) * rr]); } кольца.push(л); }
+    const линии = (цв, w) => { с.strokeStyle = цв; с.lineWidth = w; с.lineCap = с.lineJoin = 'round';
+      for (const л of [...лучи, ...кольца]) { с.beginPath(); л.forEach(([x, y], i) => i ? с.lineTo(x, y) : с.moveTo(x, y)); с.stroke(); } };
+    с.fillStyle = 'rgba(190,220,240,0.22)'; с.fillRect(0, 0, 128, 128);
+    линии('rgba(20,26,32,0.9)', 3.4); линии('rgba(255,255,255,0.95)', 1.3);
+    с.fillStyle = 'rgba(10,12,14,0.92)'; с.beginPath(); for (let а = 0; а < 6.4; а += 0.7) { const rr = 7 + сл() * 6; а ? с.lineTo(64 + Math.cos(а) * rr, 60 + Math.sin(а) * rr) : с.moveTo(64 + rr, 60); } с.fill();
+    return new THREE.CanvasTexture(к); })();
+  const трещМ = new THREE.MeshBasicMaterial({ map: трещТ, transparent: true, depthWrite: false, opacity: 0, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4 });
+  const трещ = new THREE.InstancedMesh(new THREE.PlaneGeometry(1, 1), трещМ, ОКОН); трещ.count = 0; трещ.visible = false; трещ.frustumCulled = false; сцена.add(трещ);
+  const оскГ = new THREE.BufferGeometry(), оскП = new Float32Array(ОКОН * НА_ОКНО * 3);
+  оскГ.setAttribute('position', new THREE.BufferAttribute(оскП, 3)); оскГ.setDrawRange(0, 0);
+  const оск = new THREE.Points(оскГ, new THREE.PointsMaterial({ color: 0xCFEFFF, size: 0.13, transparent: true, opacity: 0.95, depthWrite: false }));
+  оск.visible = false; оск.frustumCulled = false; сцена.add(оск);
+  let осколки = [];                                   // { p0: [x,y,z], v: [vx,vy,vz] }
+  // ударная волна: прозрачная полусфера, растёт от игрока
+  const волна = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+    new THREE.MeshBasicMaterial({ color: 0xFFF4DC, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+  волна.visible = false; волна.frustumCulled = false; сцена.add(волна);
+
+  // ---------- звук: голос + гул ----------
+  function голос(дБ) {
+    try { const р = new SpeechSynthesisUtterance('Я вайбкодер!'); р.lang = 'ru-RU'; р.volume = Math.max(0.15, Math.min(1, (дБ - 40) / 80)); р.rate = 1.05; р.pitch = 1.25;
+      speechSynthesis.cancel(); speechSynthesis.speak(р); } catch (e) {}
+  }
+  function гул(дБ) {
+    if (дБ < 140) return;
+    let ctx = window.__аудио && window.__аудио.ctx;
+    try { if (!ctx) ctx = гул.ctx || (гул.ctx = new (window.AudioContext || window.webkitAudioContext)()); if (ctx.state === 'suspended') ctx.resume(); } catch (e) { return; }
+    const сек = Math.min(3.5, 0.6 + (дБ - 140) / 60), n = Math.floor(ctx.sampleRate * сек), буф = ctx.createBuffer(1, n, ctx.sampleRate), d = буф.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (сл() * 2 - 1) * Math.pow(1 - i / n, 2);
+    const ист = ctx.createBufferSource(), фл = ctx.createBiquadFilter(), г = ctx.createGain();
+    ист.buffer = буф; фл.type = 'lowpass'; фл.frequency.value = дБ >= 194 ? 320 : 900; г.gain.value = Math.min(0.9, 0.25 + (дБ - 140) / 200);
+    ист.connect(фл); фл.connect(г); г.connect(ctx.destination); ист.start(ctx.currentTime + (дБ >= 194 ? 0.15 : 0));
+  }
+
+  // ---------- сам крик ----------
+  let ст = null;                                       // идёт крик: { t, дБ, x, y, z, R, T1 }
+  const радиус = (дБ, a, b) => дБ < a ? 0 : Math.min(600, Math.pow(10, (дБ - a) / b) * 10);
+  function заорать(дБ) {
+    const поз = window.__мир && window.__мир.поз; if (!поз || ст) return;
+    const x = поз.x, z = поз.z, y = В(x, z);
+    ст = { t: 0, дБ, x, y, z, T1: 1.3, Rв: дБ >= 194 ? Math.min(900, 120 + (дБ - 194) * 4) : 0 };
+    голос(дБ); гул(дБ);
+    // куры — врассыпную
+    const rк = дБ < 80 ? 0 : Math.min(500, 4 * Math.pow(1.06, дБ - 80));
+    if (rк) { try { window.__куры && window.__куры.пугнуть && window.__куры.пугнуть(x, z, rк); } catch (e) {}
+      try { window.__курыПосёлка && window.__курыПосёлка.пугнуть(x, z, rк); } catch (e) {} }
+    // тряска
+    const Я = window.__бахЯдро;
+    if (Я && Я.тряхнуть && дБ >= 110) Я.тряхнуть(Math.min(2.2, 0.04 * Math.pow(1.035, дБ - 110)));
+    // стёкла
+    const Rс = радиус(дБ, 150, 45);
+    осколки = []; трещ.count = 0;
+    if (Rс > 0 && API.дома) {
+      const окна = [];
+      for (const д of API.дома) { if (!д.окна || !д.окна.length || Math.hypot(д.cx - x, д.cz - z) > Rс + 20) continue;
+        for (const о of д.окна) { const d = Math.hypot(о.x - x, о.z - z); if (d < Rс) окна.push([d, о]); } }
+      окна.sort((a, b) => a[0] - b[0]);
+      const м = new THREE.Matrix4(), q = new THREE.Quaternion(), е = new THREE.Euler(), с = new THREE.Vector3();
+      for (const [d, о] of окна.slice(0, ОКОН)) {
+        const ш = (о.ш || 0.55) * 2, в = (о.y1 - о.y0) || 1.2, cy = (о.y0 + о.y1) / 2;
+        е.set(0, Math.atan2(о.нx, о.нz), 0); q.setFromEuler(е);
+        м.compose(с.set(о.x + о.нx * 0.14, cy, о.z + о.нz * 0.14), q, new THREE.Vector3(ш, в, 1)); трещ.setMatrixAt(трещ.count++, м);
+        const сила = 2 + Math.min(6, (дБ - 140) / 20), задержка = d / 340;
+        for (let k = 0; k < НА_ОКНО; k++) осколки.push({ p0: [о.x + о.ex * (сл() - 0.5) * ш, cy + (сл() - 0.5) * в, о.z + о.ez * (сл() - 0.5) * ш],
+          v: [о.нx * сила * (0.5 + сл()) + (сл() - 0.5) * 2, 1 + сл() * 3, о.нz * сила * (0.5 + сл()) + (сл() - 0.5) * 2], з: задержка });
+      }
+      трещ.instanceMatrix.needsUpdate = true; трещ.visible = трещ.count > 0;
+      оскГ.setDrawRange(0, осколки.length); оск.visible = осколки.length > 0;
+      ст.стёкол = трещ.count;
+    }
+    if (дБ >= 250) { всп.style.transition = 'opacity .08s'; всп.style.opacity = String(Math.min(1, (дБ - 230) / 120)); setTimeout(() => { всп.style.transition = 'opacity 1.2s'; всп.style.opacity = '0'; }, 140); }
+    if (дБ >= 440) setTimeout(() => {
+      конец.innerHTML = '<div>☀️ Солнечная система стёрта.<br><span style="font-size:14px;opacity:.7">Восстанавливаем из бэкапа…</span></div>';
+      конец.style.display = 'flex'; requestAnimationFrame(() => { конец.style.opacity = '1'; });
+      setTimeout(() => { конец.innerHTML = '<div>Всё вернулось.<br><span style="font-size:14px;opacity:.7">Больше так не делай.</span></div>'; }, 2200);
+      setTimeout(() => { конец.style.opacity = '0'; setTimeout(() => { конец.style.display = 'none'; }, 450); }, 3600);
+    }, 700);
+    const п2 = window.__подсказки;
+    if (п2 && п2.совет) п2.совет(дБ + ' дБ: ' + описание(дБ) + (ст.стёкол ? ' Стёкол лопнуло: ' + ст.стёкол + '.' : ''), 3.5);
+  }
+
+  const g = -9.8, T_НАЗАД = 1.1, T_ВСЁ = 3.4;
+  API.каждыйКадр.push(dt => {
+    if (!ст || !dt) return;
+    ст.t += dt; const t = ст.t, дБ = ст.дБ;
+    // надпись: растёт с громкостью, улетает вверх
+    const к = window.__люди3д && window.__люди3д.игрок && window.__люди3д.игрок(), поз = window.__мир.поз;
+    const hx = к ? к.корень.position.x : поз.x, hy = к ? к.корень.position.y : В(поз.x, поз.z), hz = к ? к.корень.position.z : поз.z;
+    const м = Math.min(4, 0.9 + Math.max(0, дБ - 60) / 40);
+    надпись.visible = t < 2.6; надпись.position.set(hx, hy + 2.4 + м * 0.2 + t * 0.3, hz);
+    надпись.scale.set(м * 2, м * 0.5, 1); надпись.material.opacity = Math.min(1, t * 6, (2.6 - t) * 2);
+    // осколки: разлетаются, потом слетаются обратно — плёнку отмотали назад
+    if (осколки.length) {
+      for (let i = 0; i < осколки.length; i++) {
+        const о = осколки[i]; let τ = Math.max(0, t - о.з);
+        if (τ > ст.T1) τ = Math.max(0, ст.T1 - (τ - ст.T1) * ст.T1 / T_НАЗАД);
+        let y = о.p0[1] + о.v[1] * τ + 0.5 * g * τ * τ; const yз = В(о.p0[0] + о.v[0] * τ, о.p0[2] + о.v[2] * τ) + 0.03; if (y < yз) y = yз;
+        оскП[i * 3] = о.p0[0] + о.v[0] * τ; оскП[i * 3 + 1] = y; оскП[i * 3 + 2] = о.p0[2] + о.v[2] * τ;
+      }
+      оскГ.attributes.position.needsUpdate = true;
+    }
+    // трещины: появляются сразу, зарастают, когда осколки вернулись
+    трещМ.opacity = трещ.count ? Math.min(0.85, t * 8) * Math.max(0, Math.min(1, (T_ВСЁ - t) / 0.6)) : 0;
+    // ударная волна
+    if (ст.Rв) { const r = Math.min(ст.Rв, 6 + t * 160); волна.visible = t < 2.4; волна.position.set(ст.x, ст.y - 0.5, ст.z); волна.scale.set(r, r * 0.35, r);
+      волна.material.opacity = 0.28 * Math.max(0, 1 - r / ст.Rв); }
+    if (t > T_ВСЁ + 0.2) { ст = null; надпись.visible = false; трещ.visible = false; трещ.count = 0; оск.visible = false; осколки = []; волна.visible = false; }
+  });
+  window.__крик = { заорать, идёт: () => !!ст };
+}]);
+
 // ===================== ФОТОРЕЖИМ =====================
 // Мир замирает, камера свободная: слева — лететь, справа — смотреть, ▲▼ — выше/ниже, ползунок — приближение.
 // Фильтры, спрятать себя, 📸 — снимок: в приложении — в галерею, в браузере — скачать файл.
