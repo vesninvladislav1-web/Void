@@ -19098,7 +19098,7 @@ window.ДЕТАЛИ.push(['кнопка назад', function () {
 window.ДЕТАЛИ.push(['школьный туалет', function (API) {
   const { THREE, сцена } = API;
   const ШИР = 1.66 / 2, ДЛ = 2.94 / 2, ВЫС = 2.68, ЗАПАС = 0.32, НАД = 320;
-  const УНИТАЗ = { x: -0.09, z: 0.99, r: 0.33 };          // нашли в скане по белому фаянсу у окна — сквозь него не пройти
+  const УНИТАЗ = { x: 0.09, z: 0.99, r: 0.33 };           // нашли в скане по белому фаянсу у окна — сквозь него не пройти (скан отзеркален)
   const стиль = document.createElement('style');
   стиль.textContent = `
     #туалетКн { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 8; display: none;
@@ -19132,6 +19132,7 @@ window.ДЕТАЛИ.push(['школьный туалет', function (API) {
           const гр = new THREE.Group();
           г.scene.traverse(о => { if (!о.isMesh) return;
             const м = new THREE.MeshBasicMaterial({ map: о.material.map, side: THREE.DoubleSide, fog: false, toneMapped: false }); о.material.dispose(); о.material = м; о.frustumCulled = false; });   // как фото: без тумана (висим в небе) и цветокоррекции
+          г.scene.scale.x = -1;                    // как в жизни: скан снят зеркально — унитазы справа (материалы двусторонние)
           гр.add(г.scene);
           // заплатки: пол (под сканом, в цвет плитки), потолок, короб снаружи — чтобы в дырах не было неба
           const заплатка = (w, d, цв, y, вниз) => { const п = new THREE.Mesh(new THREE.PlaneGeometry(w, d).rotateX(вниз ? Math.PI / 2 : -Math.PI / 2), new THREE.MeshBasicMaterial({ color: цв, fog: false, toneMapped: false })); п.position.y = y; гр.add(п); };
@@ -19143,7 +19144,7 @@ window.ДЕТАЛИ.push(['школьный туалет', function (API) {
           new THREE.TextureLoader().load('meloch/rozysk.jpg', т => {
             т.encoding = THREE.sRGBEncoding;
             const пл = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.65), new THREE.MeshBasicMaterial({ map: т, fog: false, toneMapped: false }));
-            пл.position.set(-ШИР + 0.08, 1.5, -0.25); пл.rotation.y = Math.PI / 2; гр.add(пл);
+            пл.position.set(ШИР - 0.08, 1.5, -0.25); пл.rotation.y = -Math.PI / 2; гр.add(пл);   // на той же стене, что и раньше (она теперь справа); сам плакат не зеркалим
           });
           гр.visible = false; сцена.add(гр); модель = гр; ок(гр);
         }, () => ок(null));
