@@ -21994,6 +21994,7 @@ window.ДЕТАЛИ.push(['война за времянку', function (API) {
     }
     стат.войн++;
     обновитьHUD(true);
+    if (!опц.ведомый && window.__правилаВойны) window.__правилаВойны();
     событие('война-началась', { финал: война.финал, онлайн: война.онлайн });
     return true;
   }
@@ -23277,6 +23278,33 @@ window.ДЕТАЛИ.push(['война за времянку', function (API) {
   const кнДрон = document.createElement('button'); кнДрон.id = 'войнаДрон'; кнДрон.setAttribute('aria-label', 'Запустить дрон');
   const тревогаЭл = document.createElement('div'); тревогаЭл.id = 'войнаТревога'; тревогаЭл.setAttribute('role', 'alert');
   document.body.append(панель, кнКинуть, жизниЭл, кнНаВойну, ударЭл, кнДрон, тревогаЭл);
+  // ---- «?» на табло: как выиграть. В первую войну карточка открывается сама ----
+  { const ст2 = document.createElement('style');
+    ст2.textContent = `#войнаПанель .заг { position: relative; } #войнаВопрос { pointer-events: auto; margin-left: 6px; width: 20px; height: 20px; border-radius: 10px; border: 0; background: #F4C430; color: #1A1206; font: 800 12px system-ui; cursor: pointer; padding: 0; }
+      #войнаПравила { position: fixed; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; background: rgba(8,5,3,.6); padding: 12px; }
+      #войнаПравила.видно { display: flex; }
+      #войнаПравила .лист { width: min(520px, 100%); max-height: 100%; overflow-y: auto; background: linear-gradient(#2A1E14, #1A120C); border: 1px solid rgba(232,200,74,.4); border-radius: 18px; padding: 16px 18px; color: #F2E6CC; font: 13px/1.45 system-ui, sans-serif; }
+      #войнаПравила h3 { margin: 0 0 8px; color: #F3E1B0; font: 400 20px 'Ruslan Display', Georgia, serif; }
+      #войнаПравила ol { margin: 0 0 10px; padding-left: 20px; } #войнаПравила li { margin: 5px 0; } #войнаПравила b { color: #F4C430; }
+      #войнаПравила button { height: 40px; padding: 0 22px; border-radius: 20px; border: 0; background: #E8C84A; color: #1E140A; font: 800 13px system-ui; cursor: pointer; }`;
+    document.head.appendChild(ст2);
+    const пр = document.createElement('div'); пр.id = 'войнаПравила';
+    пр.innerHTML = `<div class="лист"><h3>Как выиграть войну</h3><ol>
+      <li><b>Встань в кольцо у времянки.</b> Кто больше людей держит внутри — тот тянет полосу наверху к себе. Когда в кольце никого из врагов — тянет быстрее.</li>
+      <li><b>Дотяни полосу до конца</b> — победа сразу. Не успел за 2:30 — побеждает тот, на чьей стороне полоса.</li>
+      <li><b>Выбивай Никитиных:</b> «КИНУТЬ» (или F / пробел) — бросок в ближайшего. Выбитый ждёт и возвращается, а в кольце пока на одного меньше.</li>
+      <li><b>Береги ❤.</b> Кончились — посидишь в стороне. Встань подальше от толпы и кидай издалека.</li>
+      <li><b>🛸 ДРОН</b> (или G) — улетает к врагам в кольце. ПВО может сбить, жди, когда кнопка снова загорится.</li>
+      <li><b>Яша</b> тоже воюет: «ЦАП» — царапнуть, если играешь за кота.</li></ol>
+      <button>ПОНЯЛ, В БОЙ!</button></div>`;
+    document.body.appendChild(пр);
+    const закр = () => пр.classList.remove('видно');
+    пр.querySelector('button').addEventListener('click', закр); пр.addEventListener('pointerdown', e => { if (e.target === пр) закр(); });
+    const в = document.createElement('button'); в.id = 'войнаВопрос'; в.textContent = '?'; в.setAttribute('aria-label', 'Как выиграть');
+    в.addEventListener('pointerdown', e => { e.stopPropagation(); }); в.addEventListener('click', e => { e.stopPropagation(); пр.classList.add('видно'); });
+    панель.querySelector('.заг span').appendChild(в);
+    window.__правилаВойны = () => { let было = false; try { было = localStorage.getItem('бороздиновский.правилаВойны') === '1'; localStorage.setItem('бороздиновский.правилаВойны', '1'); } catch (e) {} if (!было) setTimeout(() => пр.classList.add('видно'), 7000); };
+  }
   кнДрон.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); мойДрон(); });
   кнКинуть.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); кинуть(); });
   кнНаВойну.addEventListener('click', () => { if (война) { телепорт(); обновитьHUD(true); } });
