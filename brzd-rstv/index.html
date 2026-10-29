@@ -19255,6 +19255,36 @@ window.ДЕТАЛИ.push(['зал дома', function (API) {
           const короб = new THREE.Mesh(new THREE.BoxGeometry(ШИР * 2 + 0.35, ВЫС + 0.1, ДЛ * 2 + 0.35), new THREE.MeshBasicMaterial({ color: '#DCD4C6', side: THREE.BackSide, ...БЕЗ }));
           короб.position.y = ВЫС / 2; гр.add(короб);                               // в дырах стен — цвет обоев, а не небо
           const л = люстра(); л.position.set(0, ВЫС, 0); гр.add(л);
+          // коробка с 17 телефонами (коллекция автора): 12 не включаются, 5 горят — по букве «ZTORM»
+          { const БЕЗ2 = { fog: false, toneMapped: false }, к = new THREE.Group(); к.position.set(ШИР - 0.5, 0, -ДЛ + 0.38); к.rotation.y = 0.35; гр.add(к);
+            const картон = new THREE.MeshBasicMaterial({ color: '#B8905C', side: THREE.DoubleSide, ...БЕЗ2 }), тёмн = new THREE.MeshBasicMaterial({ color: '#8A6A40', side: THREE.DoubleSide, ...БЕЗ2 });
+            const W2 = 0.46, D2 = 0.34, H2 = 0.2;
+            const дно = new THREE.Mesh(new THREE.PlaneGeometry(W2, D2).rotateX(-Math.PI / 2), тёмн); дно.position.y = 0.005; к.add(дно);
+            for (const [x, z, ry, w] of [[0, -D2 / 2, 0, W2], [0, D2 / 2, 0, W2], [-W2 / 2, 0, Math.PI / 2, D2], [W2 / 2, 0, Math.PI / 2, D2]]) {
+              const ст = new THREE.Mesh(new THREE.PlaneGeometry(w, H2), картон); ст.position.set(x, H2 / 2, z); ст.rotation.y = ry; к.add(ст);
+              const кл = new THREE.Mesh(new THREE.PlaneGeometry(w, 0.12), тёмн); кл.position.set(x * 1.25, H2 + 0.05, z * 1.25); кл.rotation.set(ry ? 0 : (z < 0 ? 0.9 : -0.9), ry, ry ? (x < 0 ? -0.9 : 0.9) : 0); к.add(кл); }   // откинутые клапаны
+            const экран = буква => { const кн = document.createElement('canvas'); кн.width = 64; кн.height = 128; const с = кн.getContext('2d');
+              const г2 = с.createLinearGradient(0, 0, 64, 128); г2.addColorStop(0, '#1A0A3A'); г2.addColorStop(1, '#0A2A4A'); с.fillStyle = г2; с.fillRect(0, 0, 64, 128);
+              с.font = '900 70px Arial'; с.textAlign = 'center'; с.textBaseline = 'middle'; с.shadowColor = '#5AF0FF'; с.shadowBlur = 14; с.fillStyle = '#E8FCFF'; с.fillText(буква, 32, 66);
+              const т = new THREE.CanvasTexture(кн); т.encoding = THREE.sRGBEncoding; return т; };
+            const корпусМ = new THREE.MeshBasicMaterial({ color: '#141416', ...БЕЗ2 }), чёрныйЭкран = new THREE.MeshBasicMaterial({ color: '#050507', ...БЕЗ2 });
+            const ГОРЯТ = { 3: 'Z', 6: 'T', 8: 'O', 11: 'R', 14: 'M' }, экраны = [];
+            for (let i = 0; i < 17; i++) {
+              const ряд = i < 6 ? 0 : i < 12 ? 1 : 2, вРяду = ряд < 2 ? 6 : 5, k = ряд < 2 ? i - ряд * 6 : i - 12;
+              const т = new THREE.Group(); т.position.set(-W2 / 2 + 0.05 + k * (W2 - 0.1) / (вРяду - 1), 0.085, -D2 / 2 + 0.07 + ряд * 0.1); т.rotation.set(-0.35 + (i % 3) * 0.08, (i % 4 - 1.5) * 0.06, (i % 5 - 2) * 0.04); к.add(т);
+              т.add(new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.15, 0.009), корпусМ));
+              const б = ГОРЯТ[i], э = new THREE.Mesh(new THREE.PlaneGeometry(0.064, 0.138), б ? new THREE.MeshBasicMaterial({ map: экран(б), ...БЕЗ2 }) : чёрныйЭкран);
+              э.position.z = 0.0051; т.add(э); if (б) экраны.push(э);
+            }
+            // свечение экранов: мягко «дышат» по очереди — будто бегущая надпись
+            const t0 = performance.now(); API.каждыйКадр.push(() => { if (!гр.visible) return; const t = (performance.now() - t0) / 1000;
+              экраны.forEach((э, n) => { const v = 0.65 + 0.35 * Math.max(0, Math.sin(t * 2.2 - n * 0.7)); э.material.color.setRGB(v, v, v); }); });
+            // табличка на коробке
+            const тк = document.createElement('canvas'); тк.width = 256; тк.height = 64; const с3 = тк.getContext('2d'); с3.fillStyle = '#F4EEDC'; с3.fillRect(0, 0, 256, 64);
+            с3.fillStyle = '#2A1E14'; с3.font = 'bold 22px Arial'; с3.textAlign = 'center'; с3.fillText('КОЛЛЕКЦИЯ: 17 ТЕЛЕФОНОВ', 128, 28); с3.font = '17px Arial'; с3.fillText('работают 5 из 17', 128, 52);
+            const тт = new THREE.CanvasTexture(тк); тт.encoding = THREE.sRGBEncoding;
+            const таб = new THREE.Mesh(new THREE.PlaneGeometry(0.3, 0.075), new THREE.MeshBasicMaterial({ map: тт, ...БЕЗ2 })); таб.position.set(0, 0.1, D2 / 2 + 0.002); к.add(таб);
+          }
           гр.visible = false; сцена.add(гр); модель = гр; ок(гр);
         }, () => ок(null));
       };
