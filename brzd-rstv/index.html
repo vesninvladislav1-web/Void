@@ -19256,9 +19256,9 @@ window.ДЕТАЛИ.push(['зал дома', function (API) {
           короб.position.y = ВЫС / 2; гр.add(короб);                               // в дырах стен — цвет обоев, а не небо
           const л = люстра(); л.position.set(0, ВЫС, 0); гр.add(л);
           // коробка с 17 телефонами (коллекция автора): 12 не включаются, 5 горят — по букве «ZTORM»
-          { const БЕЗ2 = { fog: false, toneMapped: false }, к = new THREE.Group(); к.position.set(ШИР - 0.5, 0, -ДЛ + 0.38); к.rotation.y = 0.35; гр.add(к);
+          { const БЕЗ2 = { fog: false, toneMapped: false }, к = new THREE.Group(); к.position.set(1.75, 0, 0.45); к.rotation.y = -Math.PI / 2 + 0.35; гр.add(к);   // на полу у дальней стены, экранами к входу
             const картон = new THREE.MeshBasicMaterial({ color: '#B8905C', side: THREE.DoubleSide, ...БЕЗ2 }), тёмн = new THREE.MeshBasicMaterial({ color: '#8A6A40', side: THREE.DoubleSide, ...БЕЗ2 });
-            const W2 = 0.46, D2 = 0.34, H2 = 0.2;
+            const W2 = 0.46, D2 = 0.34, H2 = 0.14;
             const дно = new THREE.Mesh(new THREE.PlaneGeometry(W2, D2).rotateX(-Math.PI / 2), тёмн); дно.position.y = 0.005; к.add(дно);
             for (const [x, z, ry, w] of [[0, -D2 / 2, 0, W2], [0, D2 / 2, 0, W2], [-W2 / 2, 0, Math.PI / 2, D2], [W2 / 2, 0, Math.PI / 2, D2]]) {
               const ст = new THREE.Mesh(new THREE.PlaneGeometry(w, H2), картон); ст.position.set(x, H2 / 2, z); ст.rotation.y = ry; к.add(ст);
@@ -19271,7 +19271,7 @@ window.ДЕТАЛИ.push(['зал дома', function (API) {
             const ГОРЯТ = { 3: 'Z', 6: 'T', 8: 'O', 11: 'R', 14: 'M' }, экраны = [];
             for (let i = 0; i < 17; i++) {
               const ряд = i < 6 ? 0 : i < 12 ? 1 : 2, вРяду = ряд < 2 ? 6 : 5, k = ряд < 2 ? i - ряд * 6 : i - 12;
-              const т = new THREE.Group(); т.position.set(-W2 / 2 + 0.05 + k * (W2 - 0.1) / (вРяду - 1), 0.085, -D2 / 2 + 0.07 + ряд * 0.1); т.rotation.set(-0.35 + (i % 3) * 0.08, (i % 4 - 1.5) * 0.06, (i % 5 - 2) * 0.04); к.add(т);
+              const т = new THREE.Group(); т.position.set(-W2 / 2 + 0.05 + k * (W2 - 0.1) / (вРяду - 1), 0.11, -D2 / 2 + 0.07 + ряд * 0.1); т.rotation.set(-0.35 + (i % 3) * 0.08, (i % 4 - 1.5) * 0.06, (i % 5 - 2) * 0.04); к.add(т);
               т.add(new THREE.Mesh(new THREE.BoxGeometry(0.072, 0.15, 0.009), корпусМ));
               const б = ГОРЯТ[i], э = new THREE.Mesh(new THREE.PlaneGeometry(0.064, 0.138), б ? new THREE.MeshBasicMaterial({ map: экран(б), ...БЕЗ2 }) : чёрныйЭкран);
               э.position.z = 0.0051; т.add(э); if (б) экраны.push(э);
