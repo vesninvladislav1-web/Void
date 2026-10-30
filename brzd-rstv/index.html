@@ -14741,6 +14741,358 @@ window.ДЕТАЛИ.push(['онлайн', function (API) {
 
 </script>
 <script>
+// Мини-игры свободного онлайна: прятки, салки, гонки, футбол команда на команду, сбор яблок. И отсюда же —
+// война за времянку. Кнопка «🎮 ИГРЫ» — только в свободной игре и с ролью. Кто запустил — ведущий: он рассылает
+// начало (вид, ид, зерно, состав), отсчитывает время и объявляет конец; остальные идут по тем же часам.
+// Сообщения: «игн» — новая игра, «иго» — событие внутри игры, «игк» — конец. Всё, что приходит, проверяем.
+window.ДЕТАЛИ.push(['мини-игры', function (API) {
+  const { THREE, сцена } = API, В = API.землиВысота;
+  const О = () => window.__онлайн;
+  const можно = () => { const о = О(); return !!(о && о.я && о.я.роль && window.__онлРежим && window.__онлРежим() === 'свободно'); };
+  const совет = (т, с = 3) => window.__подсказки && window.__подсказки.совет(т, с);
+  const П = () => window.__мир.поз;
+  const сл = Math.random;
+  const ИГРЫ = {
+    прятки: { имя: 'Прятки', знак: '🙈', под: 'Водящий считает, остальные прячутся. 3 минуты на поиск.' },
+    салки: { имя: 'Салки', знак: '🏃', под: 'Водящий догоняет и салит — водит осаленный. Кто меньше водил — победил.' },
+    гонки: { имя: 'Гонки', знак: '🏁', под: 'Все на старт одной трассы. Кто быстрее.' },
+    футбол: { имя: 'Футбол', знак: '⚽', под: 'Команда на команду на стадионе. 4 минуты или до 5 голов.' },
+    яблоки: { имя: 'Сбор яблок', знак: '🍎', под: 'Яблоки рассыпаны по садам. Кто больше соберёт за 3 минуты.' },
+  };
+  // ---------- вид ----------
+  const стиль = document.createElement('style');
+  стиль.textContent = `
+    #игрыКн { position: fixed; top: calc(54px + env(safe-area-inset-top, 0px)); right: calc(170px + env(safe-area-inset-right, 0px)); z-index: 9; height: 34px; padding: 0 12px;
+      border-radius: 17px; border: 1px solid rgba(244,196,48,.6); background: rgba(26,18,12,.85); color: #F4D35E; font: 800 12px system-ui, sans-serif; letter-spacing: 1px; display: none; cursor: pointer; }
+    body.игры-можно #игрыКн { display: block; }
+    #игрыОкно { position: fixed; inset: 0; z-index: 28; display: none; align-items: center; justify-content: center; background: rgba(8,5,3,.6); padding: 10px; }
+    #игрыОкно.видно { display: flex; }
+    #игрыОкно .лист { width: min(560px, 100%); max-height: 100%; overflow-y: auto; box-sizing: border-box; background: linear-gradient(#2A1E14, #1A120C); border: 1px solid rgba(232,200,74,.4);
+      border-radius: 18px; padding: 14px 16px; color: #F2E6CC; font: 13px/1.4 system-ui, sans-serif; }
+    #игрыОкно h3 { margin: 0 0 8px; color: #F3E1B0; font: 400 21px 'Ruslan Display', Georgia, serif; }
+    #игрыОкно .сп { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+    #игрыОкно .иг { display: flex; gap: 10px; align-items: flex-start; text-align: left; padding: 10px; border-radius: 14px; border: 1px solid rgba(242,230,204,.15); background: rgba(242,230,204,.05);
+      color: #F2E6CC; font: inherit; cursor: pointer; }
+    #игрыОкно .иг i { font-style: normal; font-size: 26px; } #игрыОкно .иг b { display: block; font-size: 14px; } #игрыОкно .иг small { color: #B9A887; font-size: 11.5px; }
+    #игрыОкно .тр { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; } #игрыОкно .тр button { height: 28px; padding: 0 10px; border-radius: 14px; border: 1px solid #F4C430; background: none; color: #F4D35E; font: 700 11px system-ui; cursor: pointer; }
+    #игрыОкно .низ { display: flex; justify-content: flex-end; margin-top: 10px; } #игрыОкно .низ button { height: 36px; padding: 0 18px; border-radius: 18px; border: 0; background: #E8C84A; color: #1E140A; font: 800 12px system-ui; cursor: pointer; }
+    #игрыТабло { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 10; display: none; min-width: 220px; max-width: 46vw;
+      background: rgba(18,12,8,.82); border: 1px solid rgba(244,196,48,.5); border-radius: 12px; padding: 5px 12px 6px; color: #F2E6CC; font: 700 12px/1.3 system-ui, sans-serif; text-align: center; pointer-events: none; }
+    #игрыТабло.видно { display: block; }
+    #игрыТабло .заг { color: #F4D35E; letter-spacing: 1px; } #игрыТабло .вр { font-size: 18px; font-weight: 900; } #игрыТабло .оч { font-weight: 600; font-size: 11.5px; color: #E8DCC0; }
+    #игрыЧерно { position: fixed; inset: 0; z-index: 9; background: #000; display: none; align-items: center; justify-content: center; color: #F2E6CC; font: 800 22px system-ui, sans-serif; text-align: center; }
+    #игрыЧерно.видно { display: flex; }
+    #игрыУдар { position: fixed; right: calc(14px + env(safe-area-inset-right, 0px)); bottom: calc(80px + env(safe-area-inset-bottom, 0px)); z-index: 9; display: none; width: 110px; height: 72px; border-radius: 36px;
+      border: 0; background: #F2F2EE; color: #14161A; font: 900 16px system-ui, sans-serif; letter-spacing: 1px; }
+    #игрыУдар.видно { display: block; } #игрыУдар.близко { box-shadow: 0 0 0 3px #F4C430, 0 0 18px rgba(244,196,48,.7); }
+    #игрыИтог { position: fixed; inset: 0; z-index: 29; display: none; align-items: center; justify-content: center; background: rgba(8,5,3,.6); padding: 10px; }
+    #игрыИтог.видно { display: flex; }
+    #игрыИтог .лист { width: min(420px, 100%); background: linear-gradient(#2A1E14, #1A120C); border: 1px solid rgba(232,200,74,.45); border-radius: 18px; padding: 14px 18px; color: #F2E6CC; font: 14px/1.5 system-ui, sans-serif; text-align: center; }
+    #игрыИтог h3 { margin: 0 0 6px; color: #F3E1B0; font: 400 22px 'Ruslan Display', Georgia, serif; } #игрыИтог ol { text-align: left; margin: 6px 0 12px; padding-left: 22px; }
+    #игрыИтог button { height: 38px; padding: 0 22px; border-radius: 19px; border: 0; background: #E8C84A; color: #1E140A; font: 800 13px system-ui; cursor: pointer; }
+    body.кино #игрыКн, body.кино #игрыУдар { opacity: 0; pointer-events: none; }
+    body.левша #игрыУдар { right: auto; left: calc(14px + env(safe-area-inset-left, 0px)); }
+  `;
+  document.head.appendChild(стиль);
+  const эл = (тег, id, html) => { const е = document.createElement(тег); if (id) е.id = id; if (html !== undefined) е.innerHTML = html; document.body.appendChild(е); return е; };
+  const кн = эл('button', 'игрыКн', '🎮 ИГРЫ'), окно = эл('div', 'игрыОкно'), табло = эл('div', 'игрыТабло', '<div class="заг"></div><div class="вр"></div><div class="оч"></div>');
+  const черно = эл('div', 'игрыЧерно'), кнУдар = эл('button', 'игрыУдар', 'УДАР'), итогЭл = эл('div', 'игрыИтог');
+  for (const у of ['pointerdown', 'click']) { окно.addEventListener(у, e => e.stopPropagation()); итогЭл.addEventListener(у, e => e.stopPropagation()); }
+
+  // ---------- кто есть кто ----------
+  const мойИд = () => О().я.ид;
+  function имя(ид) {
+    const о = О(); if (ид === мойИд()) { const р = о.РОЛИ[о.я.роль]; return (о.я.роль === 'житель' && о.я.ник) || (р ? р.имя : 'Ты'); }
+    const п = о.пиры.get(ид); return п ? о.подписьПира(п) : 'Кто-то';
+  }
+  function где(ид) { if (ид === мойИд()) { const п = П(); return [п.x, п.z]; } const п = О().пиры.get(ид); return п && п.x != null ? [п.x, п.z] : null; }
+  const участники = () => [мойИд(), ...[...О().пиры.values()].filter(п => п.роль && !п.спит).map(п => п.ид)].sort();
+  function зерно(с) { let а = (с >>> 0) || 1; return () => { а = (а + 0x6D2B79F5) >>> 0; let t = а; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  const послать = м => { const о = О(); if (о && о.всем) о.всем(м); };
+
+  // ---------- меню ----------
+  function открыть() {
+    if (!можно()) return;
+    const р = [];
+    for (const [к, и] of Object.entries(ИГРЫ)) {
+      let доп = '';
+      if (к === 'гонки') { const Г = window.__гонки; доп = '<div class="тр">' + (Г ? Г.ТРАССЫ.map((т, i) => `<button data-тр="${i}">${т.имя}</button>`).join('') : '') + '</div>'; }
+      р.push(`<div class="иг" data-к="${к}"><i>${и.знак}</i><div><b>${и.имя}</b><small>${и.под}</small>${доп}</div></div>`);
+    }
+    р.push('<div class="иг" data-к="война"><i>⚔️</i><div><b>Война за времянку</b><small>Шторм против Никиты — все, кто в комнате.</small></div></div>');
+    окно.innerHTML = `<div class="лист"><h3>Игры</h3><div class="сп">${р.join('')}</div><div class="низ"><button class="закр">ЗАКРЫТЬ</button></div></div>`;
+    окно.querySelector('.закр').addEventListener('click', () => окно.classList.remove('видно'));
+    окно.querySelectorAll('.иг').forEach(б => б.addEventListener('click', e => {
+      const к = б.dataset.к, тр = e.target.dataset && e.target.dataset.тр;
+      if (к === 'гонки' && тр === undefined) { совет('Выбери трассу', 1.5); return; }
+      окно.classList.remove('видно');
+      if (к === 'война') { if (window.__война && window.__война.начать({ онлайн: true, сюда: true, безКино: true })) совет('⚔ Война за времянку! Все в комнате — в бой.', 4); else совет('Сейчас нельзя.', 2); return; }
+      начать(к, к === 'гонки' ? { тр: +тр } : {});
+    }));
+    окно.classList.add('видно');
+  }
+  кн.addEventListener('click', e => { e.stopPropagation(); if (игра) { if (игра.ведущий === мойИд() && confirm('Закончить игру?')) конец('Ведущий закончил игру.'); return; } открыть(); });
+
+  // ---------- игра ----------
+  let игра = null;       // { вид, ид, ведущий, уч: [ид], t, фаза, очки: {ид: n}, ... }
+  function начать(вид, опц = {}) {
+    if (игра || !можно()) return;
+    const уч = участники();
+    if (уч.length < 2) { совет('Нужен хотя бы ещё один игрок в комнате.', 3); return; }
+    const м = { k: 'игн', вид, ид: Math.random().toString(36).slice(2, 10), сид: Math.floor(сл() * 1e9), уч, опц, где: [П().x, П().z] };
+    создать(м, мойИд()); послать(м);
+  }
+  function создать(м, ведущий) {
+    const р = зерно(м.сид);
+    игра = { вид: м.вид, ид: м.ид, ведущий, уч: м.уч, сид: м.сид, р, t: -4, фаза: 'отсчёт', очки: {}, опц: м.опц || {}, где0: м.где };
+    for (const ид of игра.уч) игра.очки[ид] = 0;
+    кн.textContent = '🎮 ' + ИГРЫ[м.вид].знак + ' ИДЁТ';
+    ВИДЫ[м.вид].старт(игра);
+    обновитьТабло(true);
+  }
+  function конец(почему, итог) {
+    if (!игра) return;
+    const г = игра;
+    if (г.ведущий === мойИд()) послать({ k: 'игк', ид: г.ид, итог: итог || null });
+    ВИДЫ[г.вид].убрать && ВИДЫ[г.вид].убрать(г);
+    игра = null; кн.textContent = '🎮 ИГРЫ'; табло.classList.remove('видно'); черно.classList.remove('видно'); кнУдар.classList.remove('видно');
+    window.__подсказки && window.__подсказки.убратьМетку && window.__подсказки.убратьМетку();
+    показатьИтог(г, почему);
+  }
+  function показатьИтог(г, почему) {
+    const В2 = ВИДЫ[г.вид], ряды = В2.итог ? В2.итог(г) : г.уч.map(ид => [ид, г.очки[ид] || 0]).sort((a, b) => b[1] - a[1]).map(([ид, о]) => [имя(ид), о]);
+    итогЭл.innerHTML = `<div class="лист"><h3>${ИГРЫ[г.вид].знак} ${ИГРЫ[г.вид].имя}</h3>${почему ? '<div>' + почему + '</div>' : ''}<ol>${ряды.map(([и, о]) => `<li><b>${и}</b> — ${о}</li>`).join('')}</ol><button>ОК</button></div>`;
+    итогЭл.querySelector('button').addEventListener('click', () => итогЭл.classList.remove('видно'));
+    итогЭл.classList.add('видно');
+  }
+  const мин = с => Math.floor(Math.max(0, с) / 60) + ':' + String(Math.floor(Math.max(0, с) % 60)).padStart(2, '0');
+  let таблоБыло = '';
+  function обновитьТабло(сразу) {
+    if (!игра) return;
+    const г = игра, В2 = ВИДЫ[г.вид];
+    const [фаза, время, очки] = В2.табло(г);
+    const с = фаза + '|' + время + '|' + очки; if (с === таблоБыло && !сразу) return; таблоБыло = с;
+    табло.querySelector('.заг').textContent = ИГРЫ[г.вид].знак + ' ' + ИГРЫ[г.вид].имя.toUpperCase() + (фаза ? ' · ' + фаза : '');
+    табло.querySelector('.вр').textContent = время; табло.querySelector('.оч').textContent = очки;
+    табло.classList.add('видно');
+  }
+  const топ = (г, n = 4, меньшеЛучше = false) => г.уч.map(ид => [ид, г.очки[ид] || 0]).sort((a, b) => меньшеЛучше ? a[1] - b[1] : b[1] - a[1]).slice(0, n).map(([ид, о]) => имя(ид) + ' ' + о).join(' · ');
+  function событие(м) { if (игра && игра.ведущий === мойИд()) { /* ведущий тоже применяет своё */ } послать(Object.assign({ k: 'иго', ид: игра.ид }, м)); }
+
+  // ---------- метка «водит» над игроком: красное кольцо под ногами ----------
+  const кольцо = new THREE.Mesh(new THREE.RingGeometry(0.7, 0.95, 28).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xFF3020, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide }));
+  кольцо.visible = false; кольцо.renderOrder = 20; сцена.add(кольцо);
+  function кольцоНа(ид) { const г2 = ид && где(ид); кольцо.visible = !!г2; if (г2) кольцо.position.set(г2[0], В(г2[0], г2[1]) + 0.08, г2[1]); }
+
+  // ===================== ВИДЫ ИГР =====================
+  const ВИДЫ = {};
+  // ---------- ПРЯТКИ ----------
+  ВИДЫ.прятки = {
+    старт(г) { г.водит = г.уч[Math.floor(г.р() * г.уч.length)]; г.найдены = new Set(); г.ПРЯЧ = 40; г.ИЩ = 180;
+      совет(г.водит === мойИд() ? '🙈 Ты водишь! Сейчас закрой глаза — 40 секунд, пока все прячутся.' : `🙈 Прятки! Водит ${имя(г.водит)}. Прячься, у тебя 40 секунд!`, 5); },
+    кадр(г, dt) {
+      const я = мойИд();
+      if (г.фаза === 'отсчёт' && г.t >= 0) г.фаза = 'прячутся';
+      if (г.фаза === 'прячутся') {
+        const водишь = г.водит === я; черно.classList.toggle('видно', водишь); if (водишь) { черно.textContent = '🙈 Считаю до сорока… ' + Math.ceil(г.ПРЯЧ - г.t); window.__управлениеСтоп = true; }
+        if (г.t >= г.ПРЯЧ) { г.фаза = 'ищет'; г.t0ищ = г.t; черно.classList.remove('видно'); if (водишь) { window.__управлениеСтоп = false; совет('🔍 Ищи! Подойди к спрятавшемуся вплотную.', 4); } else совет('🔍 Водящий пошёл искать!', 3); }
+      }
+      if (г.фаза === 'ищет') {
+        кольцоНа(г.водит);
+        if (г.водит === я) {
+          for (const ид of г.уч) { if (ид === я || г.найдены.has(ид)) continue; const ж = где(ид); if (!ж) continue;
+            if (Math.hypot(ж[0] - П().x, ж[1] - П().z) < 3) { найти(г, ид); событие({ тип: 'найден', кто: ид }); } }
+          // подсказка «горячо-холодно» после минуты поиска
+          if (г.t - г.t0ищ > 60) { let лучш = 1e9; for (const ид of г.уч) if (ид !== я && !г.найдены.has(ид)) { const ж = где(ид); if (ж) лучш = Math.min(лучш, Math.hypot(ж[0] - П().x, ж[1] - П().z)); }
+            г.тепло = лучш < 15 ? '🔥 горячо' : лучш < 40 ? '♨ тепло' : '❄ холодно'; }
+        }
+        if (г.найдены.size >= г.уч.length - 1 || г.t - г.t0ищ > г.ИЩ) { if (г.ведущий === я) конец(г.найдены.size >= г.уч.length - 1 ? 'Нашли всех!' : 'Время вышло — спрятавшиеся победили.'); }
+      }
+    },
+    событие(г, п, м) { if (м.тип === 'найден' && typeof м.кто === 'string' && г.уч.includes(м.кто) && п.ид === г.водит) найти(г, м.кто); },
+    табло(г) { const ост = г.фаза === 'прячутся' ? г.ПРЯЧ - г.t : г.фаза === 'ищет' ? г.ИЩ - (г.t - г.t0ищ) : -г.t;
+      return [г.фаза === 'прячутся' ? 'ПРЯЧУТСЯ' : г.фаза === 'ищет' ? 'ВОДИТ ' + имя(г.водит).toUpperCase() : 'СТАРТ', мин(ост), `Найдено ${г.найдены.size} из ${г.уч.length - 1}` + (г.тепло && г.водит === мойИд() ? ' · ' + г.тепло : '')]; },
+    итог(г) { return г.уч.map(ид => [имя(ид), ид === г.водит ? 'водил, нашёл ' + г.найдены.size : г.найдены.has(ид) ? 'найден' : '🏆 не нашли']); },
+    убрать() { черно.classList.remove('видно'); кольцо.visible = false; window.__управлениеСтоп = false; },
+  };
+  function найти(г, ид) { if (г.найдены.has(ид)) return; г.найдены.add(ид); г.очки[г.водит] = (г.очки[г.водит] || 0) + 1; совет(ид === мойИд() ? '😮 Тебя нашли!' : `👀 ${имя(г.водит)} нашёл ${имя(ид)}`, 2.5); }
+
+  // ---------- САЛКИ ----------
+  ВИДЫ.салки = {
+    старт(г) { г.водит = г.уч[Math.floor(г.р() * г.уч.length)]; г.ДЛ = 180; г.иммун = {}; совет(`🏃 Салки! Водит ${г.водит === мойИд() ? 'ТЫ — догоняй!' : имя(г.водит) + ' — убегай!'}`, 4); },
+    кадр(г, dt) {
+      const я = мойИд();
+      if (г.фаза === 'отсчёт' && г.t >= 0) г.фаза = 'идёт';
+      if (г.фаза !== 'идёт') return;
+      г.очки[г.водит] = (г.очки[г.водит] || 0) + dt;
+      for (const к in г.иммун) г.иммун[к] -= dt;
+      кольцоНа(г.водит);
+      if (г.водит === я && !(г.иммун[я] > 0)) for (const ид of г.уч) { if (ид === я || г.иммун[ид] > 0) continue; const ж = где(ид); if (!ж) continue;
+        if (Math.hypot(ж[0] - П().x, ж[1] - П().z) < 1.8) { осалить(г, я, ид); событие({ тип: 'осалил', кто: ид, от: я }); break; } }
+      if (г.t > г.ДЛ && г.ведущий === я) конец('Время вышло!');
+    },
+    событие(г, п, м) { if (м.тип === 'осалил' && typeof м.кто === 'string' && г.уч.includes(м.кто) && м.от === г.водит && п.ид === м.от) осалить(г, м.от, м.кто); },
+    табло(г) { return [г.фаза === 'идёт' ? 'ВОДИТ ' + имя(г.водит).toUpperCase() : 'СТАРТ', мин(г.фаза === 'идёт' ? г.ДЛ - г.t : -г.t), 'Водил дольше всех: ' + топ(Object.assign({}, г, { очки: Object.fromEntries(Object.entries(г.очки).map(([к, в]) => [к, Math.round(в)])) }), 3)]; },
+    итог(г) { return г.уч.map(ид => [ид, г.очки[ид] || 0]).sort((a, b) => a[1] - b[1]).map(([ид, с], i) => [(i === 0 ? '🏆 ' : '') + имя(ид), 'водил ' + Math.round(с) + ' с']); },
+    убрать() { кольцо.visible = false; },
+  };
+  function осалить(г, от, кто) { г.водит = кто; г.иммун = { [от]: 3 }; совет(кто === мойИд() ? '😱 Тебя осалили — теперь водишь ты!' : `🏃 ${имя(от)} осалил ${имя(кто)}`, 2.5); }
+
+  // ---------- ГОНКИ ----------
+  ВИДЫ.гонки = {
+    старт(г) { const Г = window.__гонки; г.тр = Г && Г.ТРАССЫ[Math.max(0, Math.min(Г.ТРАССЫ.length - 1, г.опц.тр | 0))]; г.финиш = {}; г.ДЛ = 600;
+      if (!г.тр) { совет('Трассы не построились.', 2); return; }
+      совет(`🏁 Гонка «${г.тр.имя}»! Садись в ВАЗ или на мопед — через 4 секунды старт.`, 4);
+      // не в машине — сажаем в свой ВАЗ
+      setTimeout(() => { if (игра !== г) return; if (!window.__вазЕдет && !window.__мопедЕдет && window.__ваз && window.__ваз.машина) { const М = window.__ваз.машина, fx = Math.sin(М.курс), fz = Math.cos(М.курс); П().x = М.x + fz * 1.3; П().z = М.z - fx * 1.3; setTimeout(() => window.__ваз.сесть && window.__ваз.сесть(), 300); } }, 1500);
+    },
+    кадр(г, dt) {
+      if (г.фаза === 'отсчёт' && г.t >= 0) { г.фаза = 'едем'; const Г = window.__гонки; if (Г && г.тр) Г.начать(г.тр); }
+      if (г.фаза === 'едем' && г.ведущий === мойИд()) { const n = Object.keys(г.финиш).length; if (n >= г.уч.length || (n && г.t - Math.min(...Object.values(г.финиш).map(ф => ф.к)) > 90) || г.t > г.ДЛ) конец(n >= г.уч.length ? 'Все на финише!' : 'Гонка окончена.'); }
+    },
+    событие(г, п, м) { if (м.тип === 'финиш' && typeof м.t === 'number' && isFinite(м.t) && м.t > 5 && м.t < 900 && !г.финиш[п.ид]) { г.финиш[п.ид] = { t: м.t, к: г.t }; совет(`🏁 ${имя(п.ид)} финишировал: ${мин(м.t)}`, 2.5); } },
+    табло(г) { const ф = Object.entries(г.финиш).sort((a, b) => a[1].t - b[1].t); return [г.тр ? г.тр.имя.toUpperCase() : '', г.фаза === 'едем' ? 'ЕДЕМ' : мин(-г.t), ф.length ? ф.slice(0, 3).map(([ид, ф], i) => (i + 1) + '. ' + имя(ид) + ' ' + мин(ф.t)).join(' · ') : 'Финишировало: 0 из ' + г.уч.length]; },
+    итог(г) { const ф = Object.entries(г.финиш).sort((a, b) => a[1].t - b[1].t).map(([ид, ф], i) => [(i === 0 ? '🏆 ' : '') + имя(ид), мин(ф.t) + '.' + Math.floor((ф.t % 1) * 10)]); for (const ид of г.уч) if (!г.финиш[ид]) ф.push([имя(ид), 'не доехал']); return ф; },
+    убрать() { const Г = window.__гонки; if (Г && Г.г && Г.г()) Г.сойти('Гонка окончена.'); },
+  };
+  window.__подписка && window.__подписка('гонка-финиш', д => { const г = игра; if (!г || г.вид !== 'гонки' || !г.тр || !д || д.т !== г.тр.ид || г.финиш[мойИд()]) return; г.финиш[мойИд()] = { t: д.t, к: г.t }; событие({ тип: 'финиш', t: д.t }); });
+
+  // ---------- ФУТБОЛ ----------
+  const R_М = 0.11, ШИР_В = 1.45;
+  let мячМ = null;
+  ВИДЫ.футбол = {
+    старт(г) {
+      const с = window.__стадион; if (!с) { совет('Стадиона нет.', 2); return; }
+      г.с = с; г.ГОЛ = с.A - 1.3; г.мяч = { a: 0, b: 0, y: R_М, va: 0, vb: 0, vy: 0 }; г.счёт = [0, 0]; г.ДЛ = 240; г.пауза = 4; г.шлём = 0; г.отдых = 0;
+      г.команда = {}; г.уч.forEach((ид, i) => { г.команда[ид] = i % 2; });
+      if (!мячМ) { мячМ = new THREE.Mesh(new THREE.IcosahedronGeometry(R_М, 2), new THREE.MeshStandardMaterial({ color: 0xF4F4F0, roughness: 0.5, flatShading: true })); мячМ.castShadow = true; сцена.add(мячМ); }
+      мячМ.visible = true; ВИДЫ.футбол.расставить(г);
+      кнУдар.classList.add('видно');
+      совет(`⚽ Ты за ${г.команда[мойИд()] ? 'СИНИХ' : 'КРАСНЫХ'}! ${г.команда[мойИд()] ? 'Ваши ворота — ближние к калитке' : 'Ваши ворота — дальние'}. Беги на мяч — поведёшь, «УДАР» — пнуть.`, 5);
+    },
+    расставить(г) {
+      const к = г.команда[мойИд()], i = г.уч.filter(ид => г.команда[ид] === к).indexOf(мойИд());
+      const a = к ? -8 : 8, b = (i - 1) * 3; [П().x, П().z] = г.с.W(a, b);
+      const [qx, qz] = г.с.W(a + (к ? 1 : -1), b), [ox, oz] = г.с.W(a, b); П().угол = Math.atan2(qx - ox, qz - oz); window.__мир.кам.рыск = П().угол + Math.PI;
+      Object.assign(г.мяч, { a: 0, b: 0, y: R_М, va: 0, vb: 0, vy: 0 }); г.пауза = Math.max(г.пауза, 1.5);
+    },
+    вПоле(г, x, z) { const с = г.с, dx = x - с.cx, dz = z - с.cz, [ux, uz] = [с.W(1, 0)[0] - с.cx, с.W(1, 0)[1] - с.cz]; return [dx * ux + dz * uz, dx * -uz + dz * ux]; },
+    пнуть(г, va, vb, vy) { const м = г.мяч; м.va = va; м.vb = vb; м.vy = vy; if (г.ведущий !== мойИд()) событие({ тип: 'пинок', a: м.a, b: м.b, va, vb, vy }); },
+    кадр(г, dt) {
+      if (!г.с) return;
+      if (г.фаза === 'отсчёт' && г.t >= 0) г.фаза = 'игра';
+      const с = г.с, A = с.A - 0.35, Б = с.Б - 0.35, м = г.мяч, я = мойИд(), вед = г.ведущий === я;
+      // игрок в поле
+      let [pa, pb] = ВИДЫ.футбол.вПоле(г, П().x, П().z);
+      if (Math.abs(pa) > A - 0.2 || Math.abs(pb) > Б - 0.2) { pa = Math.max(-A + 0.2, Math.min(A - 0.2, pa)); pb = Math.max(-Б + 0.2, Math.min(Б - 0.2, pb)); [П().x, П().z] = с.W(pa, pb); }
+      const пр = г.пред || [pa, pb]; г.пред = [pa, pb];
+      const ск = Math.hypot(pa - пр[0], pb - пр[1]) / dt;
+      if (г.пауза > 0) г.пауза -= dt;
+      else if (г.фаза === 'игра') {
+        const dп = Math.hypot(м.a - pa, м.b - pb); кнУдар.classList.toggle('близко', dп < 1.4); г.отдых -= dt;
+        if (dп < 0.55 && м.y < 0.4 && ск > 0.5 && г.отдых <= 0) { const d = Math.hypot(pa - пр[0], pb - пр[1]) || 1; ВИДЫ.футбол.пнуть(г, (pa - пр[0]) / d * (ск + 1.6), (pb - пр[1]) / d * (ск + 1.6), 0); г.отдых = 0.15; }
+      }
+      // физика мяча — у всех (между пакетами ведущего), гол — только у ведущего
+      м.vy -= 9.8 * dt; м.y += м.vy * dt; if (м.y < R_М) { м.y = R_М; м.vy = Math.abs(м.vy) > 1.2 ? -м.vy * 0.45 : 0; }
+      const тр = Math.exp(-(м.y > R_М + 0.02 ? 0.25 : 1.1) * dt); м.va *= тр; м.vb *= тр; м.a += м.va * dt; м.b += м.vb * dt;
+      if (Math.abs(м.b) > Б) { м.b = Math.sign(м.b) * Б; м.vb *= -0.6; }
+      if (вед && г.пауза <= 0 && Math.abs(м.a) > г.ГОЛ && Math.abs(м.b) < ШИР_В && м.y < 2) {
+        const кому = м.a < 0 ? 0 : 1;       // в ворота на a<0 забивают красные (0), на a>0 — синие (1)
+        г.счёт[кому]++; событие({ тип: 'гол', кому, счёт: г.счёт }); гол(г, кому);
+      } else if (Math.abs(м.a) > A) { м.a = Math.sign(м.a) * A; м.va *= -0.6; }
+      if (вед) { г.шлём -= dt; if (г.шлём <= 0) { г.шлём = 0.1; событие({ тип: 'мяч', a: +м.a.toFixed(2), b: +м.b.toFixed(2), y: +м.y.toFixed(2), va: +м.va.toFixed(2), vb: +м.vb.toFixed(2), vy: +м.vy.toFixed(2) }); }
+        if (г.t > г.ДЛ || Math.max(...г.счёт) >= 5) конец(г.счёт[0] === г.счёт[1] ? 'Ничья!' : (г.счёт[0] > г.счёт[1] ? 'Победили КРАСНЫЕ!' : 'Победили СИНИЕ!')); }
+      const [mx, mz] = с.W(м.a, м.b); мячМ.position.set(mx, с.Y + 0.12 + м.y, mz); мячМ.rotation.x += м.va * dt / R_М; мячМ.rotation.z -= м.vb * dt / R_М;
+    },
+    событие(г, п, м) {
+      const ч = v => typeof v === 'number' && isFinite(v) && Math.abs(v) < 200;
+      if (м.тип === 'мяч' && п.ид === г.ведущий && ['a', 'b', 'y', 'va', 'vb', 'vy'].every(к => ч(м[к]))) Object.assign(г.мяч, { a: м.a, b: м.b, y: м.y, va: м.va, vb: м.vb, vy: м.vy });
+      if (м.тип === 'пинок' && г.ведущий === мойИд() && ['va', 'vb', 'vy'].every(к => ч(м[к])) && Math.hypot(м.va, м.vb) < 25) { if (Math.hypot(г.мяч.a - м.a, г.мяч.b - м.b) < 3) Object.assign(г.мяч, { va: м.va, vb: м.vb, vy: Math.min(6, м.vy) }); }
+      if (м.тип === 'гол' && п.ид === г.ведущий && (м.кому === 0 || м.кому === 1) && Array.isArray(м.счёт)) { г.счёт = [м.счёт[0] | 0, м.счёт[1] | 0]; гол(г, м.кому); }
+    },
+    табло(г) { return ['', 'КРАСНЫЕ ' + г.счёт[0] + ' : ' + г.счёт[1] + ' СИНИЕ', г.фаза === 'игра' ? мин(г.ДЛ - г.t) : 'СТАРТ ' + мин(-г.t)]; },
+    итог(г) { return [['🔴 Красные', г.счёт[0]], ['🔵 Синие', г.счёт[1]], ...г.уч.map(ид => [(г.команда[ид] ? '🔵 ' : '🔴 ') + имя(ид), 'голов: ' + (г.очки[ид] || 0)])]; },
+    убрать() { if (мячМ) мячМ.visible = false; кнУдар.classList.remove('видно'); },
+  };
+  function гол(г, кому) {
+    совет(`⚽ ГОЛ! ${кому ? 'СИНИЕ' : 'КРАСНЫЕ'} — ${г.счёт[0]}:${г.счёт[1]}`, 2.5);
+    г.пауза = 2.5; setTimeout(() => { if (игра === г) ВИДЫ.футбол.расставить(г); }, 1800);
+  }
+  кнУдар.addEventListener('pointerdown', e => {
+    e.preventDefault(); e.stopPropagation(); const г = игра; if (!г || г.вид !== 'футбол' || г.пауза > 0) return;
+    const [pa, pb] = ВИДЫ.футбол.вПоле(г, П().x, П().z), м = г.мяч;
+    if (Math.hypot(м.a - pa, м.b - pb) > 1.4) { совет('Подбеги к мячу', 1); return; }
+    const [fa, fb] = ВИДЫ.футбол.вПоле(г, П().x + Math.sin(П().угол), П().z + Math.cos(П().угол)), d = Math.hypot(fa - pa, fb - pb) || 1;
+    ВИДЫ.футбол.пнуть(г, (fa - pa) / d * 15, (fb - pb) / d * 15, 2.6);
+  });
+
+  // ---------- СБОР ЯБЛОК ----------
+  let яблМ = null;
+  ВИДЫ.яблоки = {
+    старт(г) {
+      г.ДЛ = 180; г.взяты = {};
+      const Д = window.__деревья, [x0, z0] = г.где0 || [П().x, П().z];
+      let д = Д ? Д.все.filter(т => (т.порода === 'яблоня' || т.порода === 'вишня') && Math.hypot(т.x - x0, т.z - z0) < 260) : [];
+      д.sort((a, b) => (a.x - b.x) || (a.z - b.z));
+      if (д.length < 10 && Д) д = Д.все.filter(т => !т.тополь && Math.hypot(т.x - x0, т.z - z0) < 300).sort((a, b) => (a.x - b.x) || (a.z - b.z));
+      г.ябл = [];
+      for (let i = 0; i < 40 && д.length; i++) { const т = д[Math.floor(г.р() * д.length)], а = г.р() * 6.283, r = 0.6 + г.р() * 1.6; г.ябл.push([т.x + Math.cos(а) * r, т.z + Math.sin(а) * r]); }
+      if (!яблМ) { яблМ = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.16, 1), new THREE.MeshStandardMaterial({ color: 0xD02A20, roughness: 0.4, emissive: 0x401008 }), 60); яблМ.frustumCulled = false; сцена.add(яблМ); }
+      ВИДЫ.яблоки.обновить(г); яблМ.visible = true;
+      совет('🍎 Собирай яблоки под деревьями! Подбеги — подберёшь. 3 минуты.', 4);
+    },
+    обновить(г) { const м4 = new THREE.Matrix4(); let k = 0; г.ябл.forEach(([x, z], i) => { if (г.взяты[i]) return; м4.makeTranslation(x, В(x, z) + 0.16, z); яблМ.setMatrixAt(k++, м4); }); яблМ.count = k; яблМ.instanceMatrix.needsUpdate = true; },
+    кадр(г, dt) {
+      if (г.фаза === 'отсчёт' && г.t >= 0) г.фаза = 'идёт';
+      if (г.фаза !== 'идёт') return;
+      const я = мойИд(); let ближ = null, бд = 1e9;
+      г.ябл.forEach(([x, z], i) => { if (г.взяты[i] || г.просил === i) return; const d = Math.hypot(x - П().x, z - П().z); if (d < бд) { бд = d; ближ = i; }
+        if (d < 1.4) { if (г.ведущий === я) { взять(г, i, я); событие({ тип: 'взял', i, кто: я }); } else { г.просил = i; событие({ тип: 'хочу', i }); setTimeout(() => { if (г.просил === i) г.просил = null; }, 1500); } } });
+      if (ближ !== null && window.__подсказки) window.__подсказки.показатьМетку(г.ябл[ближ][0], г.ябл[ближ][1], '🍎');
+      if (г.ведущий === я && (г.t > г.ДЛ || Object.keys(г.взяты).length >= г.ябл.length)) конец(Object.keys(г.взяты).length >= г.ябл.length ? 'Все яблоки собраны!' : 'Время вышло!');
+    },
+    событие(г, п, м) {
+      const ок = Number.isInteger(м.i) && м.i >= 0 && м.i < г.ябл.length;
+      if (м.тип === 'хочу' && ок && г.ведущий === мойИд() && !г.взяты[м.i]) { const [x, z] = г.ябл[м.i], ж = где(п.ид); if (ж && Math.hypot(ж[0] - x, ж[1] - z) < 4) { взять(г, м.i, п.ид); событие({ тип: 'взял', i: м.i, кто: п.ид }); } }
+      if (м.тип === 'взял' && ок && п.ид === г.ведущий && typeof м.кто === 'string' && г.уч.includes(м.кто)) взять(г, м.i, м.кто);
+    },
+    табло(г) { return [г.фаза === 'идёт' ? 'ОСТАЛОСЬ ' + (г.ябл.length - Object.keys(г.взяты).length) : 'СТАРТ', мин(г.фаза === 'идёт' ? г.ДЛ - г.t : -г.t), топ(г, 4)]; },
+    убрать() { if (яблМ) яблМ.visible = false; },
+  };
+  function взять(г, i, кто) { if (г.взяты[i]) return; г.взяты[i] = кто; г.очки[кто] = (г.очки[кто] || 0) + 1; if (г.просил === i) г.просил = null; ВИДЫ.яблоки.обновить(г); if (кто === мойИд()) совет('🍎 +1 (' + г.очки[кто] + ')', 1); }
+
+  // ===================== СЕТЬ =====================
+  function сеть(п, м) {
+    if (!можно()) return;
+    if (м.k === 'игн') {
+      if (игра || !ИГРЫ[м.вид] || typeof м.ид !== 'string' || м.ид.length > 16 || !Array.isArray(м.уч) || м.уч.length > 40 || !м.уч.every(и => typeof и === 'string' && и.length <= 32)) return;
+      if (!м.уч.includes(мойИд()) || !Number.isFinite(м.сид)) return;
+      создать({ k: 'игн', вид: м.вид, ид: м.ид, сид: м.сид | 0, уч: м.уч, опц: м.опц && typeof м.опц === 'object' ? { тр: м.опц.тр | 0 } : {}, где: Array.isArray(м.где) && м.где.every(Number.isFinite) ? м.где.slice(0, 2) : null }, п.ид);
+      совет(`🎮 ${имя(п.ид)} начал игру «${ИГРЫ[м.вид].имя}»!`, 3);
+      return;
+    }
+    if (!игра || м.ид !== игра.ид) return;
+    if (м.k === 'иго' && typeof м.тип === 'string') { ВИДЫ[игра.вид].событие(игра, п, м); обновитьТабло(); }
+    if (м.k === 'игк' && п.ид === игра.ведущий) конец('');
+  }
+  window.__миниИгры = { сеть, начать, конец, игра: () => игра };
+
+  // ===================== КАДР =====================
+  API.каждыйКадр.push(dt => {
+    document.body.classList.toggle('игры-можно', можно());
+    if (!игра) return;
+    if (!можно()) { конец('Игра прервана.'); return; }
+    if (!dt) return;
+    игра.t += dt;
+    // ведущий ушёл — игру заканчиваем
+    if (игра.ведущий !== мойИд() && !О().пиры.has(игра.ведущий)) { конец('Ведущий вышел — игра окончена.'); return; }
+    try { ВИДЫ[игра.вид].кадр(игра, dt); } catch (e) { console.error('мини-игра:', e); конец('Что-то пошло не так.'); return; }
+    if (игра) обновитьТабло();
+  });
+}]);
+</script>
+
+<script>
 // Итоги: вибрация на телефоне, ачивки и газета «Бороздиновский вестник».
 // Всё слушает шину событий — сюжетные модули про это ничего не знают.
 window.ДЕТАЛИ.push(['итоги', function (API) {
@@ -18903,6 +19255,7 @@ window.ДЕТАЛИ.push(['гонки', function (API) {
     window.__кино && window.__кино.подпись && window.__кино.подпись(`🏁 ${т.имя}: ${время(t)}` + (рекорд ? (было ? ` — НОВЫЙ РЕКОРД! (было ${время(было.t)})` : ' — первый рекорд!') : ` · рекорд ${время(было.t)}`), 5);
     window.__итоги && window.__итоги.дать('гонка');
     const О = window.__онлайн; if (О && О.я && О.я.роль && О.всем) О.всем({ k: 'гф', т: т.ид, в: тр.вид, t: +t.toFixed(2) });
+    window.__событие && window.__событие('гонка-финиш', { т: т.ид, t: +t.toFixed(2) });
   }
   API.каждыйКадр.push((dt, ms, поз) => {
     if (!dt || !г) return;
@@ -23467,7 +23820,7 @@ window.ДЕТАЛИ.push(['война за времянку', function (API) {
     }
     if (вОнлайне()) {
       const О = онл(), с = слотОнлайна();
-      if (с.идёт && слотБыл !== с.слот && [...О.пиры.values()].some(п => п.роль) && !document.body.classList.contains('кабина')) {
+      if (с.идёт && слотБыл !== с.слот && [...О.пиры.values()].some(п => п.роль) && !document.body.classList.contains('кабина') && !(window.__онлРежим && window.__онлРежим() === 'сюжет') && !(window.__миниИгры && window.__миниИгры.игра())) {
         слотБыл = с.слот; if (начать({ ид: 'час' + с.слот, сид: с.слот, онлайн: true, безКино: true })) совет('⚔ Война за времянку! По часам — у всех в комнате. Жми «НА ВОЙНУ».', 4); }
       return;
     }
