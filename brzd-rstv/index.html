@@ -12411,7 +12411,9 @@ window.ДЕТАЛИ.push(['подсказки', function (API) {
     // поле для стрелки: не залезаем на цель сверху и на подсказку с кнопками снизу
     const верх = 120, низ = H - 200, цy = (верх + низ) / 2, полуH = (низ - верх) / 2;
     const k = Math.min((W / 2 - запас) / (Math.abs(dx) || 1), полуH / (Math.abs(dy) || 1));
-    const ex = W / 2 + dx * k, ey = цy + dy * k, угол = Math.atan2(dx, -dy);
+    let ex = W / 2 + dx * k; const ey = цy + dy * k, угол = Math.atan2(dx, -dy);
+    // слева у края — панель онлайна: метку ставим правее неё
+    const пн = document.getElementById('онлПанель'); if (пн && ex < W / 2) { const r = пн.getBoundingClientRect(); if (r.width && ey + 20 > r.top && ey - 20 < r.bottom && ex - 40 < r.right) ex = r.right + 44; }
     меткаЭл.style.width = '80px';
     меткаЭл.style.transform = `translate(${ex - 40}px, ${ey - 20}px)`;
     меткаЭл.querySelector('.стрелка').style.transform = `rotate(${угол}rad)`;
@@ -15203,6 +15205,61 @@ window.ДЕТАЛИ.push(['мини-игры', function (API) {
   });
 }]);
 </script>
+<script>
+// Раскладка интерфейса. Кнопки и плашки разных модулей стоят каждая на своём месте и на некоторых экранах
+// наезжают друг на друга. Четыре раза в секунду раздвигаем: кнопку игр — под «ОНЛАЙН» и ⚙, табло игры — в просвет
+// между левым и правым верхом, спидометр и стрелку к другу — столбиком под ним; кнопки действий внизу по центру —
+// столбиком и мимо панели онлайна, совет — над ними. Всё мерим и ставим в одном заходе — без мигания.
+window.ДЕТАЛИ.push(['раскладка интерфейса', function () {
+  const $ = id => document.getElementById(id);
+  const виден = е => {
+    if (!е) return null;
+    for (let x = е; x && x !== document.body; x = x.parentElement) { const cs = getComputedStyle(x); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return null; }
+    const r = е.getBoundingClientRect(); return r.width > 2 && r.height > 2 ? r : null;
+  };
+  const ВЕРХ = ['игрыТабло', 'вазСкорость', 'онлСтрелка'];
+  const НИЗ = ['вазСесть', 'мопедСесть', 'яшолётСесть', 'фениксСесть', 'залКн', 'туалетКн', 'футболКн', 'рыбалкаКн', 'дуракКн', 'войнаНаВойну', 'полигонСесть', 'полигонСвин'];
+  const сброс = (е, ...св) => { if (е) for (const с of св) е.style[с] = ''; };
+  function разложить() {
+    const W = innerWidth;
+    // кнопка игр — под «ОНЛАЙН» (и под ⚙, если та ниже), правым краем по нему
+    const игры = $('игрыКн'), онл = виден($('онлКн')), шест = виден($('шестерня'));
+    if (игры) { if (онл) { игры.style.top = Math.max(онл.bottom, шест ? шест.bottom : 0) + 6 + 'px'; игры.style.right = (W - онл.right) + 'px'; } else сброс(игры, 'top', 'right'); }
+    // верх по центру: сначала всё на свои места, потом табло в просвет и остальное столбиком под ним
+    for (const id of ВЕРХ) сброс($(id), 'top');
+    const т = $('игрыТабло'); сброс(т, 'left', 'maxWidth', 'minWidth');
+    if (т && виден(т)) {
+      let L = 8, R = W - 8, ниже = 0;
+      for (const id of ['компас', 'цель']) { const r = виден($(id)); if (r && r.top < 90) { L = Math.max(L, r.right + 8); ниже = Math.max(ниже, r.bottom); } }
+      for (const id of ['онлКн', 'игрыКн', 'шестерня', 'миникарта']) { const r = виден($(id)); if (r && r.top < 90 && r.left > W / 2 - 60) { R = Math.min(R, r.left - 8); ниже = Math.max(ниже, r.bottom); } }
+      if (R - L >= 210) { т.style.left = (L + R) / 2 + 'px'; т.style.maxWidth = (R - L) + 'px'; т.style.minWidth = Math.min(220, R - L) + 'px'; }
+      else { т.style.top = ниже + 6 + 'px'; т.style.maxWidth = Math.min(W - 16, 420) + 'px'; }       // просвета нет — под верхние кнопки
+    }
+    let y = null;
+    for (const id of ВЕРХ) { const е = $(id), r = виден(е); if (!r) continue; if (y !== null && r.top < y) е.style.top = y + 'px'; y = е.getBoundingClientRect().bottom + 4; }
+    // низ по центру: кнопки действий — столбиком, мимо панели онлайна
+    for (const id of НИЗ) сброс($(id), 'bottom', 'left');
+    const панель = виден($('онлПанель'));
+    let верхКнопок = null;
+    for (const id of НИЗ) {
+      const е = $(id); if (!виден(е)) continue;
+      if (верхКнопок !== null) е.style.bottom = (innerHeight - верхКнопок + 6) + 'px';
+      let r = е.getBoundingClientRect();
+      if (панель && r.left < панель.right + 6 && r.bottom > панель.top && r.top < панель.bottom) { е.style.left = (панель.right + 8 + r.width / 2) + 'px'; r = е.getBoundingClientRect(); }
+      верхКнопок = верхКнопок === null ? r.top : Math.min(верхКнопок, r.top);
+    }
+    // совет — над кнопками действий, если на них наезжает
+    const сов = $('совет'); сброс(сов, 'bottom');
+    const рс = виден(сов);
+    if (рс && верхКнопок !== null && рс.bottom > верхКнопок - 4) {
+      for (const id of НИЗ) { const r = виден($(id)); if (r && r.left < рс.right && r.right > рс.left) { сов.style.bottom = (innerHeight - верхКнопок + 8) + 'px'; break; } }
+    }
+  }
+  setInterval(() => { try { разложить(); } catch (e) {} }, 250);
+  addEventListener('resize', () => { try { разложить(); } catch (e) {} });
+  window.__разложить = разложить;
+}]);
+</script>
 
 <script>
 // Итоги: вибрация на телефоне, ачивки и газета «Бороздиновский вестник».
@@ -17610,7 +17667,7 @@ window.ДЕТАЛИ.push(['ваз 2114', function (API) {
     #вазПульт button { height: 52px; min-width: 52px; padding: 0 14px; border-radius: 26px; border: 1px solid #F4C430; background: rgba(30,22,6,0.82); color: #F4E0A0; font: 800 13px system-ui, sans-serif; letter-spacing: 1px; touch-action: manipulation; }
     #вазСкорость { position: fixed; left: 50%; top: calc(48px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 8; display: none; padding: 2px 12px; border-radius: 10px;
                    background: rgba(18,12,8,0.7); color: #F4E0A0; font: 700 15px ui-monospace, monospace; pointer-events: none; }
-    body.ваз #вазСкорость { display: block; } body.ваз #сверху { display: none !important; }
+    body.ваз #вазСкорость { display: block; } body.ваз #сверху, body.ваз #кнопки { display: none !important; }
     body.кино #вазСесть, body.кино #вазПульт, body.кино #вазСкорость { opacity: 0; pointer-events: none; }
   `;
   document.head.appendChild(стиль);
