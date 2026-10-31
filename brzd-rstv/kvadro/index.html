@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#1A120C">
+<title>Квадро-пульт</title>
+<style>
+  :root { --фон: #1A120C; --лист: #2A1E14; --текст: #F2E6CC; --тускл: #B9A887; --жёлт: #E8C84A; --красн: #D8342A; --зел: #4CAF50; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: var(--фон); color: var(--текст); font: 15px/1.4 system-ui, sans-serif; user-select: none; -webkit-user-select: none;
+    padding: calc(12px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom)); }
+  h1 { margin: 0 0 10px; font-size: 20px; color: var(--жёлт); letter-spacing: 1px; }
+  .ряд { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+  button { border: 0; border-radius: 14px; font: 800 15px system-ui, sans-serif; letter-spacing: .5px; padding: 0 16px; height: 52px; cursor: pointer; touch-action: none; }
+  button:disabled { opacity: .35; }
+  .жёлт { background: var(--жёлт); color: #1E140A; } .серый { background: #3A2C20; color: var(--текст); } .красн { background: var(--красн); color: #fff; }
+  .широкая { flex: 1; }
+  #стоп { width: 100%; height: 84px; font-size: 26px; margin-top: 10px; }
+  #ехать { width: 100%; height: 120px; font-size: 22px; background: #2E4A2E; color: #DDEFD8; border: 3px solid var(--зел); }
+  #ехать.держу { background: var(--зел); color: #0E1A0E; }
+  .табло { background: var(--лист); border-radius: 14px; padding: 10px 14px; margin: 8px 0; display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; }
+  .табло b { font-size: 22px; } .табло small { color: var(--тускл); display: block; font-size: 11px; letter-spacing: 1px; }
+  #режим { grid-column: 1 / -1; font-size: 26px; font-weight: 900; }
+  #режим.АВАРИЯ { color: var(--красн); } #режим.ЕДЕТ { color: var(--зел); } #режим.МОТОР { color: var(--жёлт); }
+  #причина { grid-column: 1 / -1; color: var(--тускл); min-height: 1.4em; }
+  label { color: var(--тускл); font-size: 13px; }
+  input[type=range] { width: 100%; } input[type=password], input[type=number] { background: #120C08; color: var(--текст); border: 1px solid #4A3A2A; border-radius: 10px; height: 44px; padding: 0 12px; font-size: 16px; width: 100%; }
+  #метры { font-size: 34px; font-weight: 900; color: var(--жёлт); text-align: center; }
+  .правила { color: var(--тускл); font-size: 12.5px; background: #22180F; border-radius: 12px; padding: 8px 12px; }
+  .правила li { margin: 2px 0; }
+  details { margin-top: 12px; color: var(--тускл); } summary { cursor: pointer; padding: 6px 0; }
+  #нет { background: #3A1410; color: #FFD0C8; border-radius: 12px; padding: 10px 12px; display: none; }
+</style>
+</head>
+<body>
+<h1>КВАДРО-ПУЛЬТ</h1>
+<div id="нет">Этот браузер не умеет Bluetooth. Открой страницу в Chrome на Android (на iPhone не работает).</div>
+
+<div class="ряд">
+  <input id="пин" type="password" inputmode="numeric" placeholder="PIN" style="flex:1" autocomplete="off">
+  <button id="подкл" class="жёлт">ПОДКЛЮЧИТЬ</button>
+</div>
+
+<div class="табло">
+  <div id="режим">НЕТ СВЯЗИ</div>
+  <div><small>ПРОЕХАЛ</small><b id="прошёл">—</b></div>
+  <div><small>СКОРОСТЬ</small><b id="скорость">—</b></div>
+  <div><small>АКБ</small><b id="акб">—</b></div>
+  <div><small>ГАЗ / ТОРМОЗ</small><b id="газ">—</b></div>
+  <div id="причина"></div>
+</div>
+
+<div class="ряд">
+  <button id="завести" class="жёлт широкая" disabled>ЗАВЕСТИ</button>
+  <button id="заглушить" class="серый широкая" disabled>ЗАГЛУШИТЬ</button>
+</div>
+
+<label>Сколько проехать</label>
+<div id="метры">10 м</div>
+<input id="дист" type="range" min="1" max="50" step="1" value="10">
+
+<ul class="правила">
+  <li>Передача — <b>L</b>, впереди пусто метров на 50, людей нет.</li>
+  <li>Квадроцикл всё время у тебя на виду. Брелок аварийной остановки — в руке.</li>
+  <li><b>Держи</b> зелёную кнопку, пока едет. Отпустил — газ в ноль и тормоз.</li>
+</ul>
+
+<button id="ехать" disabled>ДЕРЖИ — ЕДЕТ</button>
+<button id="стоп" class="красн" disabled>СТОП</button>
+
+<details>
+  <summary>Настройка (только при заглушенном моторе)</summary>
+  <div class="ряд"><input id="серва" type="number" value="1000" step="10" style="flex:1"><button id="сервоКн" class="серый">ГАЗ, мкс</button></div>
+  <div class="ряд"><button id="тормозДа" class="серый широкая">ТОРМОЗ ЖАТЬ</button><button id="тормозНет" class="серый широкая">ТОРМОЗ ОТПУСТИТЬ</button></div>
+  <div class="ряд"><button id="сброс" class="серый широкая">СНЯТЬ АВАРИЮ</button></div>
+</details>
+
+<script>
+// Пульт к прошивке kvadro.ino. Связь — Web Bluetooth (Chrome на Android, только по https).
+// 10 раз в секунду шлём «я на связи» (HB 0/1, где 1 — зелёная кнопка зажата). Перестали слать —
+// плата через 0.35 с глушит мотор. Ушёл со страницы, свернул, погас экран — сразу STOP и тишина.
+const UUID_СЛУЖБА = '7f1a0001-6b5e-4c1a-9d7e-4b5241445230';
+const UUID_КОМАНДА = '7f1a0002-6b5e-4c1a-9d7e-4b5241445230';
+const UUID_СОСТОЯНИЕ = '7f1a0003-6b5e-4c1a-9d7e-4b5241445230';
+const $ = id => document.getElementById(id);
+const кодер = new TextEncoder(), декодер = new TextDecoder();
+let устройство = null, хКоманда = null, держу = false, пульс = null, режим = '', очередь = Promise.resolve();
+
+if (!navigator.bluetooth) { $('нет').style.display = 'block'; $('подкл').disabled = true; }
+try { $('пин').value = localStorage.getItem('квадро.пин') || ''; } catch (e) {}
+
+// команды — строго по очереди: Bluetooth не любит две записи разом
+function послать(т) {
+  if (!хКоманда) return Promise.resolve();
+  очередь = очередь.then(() => хКоманда.writeValueWithoutResponse(кодер.encode(т))).catch(() => {});
+  return очередь;
+}
+
+async function подключить() {
+  try {
+    устройство = await navigator.bluetooth.requestDevice({ filters: [{ services: [UUID_СЛУЖБА] }] });
+    устройство.addEventListener('gattserverdisconnected', отвалился);
+    const сервер = await устройство.gatt.connect();
+    const служба = await сервер.getPrimaryService(UUID_СЛУЖБА);
+    хКоманда = await служба.getCharacteristic(UUID_КОМАНДА);
+    const хСост = await служба.getCharacteristic(UUID_СОСТОЯНИЕ);
+    хСост.addEventListener('characteristicvaluechanged', e => показать(декодер.decode(e.target.value)));
+    await хСост.startNotifications();
+    const пин = $('пин').value.trim(); try { localStorage.setItem('квадро.пин', пин); } catch (e) {}
+    await послать('PIN ' + пин);
+    clearInterval(пульс); пульс = setInterval(() => послать('HB ' + (держу ? 1 : 0)), 100);
+    $('подкл').textContent = 'ПОДКЛЮЧЁН';
+  } catch (e) { $('причина').textContent = 'Не подключился: ' + e.message; }
+}
+function отвалился() {
+  clearInterval(пульс); пульс = null; хКоманда = null; держу = false;
+  $('режим').textContent = 'НЕТ СВЯЗИ'; $('режим').className = ''; $('подкл').textContent = 'ПОДКЛЮЧИТЬ';
+  кнопки(false);
+}
+
+// «ГОТОВ;0.0;10.0;0.0;12.6;1000;1;причина;1»
+function показать(с) {
+  const [р, прошёл, цель, ск, акб, газ, тормоз, причина, свой] = с.split(';');
+  режим = р;
+  $('режим').textContent = свой === '1' ? р : 'НЕВЕРНЫЙ PIN'; $('режим').className = р;
+  $('прошёл').textContent = р === 'ЕДЕТ' ? прошёл + ' / ' + цель + ' м' : '—';
+  $('скорость').textContent = ск + ' км/ч';
+  $('акб').textContent = акб + ' В';
+  $('газ').textContent = газ + ' · ' + (тормоз === '1' ? 'жму' : 'нет');
+  $('причина').textContent = причина || '';
+  кнопки(свой === '1');
+}
+function кнопки(можно) {
+  $('завести').disabled = !можно || режим !== 'ГОТОВ';
+  $('заглушить').disabled = !можно;
+  $('ехать').disabled = !можно || !(режим === 'МОТОР' || режим === 'ЕДЕТ');
+  $('стоп').disabled = !можно;
+}
+
+$('подкл').addEventListener('click', подключить);
+$('завести').addEventListener('click', () => { if (confirm('Передача L? Впереди пусто? Брелок в руке?')) послать('START'); });
+$('заглушить').addEventListener('click', () => послать('KILL'));
+$('стоп').addEventListener('pointerdown', () => { держу = false; послать('STOP'); });
+$('дист').addEventListener('input', () => { $('метры').textContent = $('дист').value + ' м'; });
+
+// мёртвая рука: едет, только пока палец на кнопке
+const ехать = $('ехать');
+ехать.addEventListener('pointerdown', e => {
+  e.preventDefault(); if (ехать.disabled) return;
+  ехать.setPointerCapture(e.pointerId);
+  держу = true; ехать.classList.add('держу'); навибрировать(30);
+  послать('HB 1').then(() => { if (держу && режим === 'МОТОР') послать('GO ' + $('дист').value); });
+});
+for (const с of ['pointerup', 'pointercancel', 'lostpointercapture']) ехать.addEventListener(с, отпустил);
+function отпустил() { if (!держу) return; держу = false; ехать.classList.remove('держу'); послать('HB 0'); послать('STOP'); }
+ехать.addEventListener('contextmenu', e => e.preventDefault());
+
+// свернул, ушёл, погас экран — стоп и тишина (плата сама заглушит, не дождавшись связи)
+document.addEventListener('visibilitychange', () => { if (document.hidden) { отпустил(); clearInterval(пульс); пульс = null; } else if (хКоманда && !пульс) пульс = setInterval(() => послать('HB ' + (держу ? 1 : 0)), 100); });
+addEventListener('pagehide', отпустил);
+
+$('сервоКн').addEventListener('click', () => послать('SERVO ' + (+$('серва').value | 0)));
+$('тормозДа').addEventListener('click', () => послать('BRAKE 1'));
+$('тормозНет').addEventListener('click', () => послать('BRAKE 0'));
+$('сброс').addEventListener('click', () => послать('RESET'));
+function навибрировать(мс) { try { navigator.vibrate && navigator.vibrate(мс); } catch (e) {} }
+</script>
+</body>
+</html>
