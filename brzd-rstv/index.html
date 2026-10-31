@@ -15238,6 +15238,10 @@ window.ДЕТАЛИ.push(['раскладка интерфейса', function ()
     }
     let y = null;
     for (const id of ВЕРХ) { const е = $(id), r = виден(е); if (!r) continue; if (y !== null && r.top < y) е.style.top = y + 'px'; y = е.getBoundingClientRect().bottom + 4; }
+    // табло на узком экране вытянулось вниз до панели онлайна — панель ниже табло
+    const пн = $('онлПанель'); сброс(пн, 'top');
+    const рт = виден(т), рп = виден(пн);
+    if (рт && рп && рт.bottom > рп.top - 4 && рт.left < рп.right && рт.right > рп.left) пн.style.top = (рт.bottom + 6) + 'px';
     // низ по центру: кнопки действий — столбиком, мимо панели онлайна
     for (const id of НИЗ) сброс($(id), 'bottom', 'left');
     const панель = виден($('онлПанель'));
