@@ -14780,7 +14780,7 @@ window.ДЕТАЛИ.push(['мини-игры', function (API) {
     #игрыОкно .низ { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; } #игрыОкно .низ .рекКн { background: none; border: 1px solid #E8C84A; color: #F4D35E; }
     #игрыОкно .рек { padding: 8px 10px; border-radius: 12px; background: rgba(242,230,204,.05); } #игрыОкно .рек ol { margin: 4px 0 0; padding-left: 20px; } #игрыОкно .рек small { color: #9C8C6E; }
     #игрыОкно .низ button { height: 36px; padding: 0 18px; border-radius: 18px; border: 0; background: #E8C84A; color: #1E140A; font: 800 12px system-ui; cursor: pointer; }
-    #игрыТабло { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 10; display: none; min-width: 220px; max-width: 46vw;
+    #игрыТабло { position: fixed; left: 50%; top: calc(8px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); z-index: 10; display: none; min-width: 220px; max-width: 46vw; box-sizing: border-box; overflow: hidden;
       background: rgba(18,12,8,.82); border: 1px solid rgba(244,196,48,.5); border-radius: 12px; padding: 5px 12px 6px; color: #F2E6CC; font: 700 12px/1.3 system-ui, sans-serif; text-align: center; pointer-events: none; }
     #игрыТабло.видно { display: block; }
     #игрыТабло .заг { color: #F4D35E; letter-spacing: 1px; } #игрыТабло .вр { font-size: 18px; font-weight: 900; } #игрыТабло .оч { font-weight: 600; font-size: 11.5px; color: #E8DCC0; }
@@ -15212,9 +15212,10 @@ window.ДЕТАЛИ.push(['мини-игры', function (API) {
 // столбиком и мимо панели онлайна, совет — над ними. Всё мерим и ставим в одном заходе — без мигания.
 window.ДЕТАЛИ.push(['раскладка интерфейса', function () {
   const $ = id => document.getElementById(id);
+  // прозрачность меряем по цели, а не по ходу перехода: совет «.видно» с первого мига уже считается видным
   const виден = е => {
     if (!е) return null;
-    for (let x = е; x && x !== document.body; x = x.parentElement) { const cs = getComputedStyle(x); if (cs.display === 'none' || cs.visibility === 'hidden' || +cs.opacity < 0.05) return null; }
+    for (let x = е; x && x !== document.body; x = x.parentElement) { const cs = getComputedStyle(x); if (cs.display === 'none' || cs.visibility === 'hidden' || (+cs.opacity < 0.05 && !(x === е && е.classList.contains('видно')))) return null; }
     const r = е.getBoundingClientRect(); return r.width > 2 && r.height > 2 ? r : null;
   };
   const ВЕРХ = ['игрыТабло', 'вазСкорость', 'онлСтрелка'];
@@ -15249,11 +15250,20 @@ window.ДЕТАЛИ.push(['раскладка интерфейса', function ()
       верхКнопок = верхКнопок === null ? r.top : Math.min(верхКнопок, r.top);
     }
     // совет — над кнопками действий, если на них наезжает
-    const сов = $('совет'); сброс(сов, 'bottom');
-    const рс = виден(сов);
+    const сов = $('совет'); сброс(сов, 'bottom', 'left', 'maxWidth');
+    let рс = виден(сов);
     if (рс && верхКнопок !== null && рс.bottom > верхКнопок - 4) {
-      for (const id of НИЗ) { const r = виден($(id)); if (r && r.left < рс.right && r.right > рс.left) { сов.style.bottom = (innerHeight - верхКнопок + 8) + 'px'; break; } }
+      let лев = Infinity; for (const id of НИЗ) { const r = виден($(id)); if (r && r.left < рс.right && r.right > рс.left) лев = Math.min(лев, r.left); }
+      if (лев < Infinity) {
+        // на телефоне совет слева: сужаем, чтобы кончался левее кнопки (вверх нельзя — там панель онлайна);
+        // по центру (большой экран) или совсем узко — поднимаем над кнопками
+        if (getComputedStyle(сов).transform === 'none' && лев - 8 - рс.left >= 150) сов.style.maxWidth = (лев - 8 - рс.left) + 'px';
+        else сов.style.bottom = (innerHeight - верхКнопок + 8) + 'px';
+        рс = виден(сов);
+      }
     }
+    // совет всё равно вырос до панели онлайна — переносим правее панели
+    if (рс && панель && getComputedStyle(сов).transform === 'none' && рс.top < панель.bottom && рс.left < панель.right && рс.right > панель.left) сов.style.left = (панель.right + 8) + 'px';
   }
   setInterval(() => { try { разложить(); } catch (e) {} }, 250);
   addEventListener('resize', () => { try { разложить(); } catch (e) {} });
