@@ -1,0 +1,26 @@
+// Приложение «Бороздиновский»: игра в встроенном движке Android (WebView), без Chrome и адресной строки.
+// Игру берёт с voidm.site — после deploy у всех свежая версия; без интернета работает то, что запомнил sw.js.
+// Подпись — ключом из PWABuilder (тот же, что у прежнего APK), чтобы ставилось поверх как обновление.
+// Ключ и пароли в репозиторий не кладём: их передают через переменные BRZD_KEYSTORE, BRZD_STORE_PASS, BRZD_KEY_PASS.
+plugins { id 'com.android.application' }
+android {
+    namespace 'site.voidm.borozdinovsky'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'site.voidm.borozdinovsky'
+        minSdk 24
+        targetSdk 34
+        versionCode 4
+        versionName '4.0'
+    }
+    signingConfigs {
+        release {
+            storeFile file(System.getenv('BRZD_KEYSTORE') ?: 'нет-ключа.keystore')
+            storePassword System.getenv('BRZD_STORE_PASS')
+            keyAlias System.getenv('BRZD_KEY_ALIAS') ?: 'my-key-alias'
+            keyPassword System.getenv('BRZD_KEY_PASS')
+        }
+    }
+    buildTypes { release { minifyEnabled false; signingConfig signingConfigs.release } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}

@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "site.voidm.borozdinovsky",
+        "sha256_cert_fingerprints": ["44:FE:58:03:36:7B:AE:B7:5B:C8:64:5D:7E:11:40:C0:6D:0F:A9:23:83:15:E8:66:62:9E:E4:9A:6D:93:04:C1"]
+      }
+    }]
